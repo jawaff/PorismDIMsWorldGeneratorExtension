@@ -1,8 +1,8 @@
 // Copyright 2026 Spotted Loaf Studio
 
-#include "BlockCustomDataLayout.h"
+#include "Block/BlockCustomDataLayout.h"
 
-#include "BlockTypeSchemaRegistry.h"
+#include "Block/BlockTypeSchemaRegistry.h"
 #include "UObject/UnrealType.h"
 
 namespace

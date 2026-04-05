@@ -1,6 +1,6 @@
 // Copyright 2026 Spotted Loaf Studio
 
-#include "BlockTypeSchemaBlueprintLibrary.h"
+#include "Block/BlockTypeSchemaBlueprintLibrary.h"
 
 namespace
 {

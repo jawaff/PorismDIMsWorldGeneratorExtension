@@ -1,6 +1,6 @@
 // Copyright 2026 Spotted Loaf Studio
 
-#include "BlockTypeSchemaRegistry.h"
+#include "Block/BlockTypeSchemaRegistry.h"
 
 #include "PorismDIMsWorldGeneratorExtension.h"
 
@@ -40,6 +40,30 @@ bool UBlockTypeSchemaRegistry::ValidateSchema(FString* OutErrorMessage) const
 		if (OutErrorMessage != nullptr)
 		{
 			*OutErrorMessage = TEXT("Schema base struct references are not initialized.");
+		}
+		return false;
+	}
+
+	if (!BaseDefinitionStruct->IsChildOf(FBlockDefinitionBase::StaticStruct()))
+	{
+		if (OutErrorMessage != nullptr)
+		{
+			*OutErrorMessage = FString::Printf(
+				TEXT("Base definition struct '%s' must derive from '%s'."),
+				*GetNameSafe(BaseDefinitionStruct),
+				*GetNameSafe(FBlockDefinitionBase::StaticStruct()));
+		}
+		return false;
+	}
+
+	if (!BaseCustomDataStruct->IsChildOf(FBlockCustomDataBase::StaticStruct()))
+	{
+		if (OutErrorMessage != nullptr)
+		{
+			*OutErrorMessage = FString::Printf(
+				TEXT("Base custom-data struct '%s' must derive from '%s'."),
+				*GetNameSafe(BaseCustomDataStruct),
+				*GetNameSafe(FBlockCustomDataBase::StaticStruct()));
 		}
 		return false;
 	}

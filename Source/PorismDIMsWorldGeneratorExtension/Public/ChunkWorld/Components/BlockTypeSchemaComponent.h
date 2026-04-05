@@ -5,8 +5,8 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "InstancedStruct.h"
-#include "BlockCustomDataLayout.h"
-#include "BlockTypeSchemaRegistry.h"
+#include "Block/BlockCustomDataLayout.h"
+#include "Block/BlockTypeSchemaRegistry.h"
 #include <concepts>
 #include <type_traits>
 
@@ -31,6 +31,11 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld")
 	UBlockTypeSchemaRegistry* GetBlockTypeSchemaRegistry() const { return BlockTypeSchemaRegistry; }
+
+	/**
+	 * Sets the schema registry used by this component's runtime lookup maps.
+	 */
+	void SetBlockTypeSchemaRegistry(UBlockTypeSchemaRegistry* InBlockTypeSchemaRegistry) { BlockTypeSchemaRegistry = InBlockTypeSchemaRegistry; }
 
 	/**
 	 * Returns true when the startup-built material and mesh definition maps are ready for use.
@@ -103,10 +108,29 @@ public:
 	bool InitializeBlockCustomData(const FIntVector& BlockWorldPos);
 
 	/**
+	 * Returns whether the block at the supplied world position has runtime custom data materialized.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld")
+	bool IsBlockCustomDataMaterialized(const FIntVector& BlockWorldPos) const;
+
+	/**
+	 * Resolves swap authoring and eligibility for one block world position from shared definition/custom-data payloads.
+	 * When custom data has not been materialized yet, this falls back to authored defaults and can optionally initialize runtime custom data on authority.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld")
+	bool GetBlockSwapDefinitionForBlockWorldPos(const FIntVector& BlockWorldPos, FGameplayTag& OutBlockTypeName, FChunkWorldBlockSwapDefinition& OutSwapDefinition, bool& bOutAllowSwap, bool bInitializeCustomDataIfNeeded = true);
+
+	/**
 	 * Reconstructs the authored custom-data struct for the block at the supplied world position.
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld")
 	bool GetBlockCustomDataForBlockWorldPos(const FIntVector& BlockWorldPos, FGameplayTag& OutBlockTypeName, FInstancedStruct& OutCustomData) const;
+
+	/**
+	 * Writes one authored custom-data payload back into runtime slots for the supplied block world position.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld")
+	bool SetBlockCustomDataForBlockWorldPos(const FIntVector& BlockWorldPos, const FInstancedStruct& CustomData);
 
 	/**
 	 * Reconstructs the authored custom-data struct for the block at the supplied world position and copies it into a typed struct.
@@ -129,6 +153,18 @@ public:
 
 		OutCustomData = *TypedCustomData;
 		return true;
+	}
+
+	/**
+	 * Writes one typed authored custom-data payload back into runtime slots for the supplied block world position.
+	 */
+	template <typename TCustomData>
+	requires std::derived_from<std::remove_cvref_t<TCustomData>, FBlockCustomDataBase>
+	bool SetBlockCustomDataForBlockWorldPos(const FIntVector& BlockWorldPos, const TCustomData& CustomData)
+	{
+		FInstancedStruct CustomDataStruct;
+		CustomDataStruct.InitializeAs<TCustomData>(CustomData);
+		return SetBlockCustomDataForBlockWorldPos(BlockWorldPos, CustomDataStruct);
 	}
 
 	/**
@@ -182,7 +218,7 @@ private:
 	/**
 	 * Required schema registry asset that resolves block type schema rows and authored defaults.
 	 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Block|ChunkWorld", meta = (AllowPrivateAccess = "true", NoClear, ToolTip = "Required schema registry asset that resolves block type schema rows and authored defaults."))
+	UPROPERTY()
 	TObjectPtr<UBlockTypeSchemaRegistry> BlockTypeSchemaRegistry = nullptr;
 
 	/**

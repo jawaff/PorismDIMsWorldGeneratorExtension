@@ -4,7 +4,7 @@
 `UBlockTypeSchemaComponent` is the reusable runtime component that builds block-definition lookup maps once the host chunk world has finished setting up its runtime indexes.
 
 It provides:
-- a required `UBlockTypeSchemaRegistry` reference named `BlockTypeSchemaRegistry` for schema resolution
+- a runtime `UBlockTypeSchemaRegistry` reference for schema resolution
 - a material-index lookup map for resolved block definitions
 - a mesh-index lookup map for resolved block definitions
 - a block-position utility that reconstructs authored definition data and returns the block type tag
@@ -14,7 +14,7 @@ It provides:
 - a reusable host-independent implementation that can be attached to any chunk-world class
 
 ## Current Behavior
-- Stores a required `UBlockTypeSchemaRegistry` in `BlockTypeSchemaRegistry`
+- Stores the runtime `UBlockTypeSchemaRegistry` assigned by the owning chunk world
 - Builds lookup maps from the owning chunk world's resolved material and mesh indexes after the chunk world starts generation
 - Exposes `GetBlockDefinitionForMaterialIndex()` and `GetBlockDefinitionForMeshIndex()`
 - Exposes `GetBlockDefinitionForBlockWorldPos()` so gameplay or tooling can reconstruct the authored definition struct and block type tag from the resolved schema row
@@ -32,3 +32,5 @@ For generic `FInstancedStruct` payload handling, use the registry helpers plus t
 
 ## Intended Use
 Attach this component to any chunk world that should use the plugin's block-type schema flow. `AChunkWorldExtended` creates one by default, but other chunk-world classes can add the same component without inheriting from the extension actor.
+
+When using `AChunkWorldExtended`, assign the registry on the actor-level `BlockTypeSchemaRegistry` property instead of editing the component internals directly. The actor syncs that value into the component automatically so the details panel has one source of truth.

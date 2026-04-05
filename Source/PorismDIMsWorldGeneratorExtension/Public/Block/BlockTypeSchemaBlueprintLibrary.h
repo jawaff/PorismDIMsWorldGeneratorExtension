@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
-#include "BlockTypeSchemaRegistry.h"
+#include "Block/BlockTypeSchemaRegistry.h"
 #include "BlockTypeSchemaBlueprintLibrary.generated.h"
 
 /**

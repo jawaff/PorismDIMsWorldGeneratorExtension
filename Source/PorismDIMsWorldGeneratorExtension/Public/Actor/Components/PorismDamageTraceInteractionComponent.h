@@ -1,0 +1,85 @@
+// Copyright 2026 Spotted Loaf Studio
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Actor/Components/PorismTraceInteractionComponent.h"
+#include "Actor/Interaction/PorismDamageTraceInteractionTypes.h"
+#include "PorismDamageTraceInteractionComponent.generated.h"
+
+class UPorismPredictedBlockStateComponent;
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnChunkWorldDamageBlockInteractionChanged, const FChunkWorldDamageBlockInteractionResult&, Result);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnChunkWorldDamageBlockInteractionUpdated, const FChunkWorldDamageBlockInteractionResult&, Result);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnChunkWorldDamageBlockCustomDataMaterialized, const FChunkWorldDamageBlockInteractionResult&, Result);
+
+/**
+ * Shared interaction component that builds on the generic trace loop with optional health-aware block payloads and damage application helpers.
+ */
+UCLASS(ClassGroup = (Porism), BlueprintType, meta = (BlueprintSpawnableComponent, DisplayName = "Porism Damage Trace Interaction Component"))
+class PORISMDIMSWORLDGENERATOREXTENSION_API UPorismDamageTraceInteractionComponent : public UPorismTraceInteractionComponent
+{
+	GENERATED_BODY()
+
+public:
+	/** Creates a damage-aware interaction component that only selects blocks when they support the shared damage schema family. */
+	UPorismDamageTraceInteractionComponent();
+
+	/** Returns the last health-aware block interaction payload. Pair this with HasActiveDamageBlockInteraction() before treating it as current state. */
+	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld|Damage")
+	FChunkWorldDamageBlockInteractionResult GetLastDamageBlockInteractionResult() const;
+
+	/** Returns whether a damage-capable block interaction target is currently active. */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld|Damage")
+	bool HasActiveDamageBlockInteraction() const { return bHasActiveDamageBlockInteraction; }
+
+	/** Returns whether the current active block target can accept shared damage under the health schema family. */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld|Damage")
+	bool CanApplyDamageToCurrentBlock() const;
+
+	/** Applies damage to the current active block target when it supports the shared health schema family. */
+	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld|Damage")
+	bool ApplyDamageToCurrentBlock(int32 DamageAmount, int32& OutNewHealth);
+
+	UPROPERTY(BlueprintAssignable, Category = "Block|ChunkWorld|Damage")
+	FOnChunkWorldDamageBlockInteractionChanged OnDamageBlockInteractionStarted;
+
+	UPROPERTY(BlueprintAssignable, Category = "Block|ChunkWorld|Damage")
+	FOnChunkWorldDamageBlockInteractionChanged OnDamageBlockInteractionEnded;
+
+	UPROPERTY(BlueprintAssignable, Category = "Block|ChunkWorld|Damage")
+	FOnChunkWorldDamageBlockInteractionUpdated OnDamageBlockInteractionUpdated;
+
+	/** Broadcast when the focused damage-capable block has runtime custom data materialized. */
+	UPROPERTY(BlueprintAssignable, Category = "Block|ChunkWorld|Damage")
+	FOnChunkWorldDamageBlockCustomDataMaterialized OnDamageBlockCustomDataMaterialized;
+
+protected:
+	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual bool ShouldAcceptBlockInteractionResult(const FChunkWorldBlockInteractionResult& BlockResult) const override;
+	virtual bool DidBlockInteractionResultChange(bool bHadPreviousResult, const FChunkWorldBlockInteractionResult& PreviousResult, bool bHasNewResult, const FChunkWorldBlockInteractionResult& NewResult) const override;
+
+private:
+	FChunkWorldDamageBlockInteractionResult LastDamageBlockInteractionResult;
+	bool bHasActiveDamageBlockInteraction = false;
+
+	UFUNCTION()
+	void HandleBlockInteractionStarted(const FChunkWorldBlockInteractionResult& Result);
+
+	UFUNCTION()
+	void HandleBlockInteractionEnded(const FChunkWorldBlockInteractionResult& Result);
+
+	UFUNCTION()
+	void HandleBlockInteractionUpdated(const FChunkWorldBlockInteractionResult& Result);
+
+	UFUNCTION()
+	void HandleBlockCustomDataMaterialized(const FChunkWorldBlockInteractionResult& Result);
+
+	UFUNCTION(Server, Reliable)
+	void ServerApplyDamageToCurrentBlock(const FHitResult& BlockHit, const FVector_NetQuantizeNormal& TraceDirection, int32 DamageAmount);
+
+	void RefreshDamageInteractionState(bool bBroadcastUpdate);
+	bool TryBuildDamageBlockInteractionResult(const FChunkWorldBlockInteractionResult& BlockResult, FChunkWorldDamageBlockInteractionResult& OutResult) const;
+	UPorismPredictedBlockStateComponent* GetPredictedBlockStateComponent() const;
+};

@@ -1,8 +1,8 @@
 // Copyright 2026 Spotted Loaf Studio
 
-#include "BlockTypeSchemaComponent.h"
+#include "ChunkWorld/Components/BlockTypeSchemaComponent.h"
 
-#include "BlockCustomDataLayout.h"
+#include "Block/BlockCustomDataLayout.h"
 #include "ChunkWorld/ChunkWorld.h"
 #include "ChunkWorld/ChunkWorldBase.h"
 #include "ChunkWorldStructs/ChunkWorldStructs.h"
@@ -163,6 +163,31 @@ bool UBlockTypeSchemaComponent::GetBlockCustomDataForBlockWorldPos(const FIntVec
 		return false;
 	}
 
+	return true;
+}
+
+bool UBlockTypeSchemaComponent::SetBlockCustomDataForBlockWorldPos(const FIntVector& BlockWorldPos, const FInstancedStruct& CustomData)
+{
+	if (!CustomData.IsValid() || !bBlockDefinitionLookupReady)
+	{
+		return false;
+	}
+
+	const UScriptStruct* StructType = CustomData.GetScriptStruct();
+	const FBlockCustomDataLayout* Layout = GetOrBuildBlockCustomDataLayout(StructType);
+	if (Layout == nullptr)
+	{
+		return false;
+	}
+
+	TArray<int32> PackedCustomData;
+	if (!Layout->Pack(CustomData.GetMemory(), PackedCustomData))
+	{
+		return false;
+	}
+
+	PackedCustomData.Add(1);
+	WriteBlockCustomDataSlots(BlockWorldPos, PackedCustomData);
 	return true;
 }
 
@@ -328,6 +353,99 @@ bool UBlockTypeSchemaComponent::InitializeBlockCustomData(const FIntVector& Bloc
 	}
 
 	WriteBlockCustomDataSlots(BlockWorldPos, PackedCustomData);
+
+	return true;
+}
+
+bool UBlockTypeSchemaComponent::IsBlockCustomDataMaterialized(const FIntVector& BlockWorldPos) const
+{
+	if (!bBlockDefinitionLookupReady)
+	{
+		return false;
+	}
+
+	AChunkWorldBase* ChunkWorld = Cast<AChunkWorldBase>(GetOwner());
+	if (ChunkWorld == nullptr)
+	{
+		return false;
+	}
+
+	const int32 MaterialIndex = ChunkWorld->GetBlockValueByBlockWorldPos(BlockWorldPos, ERessourceType::MaterialIndex);
+	const int32 MeshIndex = ChunkWorld->GetBlockValueByBlockWorldPos(BlockWorldPos, ERessourceType::MeshIndex);
+	const FBlockTypeSchema* BlockType = FindBlockTypeSchemaForIndexes(MaterialIndex, MeshIndex);
+	if (BlockType == nullptr || !BlockType->CustomData.IsValid())
+	{
+		return false;
+	}
+
+	const UScriptStruct* StructType = BlockType->CustomData.GetScriptStruct();
+	const FBlockCustomDataLayout* Layout = GetOrBuildBlockCustomDataLayout(StructType);
+	if (Layout == nullptr)
+	{
+		return false;
+	}
+
+	const int32 MaterializationSlotIndex = Layout->GetValueSlotCount();
+	return ChunkWorld->GetBlockValueByBlockWorldPos(BlockWorldPos, ERessourceType::CustomData, MaterializationSlotIndex) != 0;
+}
+
+bool UBlockTypeSchemaComponent::GetBlockSwapDefinitionForBlockWorldPos(const FIntVector& BlockWorldPos, FGameplayTag& OutBlockTypeName, FChunkWorldBlockSwapDefinition& OutSwapDefinition, bool& bOutAllowSwap, bool bInitializeCustomDataIfNeeded)
+{
+	OutBlockTypeName = FGameplayTag();
+	OutSwapDefinition = FChunkWorldBlockSwapDefinition();
+	bOutAllowSwap = false;
+
+	if (!bBlockDefinitionLookupReady)
+	{
+		UE_LOG(LogBlockTypeSchemaComponent, Warning, TEXT("Cannot resolve block swap definition on %s because the lookup maps are not ready."), *GetNameSafe(GetOwner()));
+		return false;
+	}
+
+	AChunkWorldBase* ChunkWorld = Cast<AChunkWorldBase>(GetOwner());
+	if (ChunkWorld == nullptr)
+	{
+		UE_LOG(LogBlockTypeSchemaComponent, Warning, TEXT("Cannot resolve block swap definition on %s because the owning actor is not a chunk world base."), *GetNameSafe(GetOwner()));
+		return false;
+	}
+
+	const int32 MaterialIndex = ChunkWorld->GetBlockValueByBlockWorldPos(BlockWorldPos, ERessourceType::MaterialIndex);
+	const int32 MeshIndex = ChunkWorld->GetBlockValueByBlockWorldPos(BlockWorldPos, ERessourceType::MeshIndex);
+	const FBlockTypeSchema* BlockType = FindBlockTypeSchemaForIndexes(MaterialIndex, MeshIndex);
+	if (BlockType == nullptr || !BlockType->Definition.IsValid())
+	{
+		return false;
+	}
+
+	const FBlockDefinitionBase* Definition = BlockType->Definition.GetPtr<FBlockDefinitionBase>();
+	if (Definition == nullptr)
+	{
+		return false;
+	}
+
+	OutBlockTypeName = BlockType->BlockTypeName;
+	OutSwapDefinition.SwapActorClass = Definition->SwapActorClass;
+	OutSwapDefinition.bSpawnActor = Definition->bSpawnSwapActor;
+	OutSwapDefinition.SwapInDistance = Definition->SwapInDistance;
+	OutSwapDefinition.SwapOutDistance = Definition->SwapOutDistance;
+
+	const FBlockCustomDataBase* AuthoredCustomData = BlockType->CustomData.GetPtr<FBlockCustomDataBase>();
+	if (AuthoredCustomData != nullptr)
+	{
+		bOutAllowSwap = AuthoredCustomData->bAllowSwap;
+	}
+
+	if (bInitializeCustomDataIfNeeded && ChunkWorld->GetNetMode() != NM_Client)
+	{
+		(void)InitializeBlockCustomData(BlockWorldPos);
+	}
+
+	FGameplayTag RuntimeBlockTypeName;
+	FBlockCustomDataBase RuntimeCustomData;
+	if (GetBlockCustomDataForBlockWorldPos(BlockWorldPos, RuntimeBlockTypeName, RuntimeCustomData))
+	{
+		OutBlockTypeName = RuntimeBlockTypeName;
+		bOutAllowSwap = RuntimeCustomData.bAllowSwap;
+	}
 
 	return true;
 }

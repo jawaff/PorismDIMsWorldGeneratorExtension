@@ -17,8 +17,8 @@ public class PorismDIMsWorldGeneratorExtension : ModuleRules
 			"CoreUObject",
 			"Engine",
 			"GameplayTags",
-			"PorismDIMsWorldGenerator",
-			"StructUtils"
+			"Niagara",
+			"PorismDIMsWorldGenerator"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]

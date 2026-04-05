@@ -36,6 +36,15 @@ Each row contains:
 - `Definition`
 - `CustomData`
 
+Within `Definition`, `MaterialAsset` and `MeshAsset` are the primary association fields used to match the semantic block type back to Porism runtime blocks. They are intentionally surfaced first in the definition UI so authored rows read as:
+- what Porism block this schema row matches
+- then what static gameplay data that block type carries
+
+`BlockTypeName` should also stay grouped by the same authored identity so the tag tree remains readable. For Spellblade's current voxel set that means patterns like:
+- `BlockType.Material.Dirt`
+- `BlockType.Mesh.Grass.MainGrass`
+- `BlockType.Mesh.Tree.LargeFirTree`
+
 ## Expected Project Extension Pattern
 Future project-specific structs should extend the base families, for example:
 - `FMyGameBlockDefinition : public FBlockDamageDefinition`
@@ -46,6 +55,8 @@ That gives the schema a stable base contract while still allowing each voxel fam
 ## Validation Rule
 The schema validates that:
 - the base definition and custom-data families are set
+- `BaseDefinitionStruct` derives from `FBlockDefinitionBase`
+- `BaseCustomDataStruct` derives from `FBlockCustomDataBase`
 - each block type row uses payload structs compatible with those bases
 
 This keeps the lookup layer predictable before any gameplay code consumes the resolved data.
@@ -131,8 +142,9 @@ The same cached layout is used for unpacking, so the component can reconstruct t
 ## Editor Workflow
 1. Create a new `UBlockTypeSchemaRegistry` data asset in the Content Browser.
 2. Author the `FBlockTypeSchema` rows on that asset.
-3. Assign the asset to `AChunkWorldExtended.BlockTypeSchemaComponent.BlockTypeSchemaRegistry` or to the same property on another chunk world that hosts `UBlockTypeSchemaComponent`.
-4. Use `GetBlockDefinitionForMaterialIndex()` or `GetBlockDefinitionForMeshIndex()` on the component when you need the resolved definition for a runtime index.
-5. Call `GetBlockDefinitionForBlockWorldPos()` when you need the resolved definition payload and block type tag for a specific block world position.
-6. Call `InitializeBlockCustomData()` with a `BlockWorldPos` when a block should lazily seed its custom data on first use.
-7. Call `GetBlockCustomDataForBlockWorldPos()` when you need to reconstruct the authored custom-data struct and block type tag from the packed runtime slots.
+3. Assign the asset to `AChunkWorldExtended.BlockTypeSchemaRegistry`.
+4. The chunk world syncs that actor-level property into its runtime `UBlockTypeSchemaComponent` automatically.
+5. Use `GetBlockDefinitionForMaterialIndex()` or `GetBlockDefinitionForMeshIndex()` on the component when you need the resolved definition for a runtime index.
+6. Call `GetBlockDefinitionForBlockWorldPos()` when you need the resolved definition payload and block type tag for a specific block world position.
+7. Call `InitializeBlockCustomData()` with a `BlockWorldPos` when a block should lazily seed its custom data on first use.
+8. Call `GetBlockCustomDataForBlockWorldPos()` when you need to reconstruct the authored custom-data struct and block type tag from the packed runtime slots.

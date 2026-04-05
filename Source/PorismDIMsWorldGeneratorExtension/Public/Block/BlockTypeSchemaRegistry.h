@@ -12,7 +12,9 @@
 #include "BlockTypeSchemaRegistry.generated.h"
 
 class UScriptStruct;
+class AActor;
 class UMaterialInterface;
+class UNiagaraSystem;
 class USoundBase;
 class UStaticMesh;
 
@@ -25,28 +27,78 @@ struct FBlockDefinitionBase
 	GENERATED_BODY()
 
 	/**
-	 * Optional material asset reference for this block type.
+	 * Optional material asset reference used to associate this semantic block type with a Porism block.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Definition", meta = (ToolTip = "Optional material asset reference for this block type."))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Association", meta = (DisplayPriority = "1", ToolTip = "Optional material asset reference used to associate this semantic block type with a Porism block."))
 	TSoftObjectPtr<UMaterialInterface> MaterialAsset;
 
 	/**
-	 * Optional mesh asset reference for this block type.
+	 * Optional mesh asset reference used to associate this semantic block type with a Porism block.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Definition", meta = (ToolTip = "Optional mesh asset reference for this block type."))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Association", meta = (DisplayPriority = "2", ToolTip = "Optional mesh asset reference used to associate this semantic block type with a Porism block."))
 	TSoftObjectPtr<UStaticMesh> MeshAsset;
 
 	/**
-	 * Optional default swap id for this block type.
+	 * Optional actor class spawned by project-side swap scanning when this block swaps out of the chunk world.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Definition", meta = (ClampMin = "0", UIMin = "0", ToolTip = "Optional default swap id for this block type."))
-	int32 SwapId = 0;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Swap", meta = (DisplayPriority = "5", ToolTip = "Optional actor class spawned by project-side swap scanning when this block swaps out of the chunk world."))
+	TSoftClassPtr<AActor> SwapActorClass;
+
+	/**
+	 * If true, project-side swap scanning should spawn the configured swap actor when the block swaps out.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Swap", meta = (DisplayPriority = "6", ToolTip = "If true, project-side swap scanning should spawn the configured swap actor when the block swaps out."))
+	bool bSpawnSwapActor = true;
+
+	/**
+	 * Distance at which the swap actor should replace the block.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Swap", meta = (DisplayPriority = "7", ClampMin = "0.0", UIMin = "0.0", ToolTip = "Distance at which the swap actor should replace the block."))
+	float SwapInDistance = 600.0f;
+
+	/**
+	 * Distance at which the swap actor should be removed and the block restored.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Swap", meta = (DisplayPriority = "8", ClampMin = "0.0", UIMin = "0.0", ToolTip = "Distance at which the swap actor should be removed and the block restored."))
+	float SwapOutDistance = 800.0f;
 
 	/**
 	 * Optional sound to play when this block type is destroyed.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Definition", meta = (ToolTip = "Optional sound to play when this block type is destroyed."))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Definition", meta = (DisplayPriority = "10", ToolTip = "Optional sound to play when this block type is destroyed."))
 	TObjectPtr<USoundBase> DestroyedSound = nullptr;
+
+	/**
+	 * Optional Niagara system to spawn when this block type is destroyed.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Definition", meta = (DisplayPriority = "11", ToolTip = "Optional Niagara system to spawn when this block type is destroyed."))
+	TObjectPtr<UNiagaraSystem> DestroyedEffect = nullptr;
+};
+
+/**
+ * Shared swap payload resolved from a block definition for project-side swap scanning and presentation.
+ */
+USTRUCT(BlueprintType)
+struct FChunkWorldBlockSwapDefinition
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Swap")
+	TSoftClassPtr<AActor> SwapActorClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Swap")
+	bool bSpawnActor = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Swap")
+	float SwapInDistance = 600.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Swap")
+	float SwapOutDistance = 800.0f;
+
+	bool IsConfigured() const
+	{
+		return !SwapActorClass.IsNull() || !bSpawnActor;
+	}
 };
 
 /**
@@ -60,13 +112,13 @@ struct FBlockCustomDataBase
 	/**
 	 * If true, this block is invincible by default when materialized at runtime.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CustomData", meta = (ToolTip = "If true, this block is invincible by default when materialized at runtime."))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CustomData", meta = (DisplayPriority = "1", ToolTip = "If true, this block is invincible by default when materialized at runtime."))
 	bool bInvincible = false;
 
 	/**
 	 * If true, this block can participate in swaps by default.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CustomData", meta = (ToolTip = "If true, this block can participate in swaps by default."))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CustomData", meta = (DisplayPriority = "2", ToolTip = "If true, this block can participate in swaps by default."))
 	bool bAllowSwap = false;
 };
 
@@ -81,13 +133,20 @@ struct FBlockDamageDefinition : public FBlockDefinitionBase
 	/**
 	 * Maximum health for this block type before it is destroyed.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (ClampMin = "0", UIMin = "0", ToolTip = "Maximum health for this block type before it is destroyed."))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (DisplayPriority = "20", ClampMin = "0", UIMin = "0", ToolTip = "Maximum health for this block type before it is destroyed."))
 	int32 MaxHealth = 1;
+
+	/**
+	 * Generic authored damage scalar applied by project-side damage calculators after they compute their local damage model.
+	 * Kept in the shared damage schema so projects can opt into a simple block-wide multiplier before introducing richer damage families.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (DisplayPriority = "21", ClampMin = "0.0", UIMin = "0.0", ToolTip = "Generic authored damage scalar applied by project-side damage calculators after they compute their local damage model."))
+	double DamageMultiplier = 1.0;
 
 	/**
 	 * Sound to play when this block type is hit but not destroyed.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (ToolTip = "Sound to play when this block type is hit but not destroyed."))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (DisplayPriority = "22", ToolTip = "Sound to play when this block type is hit but not destroyed."))
 	TObjectPtr<USoundBase> HitSound = nullptr;
 };
 
@@ -102,7 +161,7 @@ struct FBlockDamageCustomData : public FBlockCustomDataBase
 	/**
 	 * Current health for this materialized block instance.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (ClampMin = "0", UIMin = "0", ToolTip = "Current health for this materialized block instance."))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (DisplayPriority = "20", ClampMin = "0", UIMin = "0", ToolTip = "Current health for this materialized block instance."))
 	int32 Health = 1;
 };
 
@@ -117,19 +176,19 @@ struct FBlockTypeSchema
 	/**
 	 * Stable gameplay tag for the semantic block type represented by this schema row.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Block Type", meta = (Categories = "BlockType", ToolTip = "Stable gameplay tag for the semantic block type represented by this schema row."))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Block Type", meta = (DisplayPriority = "1", Categories = "BlockType", ToolTip = "Stable gameplay tag for the semantic block type represented by this schema row."))
 	FGameplayTag BlockTypeName;
 
 	/**
 	 * Typed definition payload for this semantic block type.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Block Type", meta = (BaseStruct = "/Script/PorismDIMsWorldGeneratorExtension.BlockDefinitionBase", ToolTip = "Typed definition payload for this semantic block type."))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Block Type", meta = (DisplayPriority = "2", BaseStruct = "/Script/PorismDIMsWorldGeneratorExtension.BlockDefinitionBase", ToolTip = "Typed definition payload for this semantic block type."))
 	FInstancedStruct Definition;
 
 	/**
 	 * Typed runtime custom-data payload for this semantic block type.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Block Type", meta = (BaseStruct = "/Script/PorismDIMsWorldGeneratorExtension.BlockCustomDataBase", ToolTip = "Typed runtime custom-data payload for this semantic block type."))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Block Type", meta = (DisplayPriority = "3", BaseStruct = "/Script/PorismDIMsWorldGeneratorExtension.BlockCustomDataBase", ToolTip = "Typed runtime custom-data payload for this semantic block type."))
 	FInstancedStruct CustomData;
 };
 
@@ -247,13 +306,13 @@ private:
 	/**
 	 * Base definition family for all lookup payloads in this schema.
 	 */
-	UPROPERTY(EditAnywhere, Category = "Schema", meta = (ToolTip = "Base definition family for all lookup payloads in this schema registry."))
+	UPROPERTY(EditAnywhere, Category = "Schema", meta = (MetaStruct = "/Script/PorismDIMsWorldGeneratorExtension.BlockDefinitionBase", ToolTip = "Base definition family for all lookup payloads in this schema registry. Must derive from FBlockDefinitionBase."))
 	TObjectPtr<UScriptStruct> BaseDefinitionStruct;
 
 	/**
 	 * Base runtime custom-data family for all custom-data payloads in this schema.
 	 */
-	UPROPERTY(EditAnywhere, Category = "Schema", meta = (ToolTip = "Base runtime custom-data family for all custom-data payloads in this schema registry."))
+	UPROPERTY(EditAnywhere, Category = "Schema", meta = (MetaStruct = "/Script/PorismDIMsWorldGeneratorExtension.BlockCustomDataBase", ToolTip = "Base runtime custom-data family for all custom-data payloads in this schema registry. Must derive from FBlockCustomDataBase."))
 	TObjectPtr<UScriptStruct> BaseCustomDataStruct;
 
 	/**
