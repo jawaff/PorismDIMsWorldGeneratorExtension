@@ -14,18 +14,36 @@ route and extend to your heart's desire.
 Both routes use:
 - `AChunkWorldExtended` as the chunk-world host
 - `UBlockTypeSchemaComponent` on that chunk world through the actor's schema setup
+- `UChunkWorldBlockSwapScannerComponent` on that chunk world when schema-authored block swap actors should be materialized
+- `UChunkWorldSwapRegistrationSubsystem` to connect active proximity sources to active chunk-world swap scanners
 - `UChunkWorldHitBlueprintLibrary` for generic chunk-world hit resolution and non-damage helper functions
 
 For simple block removal in either route, call `DestroyBlock()` on `AChunkWorldExtended`.
+For proximity-driven mesh/actor presentation swap, add `UChunkWorldProximityComponent` to the relevant actor, usually the player character or another actor that defines swap relevance.
+For the full swap feature design and ownership boundary, see `Docs/Design/ChunkWorldBlockSwap.md`.
+
+### Swap Setup Notes
+- `UChunkWorldProximityComponent` now drives polling queries, not overlap-event tracking.
+- Configure `SwapScanInterval` on `UChunkWorldBlockSwapScannerComponent` and `SwapInDistance` / `SwapOutDistance` on `UChunkWorldProximityComponent`.
+- Use a collision channel for proximity queries that resolves the same represented chunk-world block data path you expect interaction and damage systems to hit.
+- Configure swapped actor collision so player interaction traces do not pass through the actor and accidentally hit the chunk world behind it.
+- Set the hidden parking area before swapping begins. The plugin stays generic, while project code can supply a centralized policy from a chunk-world subclass.
 
 ## Route 1: Damage-Capable Voxels
 Use this route when blocks should have health, destructibility, predicted local state, or shared damage-oriented feedback.
+
+Starter character class:
+- `AChunkWorldDamagePlayerCharacter`
+  - includes `UPorismDamageTraceInteractionComponent`
+  - includes `UPorismPredictedBlockStateComponent`
+  - includes `UChunkWorldProximityComponent`
 
 ### Required Setup
 - use damage-oriented schema families in the registry
   - definition family derived from `FBlockDamageDefinition`
   - custom-data family derived from `FBlockDamageCustomData`
 - add `UPorismPredictedBlockStateComponent` to player-controlled characters that need to damage voxels
+- when damage-capable blocks also use actor swap, keep the damage interaction and predicted-state components on the same character that owns the proximity component so focused block UI and swap relevance stay aligned
 
 ### Interaction Support
 Only add `UPorismDamageTraceInteractionComponent` when that character also needs interaction support for focused damage-capable blocks.
@@ -49,6 +67,11 @@ Choose this route when your project needs:
 
 ## Route 2: Non-Damage Voxels
 Use this route when blocks do not need health or damage support.
+
+Starter character class:
+- `AChunkWorldPlayerCharacter`
+  - includes `UPorismTraceInteractionComponent`
+  - includes `UChunkWorldProximityComponent`
 
 ### Required Setup
 - use the base struct families in the registry
@@ -81,3 +104,15 @@ Pick one route per gameplay need:
 - if the project does not need voxel damage, stay on the base families and the base trace interaction component
 
 That keeps the extension setup simple and makes the intended public interfaces clear.
+
+For projects with a world-specific parking rule:
+- keep that rule outside the plugin
+- push it into `UChunkWorldBlockSwapComponent` from a project chunk-world subclass during startup
+- validate that the chosen parking Z stays outside any meaningful generated space for the world definition
+
+## Starter Character Classes
+The extension plugin now includes two minimal player-facing character bases you can subclass in Blueprint or extend in C++:
+- `AChunkWorldPlayerCharacter`
+- `AChunkWorldDamagePlayerCharacter`
+
+These classes are intentionally minimal. They establish the component composition for each setup, but they do not include project-specific movement, camera, UI, input, or equipment logic.

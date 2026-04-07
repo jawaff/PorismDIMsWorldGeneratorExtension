@@ -123,17 +123,6 @@ bool UBlockTypeSchemaRegistry::ValidateSchema(FString* OutErrorMessage) const
 				}
 				return false;
 			}
-
-			if (bHasSwapActor && TypedDefinition->SwapOutDistance < TypedDefinition->SwapInDistance)
-			{
-				if (OutErrorMessage != nullptr)
-				{
-					*OutErrorMessage = FString::Printf(
-						TEXT("Definition payload for block type '%s' must use SwapOutDistance greater than or equal to SwapInDistance."),
-						*Definition.BlockTypeName.ToString());
-				}
-				return false;
-			}
 		}
 	}
 

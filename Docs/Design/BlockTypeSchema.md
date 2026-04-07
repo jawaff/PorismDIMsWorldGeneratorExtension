@@ -40,7 +40,7 @@ Within `Definition`, `MaterialAsset` and `MeshAsset` are the primary association
 - what Porism block this schema row matches
 - then what static gameplay data that block type carries
 
-`BlockTypeName` should also stay grouped by the same authored identity so the tag tree remains readable. For Spellblade's current voxel set that means patterns like:
+`BlockTypeName` should also stay grouped by the same authored identity so the tag tree remains readable. Try something like:
 - `BlockType.Material.Dirt`
 - `BlockType.Mesh.Grass.MainGrass`
 - `BlockType.Mesh.Tree.LargeFirTree`

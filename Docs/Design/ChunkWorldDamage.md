@@ -106,7 +106,6 @@ Current behavior:
 Chunk worlds that want shared feedback should own a `UChunkWorldBlockFeedbackComponent`.
 
 `AChunkWorldExtended` creates one by default.
-`ASpellbladeChunkWorld` now also creates one so Spellblade can consume the same shared route.
 
 ## Prediction Model
 `UPorismPredictedBlockStateComponent` is the local-only prediction cache.

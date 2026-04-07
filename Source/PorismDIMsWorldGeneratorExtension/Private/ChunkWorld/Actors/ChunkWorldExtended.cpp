@@ -7,6 +7,7 @@
 #include "ChunkWorld/Components/BlockTypeSchemaComponent.h"
 #include "ChunkWorld/Blueprint/ChunkWorldBlockDamageBlueprintLibrary.h"
 #include "ChunkWorld/Components/ChunkWorldBlockFeedbackComponent.h"
+#include "ChunkWorld/Components/ChunkWorldBlockSwapScannerComponent.h"
 #include "ChunkWorld/Components/ChunkWorldBlockSwapComponent.h"
 #include "ChunkWorldStructs/ChunkWorldRuntimeStructs.h"
 #include "ChunkWorldStructs/ChunkWorldStructs.h"
@@ -59,6 +60,7 @@ AChunkWorldExtended::AChunkWorldExtended()
 {
 	BlockTypeSchemaComponent = CreateDefaultSubobject<UBlockTypeSchemaComponent>(TEXT("BlockTypeSchemaComponent"));
 	BlockFeedbackComponent = CreateDefaultSubobject<UChunkWorldBlockFeedbackComponent>(TEXT("BlockFeedbackComponent"));
+	BlockSwapScannerComponent = CreateDefaultSubobject<UChunkWorldBlockSwapScannerComponent>(TEXT("BlockSwapScannerComponent"));
 	BlockSwapComponent = CreateDefaultSubobject<UChunkWorldBlockSwapComponent>(TEXT("BlockSwapComponent"));
 	SyncBlockTypeSchemaRegistry();
 }
@@ -128,6 +130,11 @@ UBlockTypeSchemaComponent* AChunkWorldExtended::GetBlockTypeSchemaComponent() co
 UChunkWorldBlockFeedbackComponent* AChunkWorldExtended::GetBlockFeedbackComponent() const
 {
 	return BlockFeedbackComponent;
+}
+
+UChunkWorldBlockSwapScannerComponent* AChunkWorldExtended::GetBlockSwapScannerComponent() const
+{
+	return BlockSwapScannerComponent;
 }
 
 UChunkWorldBlockSwapComponent* AChunkWorldExtended::GetBlockSwapComponent() const
@@ -238,6 +245,11 @@ bool AChunkWorldExtended::DestroyBlock(const FIntVector& BlockWorldPos, bool bRe
 	if (!HasAuthority())
 	{
 		return false;
+	}
+
+	if (BlockSwapScannerComponent != nullptr)
+	{
+		(void)BlockSwapScannerComponent->ForceRemoveSwapForDestroyedBlock(BlockWorldPos);
 	}
 
 	FChunkWorldResolvedBlockHit DestroyedFeedbackHit;

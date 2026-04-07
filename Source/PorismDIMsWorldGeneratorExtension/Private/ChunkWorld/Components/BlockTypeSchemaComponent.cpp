@@ -11,6 +11,11 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogBlockTypeSchemaComponent, Log, All);
 
+namespace
+{
+	constexpr int32 MaterializedCustomDataMarkerValue = 1;
+}
+
 UBlockTypeSchemaComponent::UBlockTypeSchemaComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
@@ -253,7 +258,7 @@ bool UBlockTypeSchemaComponent::GetBlockCustomDataForBlockWorldPos(const FIntVec
 	}
 
 	const int32 MarkerSlotIndex = Layout->GetValueSlotCount();
-	if (!PackedValues.IsValidIndex(MarkerSlotIndex) || PackedValues[MarkerSlotIndex] <= 0)
+	if (!PackedValues.IsValidIndex(MarkerSlotIndex) || PackedValues[MarkerSlotIndex] != MaterializedCustomDataMarkerValue)
 	{
 		return false;
 	}
@@ -293,7 +298,7 @@ bool UBlockTypeSchemaComponent::SetBlockCustomDataForBlockWorldPos(const FIntVec
 		return false;
 	}
 
-	PackedCustomData.Add(1);
+	PackedCustomData.Add(MaterializedCustomDataMarkerValue);
 	WriteBlockCustomDataSlots(BlockWorldPos, PackedCustomData);
 	return true;
 }
@@ -455,11 +460,11 @@ bool UBlockTypeSchemaComponent::InitializeBlockCustomData(const FIntVector& Bloc
 	}
 
 	// Reserve one trailing runtime slot as a materialization marker so we can detect first-time initialization without a side cache.
-	PackedCustomData.Add(1);
+	PackedCustomData.Add(MaterializedCustomDataMarkerValue);
 
 	const int32 MaterializationSlotIndex = PackedCustomData.Num() - 1;
 	const int32 StoredMarker = ChunkWorld->GetBlockValueByBlockWorldPos(BlockWorldPos, ERessourceType::CustomData, MaterializationSlotIndex);
-	if (StoredMarker > 0)
+	if (StoredMarker == MaterializedCustomDataMarkerValue)
 	{
 		return false;
 	}
@@ -503,7 +508,7 @@ bool UBlockTypeSchemaComponent::IsBlockCustomDataMaterialized(const FIntVector& 
 	}
 
 	const int32 MaterializationSlotIndex = Layout->GetValueSlotCount();
-	return ChunkWorld->GetBlockValueByBlockWorldPos(BlockWorldPos, ERessourceType::CustomData, MaterializationSlotIndex) > 0;
+	return ChunkWorld->GetBlockValueByBlockWorldPos(BlockWorldPos, ERessourceType::CustomData, MaterializationSlotIndex) == MaterializedCustomDataMarkerValue;
 }
 
 void UBlockTypeSchemaComponent::RebuildBlockDefinitionLookupMaps()

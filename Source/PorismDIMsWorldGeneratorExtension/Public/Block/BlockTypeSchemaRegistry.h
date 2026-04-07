@@ -41,37 +41,25 @@ struct FBlockDefinitionBase
 	/**
 	 * Optional actor class spawned by project-side swap scanning when this block swaps out of the chunk world.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Swap", meta = (DisplayPriority = "5", ToolTip = "Optional actor class spawned by project-side swap scanning when this block swaps out of the chunk world."))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Swap", meta = (DisplayPriority = "3", ToolTip = "Optional actor class spawned by project-side swap scanning when this block swaps out of the chunk world."))
 	TSoftClassPtr<AActor> SwapActorClass;
-
-	/**
-	 * Distance at which the swap actor should replace the block.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Swap", meta = (DisplayPriority = "6", ClampMin = "0.0", UIMin = "0.0", ToolTip = "Distance at which the swap actor should replace the block."))
-	float SwapInDistance = 600.0f;
-
-	/**
-	 * Distance at which the swap actor should be removed and the block restored.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Swap", meta = (DisplayPriority = "7", ClampMin = "0.0", UIMin = "0.0", ToolTip = "Distance at which the swap actor should be removed and the block restored."))
-	float SwapOutDistance = 800.0f;
 
 	/**
 	 * Optional sound to play when this block type is destroyed.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Definition", meta = (DisplayPriority = "10", ToolTip = "Optional sound to play when this block type is destroyed."))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Definition", meta = (DisplayPriority = "4", ToolTip = "Optional sound to play when this block type is destroyed."))
 	TObjectPtr<USoundBase> DestroyedSound = nullptr;
 
 	/**
 	 * Optional Niagara system to spawn when this block type is destroyed.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Definition", meta = (DisplayPriority = "11", ToolTip = "Optional Niagara system to spawn when this block type is destroyed."))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Definition", meta = (DisplayPriority = "5", ToolTip = "Optional Niagara system to spawn when this block type is destroyed."))
 	TObjectPtr<UNiagaraSystem> DestroyedEffect = nullptr;
 
 	/**
 	 * If true, this block ignores damage requests entirely.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Definition", meta = (DisplayPriority = "12", ToolTip = "If true, this block ignores damage requests entirely."))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Definition", meta = (DisplayPriority = "6", ToolTip = "If true, this block ignores damage requests entirely."))
 	bool bInvincible = false;
 };
 
@@ -95,20 +83,20 @@ struct FBlockDamageDefinition : public FBlockDefinitionBase
 	/**
 	 * Maximum health for this block type before it is destroyed.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (DisplayPriority = "20", ClampMin = "0", UIMin = "0", ToolTip = "Maximum health for this block type before it is destroyed."))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (DisplayPriority = "7", ClampMin = "0", UIMin = "0", ToolTip = "Maximum health for this block type before it is destroyed."))
 	int32 MaxHealth = 1;
 
 	/**
 	 * Generic authored damage scalar applied by project-side damage calculators after they compute their local damage model.
 	 * Kept in the shared damage schema so projects can opt into a simple block-wide multiplier before introducing richer damage families.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (DisplayPriority = "21", ClampMin = "0.0", UIMin = "0.0", ToolTip = "Generic authored damage scalar applied by project-side damage calculators after they compute their local damage model."))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (DisplayPriority = "8", ClampMin = "0.0", UIMin = "0.0", ToolTip = "Generic authored damage scalar applied by project-side damage calculators after they compute their local damage model."))
 	double DamageMultiplier = 1.0;
 
 	/**
 	 * Sound to play when this block type is hit but not destroyed.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (DisplayPriority = "22", ToolTip = "Sound to play when this block type is hit but not destroyed."))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (DisplayPriority = "9", ToolTip = "Sound to play when this block type is hit but not destroyed."))
 	TObjectPtr<USoundBase> HitSound = nullptr;
 };
 
@@ -123,7 +111,7 @@ struct FBlockDamageCustomData : public FBlockCustomDataBase
 	/**
 	 * Current health for this materialized block instance.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (DisplayPriority = "20", ClampMin = "0", UIMin = "0", ToolTip = "Current health for this materialized block instance."))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (DisplayPriority = "1", ClampMin = "0", UIMin = "0", ToolTip = "Current health for this materialized block instance."))
 	int32 Health = 1;
 };
 

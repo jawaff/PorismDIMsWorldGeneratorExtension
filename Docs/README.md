@@ -7,6 +7,7 @@ This plugin-local documentation is the home for the v2 Block type schema and its
   - stable design and reference documentation for the shared schema, chunk-world, damage, and interaction systems
 - [Design/BlockTypeSchema.md](./Design/BlockTypeSchema.md)
 - [Design/BlockTypeSchemaComponent.md](./Design/BlockTypeSchemaComponent.md)
+- [Design/ChunkWorldBlockSwap.md](./Design/ChunkWorldBlockSwap.md)
 - [Design/ChunkWorldDamage.md](./Design/ChunkWorldDamage.md)
 - [Design/ChunkWorldExtended.md](./Design/ChunkWorldExtended.md)
 - [Design/TraceInteractionComponent.md](./Design/TraceInteractionComponent.md)
@@ -30,6 +31,8 @@ This plugin-local documentation is the home for the v2 Block type schema and its
   - chunk-world host actors for this feature set
 - `Source/PorismDIMsWorldGeneratorExtension/Public/ChunkWorld/Components/`
   - chunk-world runtime components
+- `Source/PorismDIMsWorldGeneratorExtension/Public/ChunkWorld/Subsystems/`
+  - world-scoped registration and coordination services for chunk-world runtime features
 - `Source/PorismDIMsWorldGeneratorExtension/Public/ChunkWorld/Blueprint/`
   - Blueprint libraries centered on chunk-world/block hit resolution
 

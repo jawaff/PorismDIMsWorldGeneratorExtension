@@ -9,6 +9,7 @@
 class UBlockTypeSchemaComponent;
 class UBlockTypeSchemaRegistry;
 class UChunkWorldBlockFeedbackComponent;
+class UChunkWorldBlockSwapScannerComponent;
 class UChunkWorldBlockSwapComponent;
 class AChunkWorldExtended;
 #if WITH_EDITOR
@@ -58,6 +59,12 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld")
 	UChunkWorldBlockFeedbackComponent* GetBlockFeedbackComponent() const;
+
+	/**
+	 * Returns the shared server-side swap scanner used for proximity-driven mesh/actor presentation.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld")
+	UChunkWorldBlockSwapScannerComponent* GetBlockSwapScannerComponent() const;
 
 	/**
 	 * Returns the replicated block swap component that owns shared hide/restore transitions.
@@ -117,6 +124,10 @@ private:
 	/** Reusable replicated block feedback component used by shared damage and destroy helpers. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Block|ChunkWorld", meta = (AllowPrivateAccess = "true", ToolTip = "Replicated feedback component used by shared block hit and destroy helpers."))
 	TObjectPtr<UChunkWorldBlockFeedbackComponent> BlockFeedbackComponent = nullptr;
+
+	/** Reusable server-side swap scanner used for proximity-driven mesh and actor presentation swaps. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Block|ChunkWorld", meta = (AllowPrivateAccess = "true", ToolTip = "Server-side swap scanner used for proximity-driven mesh and actor presentation swaps."))
+	TObjectPtr<UChunkWorldBlockSwapScannerComponent> BlockSwapScannerComponent = nullptr;
 
 	/** Reusable replicated block swap host used by shared chunk-world hide/restore transitions. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Block|ChunkWorld", meta = (AllowPrivateAccess = "true", ToolTip = "Replicated block swap host used by shared chunk-world hide and restore transitions."))

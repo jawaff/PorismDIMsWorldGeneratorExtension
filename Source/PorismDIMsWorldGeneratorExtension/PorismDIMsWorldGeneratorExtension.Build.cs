@@ -23,6 +23,7 @@ public class PorismDIMsWorldGeneratorExtension : ModuleRules
 
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
+			"NetCore",
 			"PorismDIMsWorldGenerator"
 		});
 	}
