@@ -2,6 +2,7 @@
 
 #include "ChunkWorld/Blueprint/ChunkWorldBlockDamageBlueprintLibrary.h"
 
+#include "Block/BlockTypeSchemaBlueprintLibrary.h"
 #include "ChunkWorld/ChunkWorld.h"
 #include "ChunkWorldStructs/ChunkWorldEnums.h"
 #include "ChunkWorldStructs/ChunkWorldStructs.h"
@@ -32,6 +33,7 @@ bool UChunkWorldBlockDamageBlueprintLibrary::TryResolveDamageSchemaForResolvedBl
 
 	if (!ResolvedHit.BlockTypeSchemaComponent->GetBlockCustomDataForBlockWorldPos(ResolvedHit.BlockWorldPos, OutBlockTypeName, OutCustomData))
 	{
+		// These are all fallbacks
 		FInstancedStruct DefinitionStruct;
 		if (!UChunkWorldHitBlueprintLibrary::TryGetBlockDefinitionForResolvedBlockHit(ResolvedHit, OutBlockTypeName, DefinitionStruct))
 		{
@@ -58,7 +60,13 @@ bool UChunkWorldBlockDamageBlueprintLibrary::TryResolveDamageSchemaForResolvedBl
 		return false;
 	}
 
-	return ResolvedHit.BlockTypeSchemaComponent->GetBlockDefinitionForBlockWorldPos(ResolvedHit.BlockWorldPos, OutBlockTypeName, OutDefinition);
+	FInstancedStruct DefinitionStruct;
+	if (!UChunkWorldHitBlueprintLibrary::TryGetBlockDefinitionForResolvedBlockHit(ResolvedHit, OutBlockTypeName, DefinitionStruct))
+	{
+		return false;
+	}
+
+	return UBlockTypeSchemaBlueprintLibrary::TryGetBlockDamageDefinition(DefinitionStruct, OutDefinition);
 }
 
 bool UChunkWorldBlockDamageBlueprintLibrary::TryBroadcastHitFeedbackForResolvedBlockHit(const FChunkWorldResolvedBlockHit& ResolvedHit)
@@ -88,21 +96,6 @@ bool UChunkWorldBlockDamageBlueprintLibrary::TryBroadcastHitFeedbackForResolvedB
 	return FeedbackComponent->BroadcastFeedbackAtLocation(FeedbackLocation, Definition.HitSound);
 }
 
-bool UChunkWorldBlockDamageBlueprintLibrary::TryDestroyResolvedBlock(const FChunkWorldResolvedBlockHit& ResolvedHit)
-{
-	if (!ResolvedHit.bHasBlock || !IsValid(ResolvedHit.ChunkWorld))
-	{
-		return false;
-	}
-
-	FMeshData EmptyMeshData;
-	EmptyMeshData.MeshId = EmptyMesh;
-
-	ResolvedHit.ChunkWorld->SetMeshDataByBlockWorldPos(ResolvedHit.BlockWorldPos, EmptyMeshData, true);
-	ResolvedHit.ChunkWorld->SetBlockValueByBlockWorldPos(ResolvedHit.BlockWorldPos, EmptyMaterial, true);
-	return true;
-}
-
 bool UChunkWorldBlockDamageBlueprintLibrary::TryApplyBlockDamageForResolvedBlockHit(const FChunkWorldResolvedBlockHit& ResolvedHit, int32 DamageAmount, FChunkWorldBlockDamageResult& OutResult)
 {
 	OutResult = FChunkWorldBlockDamageResult();
@@ -127,11 +120,11 @@ bool UChunkWorldBlockDamageBlueprintLibrary::TryApplyBlockDamageForResolvedBlock
 
 	OutResult.bHasDamageSchema = true;
 	OutResult.BlockTypeName = BlockTypeName;
-	OutResult.bWasInvincible = CustomData.bInvincible;
+	OutResult.bWasInvincible = Definition.bInvincible;
 	OutResult.PreviousHealth = CustomData.Health;
 	OutResult.DamageApplied = DamageAmount;
 
-	if (CustomData.bInvincible)
+	if (Definition.bInvincible)
 	{
 		OutResult.NewHealth = CustomData.Health;
 		return true;
@@ -156,54 +149,10 @@ bool UChunkWorldBlockDamageBlueprintLibrary::TryApplyBlockDamageForResolvedBlock
 
 	if (OutResult.bDestroyed)
 	{
-		(void)UChunkWorldHitBlueprintLibrary::TryBroadcastDestroyedFeedbackForResolvedBlockHit(ResolvedHit);
-		return TryDestroyResolvedBlock(ResolvedHit);
-	}
-
-	(void)TryBroadcastHitFeedbackForResolvedBlockHit(ResolvedHit);
-	return true;
-}
-
-bool UChunkWorldBlockDamageBlueprintLibrary::TryApplyPredictedBlockDamageForResolvedBlockHit(const FChunkWorldResolvedBlockHit& ResolvedHit, int32 DamageAmount, float PredictionTimeSeconds, FChunkWorldBlockDamageResult& OutResult)
-{
-	OutResult = FChunkWorldBlockDamageResult();
-	if (DamageAmount <= 0 || !ResolvedHit.bHasBlock || !IsValid(ResolvedHit.ChunkWorld))
-	{
-		return false;
-	}
-
-	OutResult.bHitWasRepresentedBlock = true;
-	OutResult.bUsedPredictedWrite = true;
-	OutResult.ChunkWorld = ResolvedHit.ChunkWorld;
-	OutResult.BlockWorldPos = ResolvedHit.BlockWorldPos;
-	OutResult.MaterialIndex = ResolvedHit.MaterialIndex;
-	OutResult.MeshIndex = ResolvedHit.MeshIndex;
-	OutResult.PredictionTimeSeconds = PredictionTimeSeconds;
-
-	FGameplayTag BlockTypeName;
-	FBlockDamageDefinition Definition;
-	FBlockDamageCustomData CustomData;
-	if (!TryResolveDamageSchemaForResolvedBlockHit(ResolvedHit, false, BlockTypeName, Definition, CustomData))
-	{
-		return false;
-	}
-
-	OutResult.bHasDamageSchema = true;
-	OutResult.BlockTypeName = BlockTypeName;
-	OutResult.bWasInvincible = CustomData.bInvincible;
-	OutResult.PreviousHealth = CustomData.Health;
-	OutResult.DamageApplied = DamageAmount;
-
-	if (CustomData.bInvincible)
-	{
-		OutResult.NewHealth = CustomData.Health;
 		return true;
 	}
 
-	const int32 ClampedHealth = FMath::Max(0, CustomData.Health);
-	OutResult.NewHealth = FMath::Max(0, ClampedHealth - DamageAmount);
-	OutResult.bAppliedDamage = OutResult.NewHealth != ClampedHealth;
-	OutResult.bDestroyed = OutResult.NewHealth <= 0 && ClampedHealth > 0;
+	(void)TryBroadcastHitFeedbackForResolvedBlockHit(ResolvedHit);
 	return true;
 }
 
@@ -221,7 +170,7 @@ bool UChunkWorldBlockDamageBlueprintLibrary::TryGetCurrentBlockHealthStateForRes
 	}
 
 	OutHealth = CustomData.Health;
-	bOutInvincible = CustomData.bInvincible;
+	bOutInvincible = Definition.bInvincible;
 	return true;
 }
 
@@ -248,7 +197,7 @@ bool UChunkWorldBlockDamageBlueprintLibrary::TryGetBlockHealthStateForBlockWorld
 
 	OutMaxHealth = Definition.MaxHealth;
 	OutHealth = CustomData.Health;
-	bOutInvincible = CustomData.bInvincible;
+	bOutInvincible = Definition.bInvincible;
 
 	FGameplayTag RuntimeBlockTypeName;
 	FBlockDamageCustomData RuntimeCustomData;

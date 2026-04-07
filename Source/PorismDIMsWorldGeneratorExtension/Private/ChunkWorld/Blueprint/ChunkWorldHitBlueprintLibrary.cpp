@@ -2,6 +2,7 @@
 
 #include "ChunkWorld/Blueprint/ChunkWorldHitBlueprintLibrary.h"
 
+#include "Block/BlockTypeSchemaBlueprintLibrary.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "ChunkWorld/ChunkWorld.h"
 #include "ChunkWorldStructs/ChunkWorldEnums.h"
@@ -324,7 +325,23 @@ bool UChunkWorldHitBlueprintLibrary::TryGetBlockDefinitionForResolvedBlockHit(co
 		return false;
 	}
 
-	return ResolvedHit.BlockTypeSchemaComponent->GetBlockDefinitionForBlockWorldPos(ResolvedHit.BlockWorldPos, OutBlockTypeName, OutDefinition);
+	if (!ResolvedHit.BlockTypeSchemaComponent->GetBlockDefinitionForBlockWorldPos(ResolvedHit.BlockWorldPos, OutBlockTypeName, OutDefinition))
+	{
+		UE_LOG(
+			LogPorismDIMsWorldGeneratorExtension,
+			Warning,
+			TEXT("Failed to resolve block definition for chunk world '%s' at %s. LookupReady=%d Registry=%s MaterialIndex=%d MeshIndex=%d ResolveSource=%d"),
+			*GetNameSafe(ResolvedHit.ChunkWorld),
+			*ResolvedHit.BlockWorldPos.ToString(),
+			ResolvedHit.BlockTypeSchemaComponent->IsBlockDefinitionLookupReady(),
+			*GetNameSafe(ResolvedHit.BlockTypeSchemaComponent->GetBlockTypeSchemaRegistry()),
+			ResolvedHit.MaterialIndex,
+			ResolvedHit.MeshIndex,
+			static_cast<int32>(ResolvedHit.ResolveSource));
+		return false;
+	}
+
+	return true;
 }
 
 bool UChunkWorldHitBlueprintLibrary::TryGetBlockCustomDataForBlockTypeName(UBlockTypeSchemaComponent* SchemaComponent, FGameplayTag BlockTypeName, FInstancedStruct& OutCustomData)
@@ -381,8 +398,8 @@ bool UChunkWorldHitBlueprintLibrary::TryBroadcastDestroyedFeedbackForResolvedBlo
 		return false;
 	}
 
-	const FBlockDefinitionBase* BlockDefinition = DefinitionStruct.GetPtr<FBlockDefinitionBase>();
-	if (BlockDefinition == nullptr)
+	FBlockDefinitionBase BlockDefinition;
+	if (!UBlockTypeSchemaBlueprintLibrary::TryGetBlockDefinitionBase(DefinitionStruct, BlockDefinition))
 	{
 		return false;
 	}
@@ -390,5 +407,5 @@ bool UChunkWorldHitBlueprintLibrary::TryBroadcastDestroyedFeedbackForResolvedBlo
 	const FVector FeedbackLocation = ResolvedHit.RepresentativeWorldPos.IsNearlyZero()
 		? ResolvedHit.ChunkWorld->BlockWorldPosToUEWorldPos(ResolvedHit.BlockWorldPos)
 		: ResolvedHit.RepresentativeWorldPos;
-	return FeedbackComponent->BroadcastFeedbackAtLocation(FeedbackLocation, BlockDefinition->DestroyedSound, BlockDefinition->DestroyedEffect);
+	return FeedbackComponent->BroadcastFeedbackAtLocation(FeedbackLocation, BlockDefinition.DestroyedSound, BlockDefinition.DestroyedEffect);
 }

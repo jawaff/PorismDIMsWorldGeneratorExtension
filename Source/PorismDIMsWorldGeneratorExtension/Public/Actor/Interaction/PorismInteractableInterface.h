@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Internationalization/Text.h"
 #include "GameplayTagContainer.h"
 #include "UObject/Interface.h"
 #include "PorismInteractableInterface.generated.h"
@@ -26,6 +27,14 @@ class PORISMDIMSWORLDGENERATOREXTENSION_API IPorismInteractableInterface
 	GENERATED_BODY()
 
 public:
+	/** Returns the display name shown for this interactable actor in shared interaction widgets. */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Porism|Interaction")
+	FText GetInteractableName() const;
+
+	/** Returns the display text shown for the supplied interaction tag in shared interaction widgets. */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Porism|Interaction")
+	FText GetInteractionName(FGameplayTag InteractionTag) const;
+
 	/** Returns whether the supplied pawn may currently use the provided interaction tag on this actor. */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Porism|Interaction")
 	bool CanHandleInteraction(APawn* InteractingPawn, FGameplayTag InteractionTag) const;

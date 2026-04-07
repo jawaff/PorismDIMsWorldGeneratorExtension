@@ -33,12 +33,6 @@ public:
 	static bool TryApplyBlockDamageForResolvedBlockHit(const FChunkWorldResolvedBlockHit& ResolvedHit, int32 DamageAmount, FChunkWorldBlockDamageResult& OutResult);
 
 	/**
-	 * Calculates a local-only predicted damage result without mutating chunk-world custom data.
-	 */
-	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld|Damage")
-	static bool TryApplyPredictedBlockDamageForResolvedBlockHit(const FChunkWorldResolvedBlockHit& ResolvedHit, int32 DamageAmount, float PredictionTimeSeconds, FChunkWorldBlockDamageResult& OutResult);
-
-	/**
 	 * Reads current health and invincibility state for one resolved block using the shared damage schema family.
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld|Damage")
@@ -57,6 +51,4 @@ private:
 		FGameplayTag& OutBlockTypeName,
 		FBlockDamageDefinition& OutDefinition,
 		FBlockDamageCustomData& OutCustomData);
-
-	static bool TryDestroyResolvedBlock(const FChunkWorldResolvedBlockHit& ResolvedHit);
 };

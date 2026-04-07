@@ -48,11 +48,10 @@ bool UChunkWorldBlockSwapComponent::CanApplySwapRequest(const FIntVector& BlockW
 	}
 
 	FGameplayTag BlockTypeName;
-	FChunkWorldBlockSwapDefinition SwapDefinition;
-	bool bAllowSwap = false;
-	if (SchemaComponent->GetBlockSwapDefinitionForBlockWorldPos(BlockWorldPos, BlockTypeName, SwapDefinition, bAllowSwap))
+	FBlockDefinitionBase Definition;
+	if (SchemaComponent->GetBlockDefinitionForBlockWorldPos(BlockWorldPos, BlockTypeName, Definition))
 	{
-		return bAllowSwap && SwapDefinition.IsConfigured();
+		return !Definition.SwapActorClass.IsNull();
 	}
 
 	return false;
@@ -74,14 +73,12 @@ void UChunkWorldBlockSwapComponent::ApplySwapHiddenState(const FIntVector& Block
 		}
 
 		FBlockSwapBackup Backup;
-		CacheOriginalBlockState(BlockWorldPos, Backup);
-		SwapBackups.Add(BlockWorldPos, Backup);
+		if (CacheOriginalBlockState(BlockWorldPos, Backup))
+		{
+		    SwapBackups.Add(BlockWorldPos, Backup);
+		    ChunkWorld->DestroyBlock(BlockWorldPos, true);
+		}
 
-		FMeshData EmptyMeshData;
-		EmptyMeshData.MeshId = EmptyMesh;
-
-		ChunkWorld->SetMeshDataByBlockWorldPos(BlockWorldPos, EmptyMeshData, true);
-		ChunkWorld->SetBlockValueByBlockWorldPos(BlockWorldPos, EmptyMaterial, true);
 		return;
 	}
 
@@ -91,22 +88,25 @@ void UChunkWorldBlockSwapComponent::ApplySwapHiddenState(const FIntVector& Block
 		return;
 	}
 
-	ChunkWorld->SetMeshDataByBlockWorldPos(BlockWorldPos, Backup->bHasMesh ? Backup->MeshData : FMeshData(), true);
-	ChunkWorld->SetBlockValueByBlockWorldPos(BlockWorldPos, Backup->MaterialIndex, true);
+	if (Backup->bHasMesh)
+	{
+	    ChunkWorld->SetMeshDataByBlockWorldPos(BlockWorldPos, Backup->MeshData, true);
+	}
+	
 	SwapBackups.Remove(BlockWorldPos);
 }
 
-void UChunkWorldBlockSwapComponent::CacheOriginalBlockState(const FIntVector& BlockWorldPos, FBlockSwapBackup& OutBackup) const
+bool UChunkWorldBlockSwapComponent::CacheOriginalBlockState(const FIntVector& BlockWorldPos, FBlockSwapBackup& OutBackup) const
 {
 	AChunkWorldExtended* ChunkWorld = GetChunkWorldOwner();
 	if (ChunkWorld == nullptr)
 	{
-		return;
+		return false;
 	}
 
-	OutBackup.MaterialIndex = ChunkWorld->GetBlockValueByBlockWorldPos(BlockWorldPos, ERessourceType::MaterialIndex, 0);
 	OutBackup.MeshData = ChunkWorld->GetMeshDataByBlockWorldPos(BlockWorldPos);
 	OutBackup.bHasMesh = OutBackup.MeshData.MeshId != EmptyMesh;
+	return OutBackup.bHasMesh;
 }
 
 AChunkWorldExtended* UChunkWorldBlockSwapComponent::GetChunkWorldOwner() const

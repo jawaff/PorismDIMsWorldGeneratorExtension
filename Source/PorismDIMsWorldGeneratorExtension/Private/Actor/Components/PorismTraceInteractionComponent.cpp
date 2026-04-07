@@ -19,6 +19,7 @@ UPorismTraceInteractionComponent::UPorismTraceInteractionComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
 	SetIsReplicatedByDefault(true);
+	InteractableInterfaces.AddUnique(UPorismInteractableInterface::StaticClass());
 
 	TraceChannel = ECC_Visibility;
 	BlockTraceChannel = ECC_Visibility;

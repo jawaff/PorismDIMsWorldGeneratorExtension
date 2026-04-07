@@ -2,12 +2,19 @@
 
 This plugin-local documentation is the home for the v2 Block type schema and its derived project-specific extensions.
 
-## Files
-- [BlockTypeSchema.md](./BlockTypeSchema.md)
-- [BlockTypeSchemaComponent.md](./BlockTypeSchemaComponent.md)
-- [ChunkWorldDamage.md](./ChunkWorldDamage.md)
-- [ChunkWorldExtended.md](./ChunkWorldExtended.md)
-- [TraceInteractionComponent.md](./TraceInteractionComponent.md)
+## Documentation Areas
+- `Docs/Design/`
+  - stable design and reference documentation for the shared schema, chunk-world, damage, and interaction systems
+- [Design/BlockTypeSchema.md](./Design/BlockTypeSchema.md)
+- [Design/BlockTypeSchemaComponent.md](./Design/BlockTypeSchemaComponent.md)
+- [Design/ChunkWorldDamage.md](./Design/ChunkWorldDamage.md)
+- [Design/ChunkWorldExtended.md](./Design/ChunkWorldExtended.md)
+- [Design/TraceInteractionComponent.md](./Design/TraceInteractionComponent.md)
+- `Docs/Usage/`
+  - setup guides and recommended component/library combinations for common gameplay routes
+- [Usage/ChunkWorldGameplaySetup.md](./Usage/ChunkWorldGameplaySetup.md)
+- `Docs/InProgress/`
+  - active implementation notes that are not yet stable reference documentation
 - [InProgress/ChunkWorldBlockSwap.md](./InProgress/ChunkWorldBlockSwap.md)
 - [InProgress/ChunkWorldDamage.md](./InProgress/ChunkWorldDamage.md)
 - [InProgress/TraceInteractionComponentV2.md](./InProgress/TraceInteractionComponentV2.md)

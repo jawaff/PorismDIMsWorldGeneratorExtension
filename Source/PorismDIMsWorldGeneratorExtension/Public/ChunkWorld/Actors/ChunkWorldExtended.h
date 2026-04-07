@@ -10,11 +10,12 @@ class UBlockTypeSchemaComponent;
 class UBlockTypeSchemaRegistry;
 class UChunkWorldBlockFeedbackComponent;
 class UChunkWorldBlockSwapComponent;
+class AChunkWorldExtended;
 #if WITH_EDITOR
 struct FPropertyChangedEvent;
 #endif
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnChunkWorldAuthoritativeBlockCustomDataUpdated, const FIntVector&, BlockWorldPos);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnChunkWorldAuthoritativeBlockCustomDataUpdated, AChunkWorldExtended*, ChunkWorld, const FIntVector&, BlockWorldPos);
 
 /**
  * Basic extension chunk world that hosts the reusable block type schema component used by project-specific block systems.
@@ -29,6 +30,11 @@ public:
 	 * Creates a chunk world that includes the reusable block type schema component.
 	 */
 	AChunkWorldExtended();
+
+	/**
+	 * Sizes chunk-world custom-data storage from the active schema registry before Porism compiles runtime config.
+	 */
+	virtual SCacheKey StartGenDTs() override;
 
 	/**
 	 * Starts generation and then rebuilds the schema lookup maps once the world indexes are available.
@@ -63,6 +69,16 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Block|ChunkWorld")
 	FOnChunkWorldAuthoritativeBlockCustomDataUpdated OnAuthoritativeBlockCustomDataUpdated;
 
+	/**
+	 * Processes authoritative custom data changes to trigger things like block removal.
+	 */
+	void ProcessAuthoritativeCustomDataChanges(const FIntVector& BlockWorldPos, const TArray<int32>& PackedValues);
+
+	/**
+	 * Removes one block's runtime representation using the authored block-definition association.
+	 */
+	bool DestroyBlock(const FIntVector& BlockWorldPos, bool bRefreshChunks);
+
 protected:
 	/** Retires local predicted block state and emits a shared update event after authoritative custom-data replication is applied. */
 	virtual void WriteCustomDataValuesAndUpdate(const TArray<SCustomDataChangeCall>& NetCustomDataChangeCalls) override;
@@ -76,7 +92,16 @@ protected:
 	virtual void PostLoad() override;
 
 private:
-	/** Applies the actor-owned schema registry to the runtime schema component so details panels expose one source of truth. */
+	/** Applies shared post-write behavior for one authoritative custom-data update, including project-side zero-health block removal. */
+	void HandlePostAuthoritativeCustomDataUpdate(const FIntVector& BlockWorldPos, const SCustomDataChangeCall* ChangeCall = nullptr);
+
+	/** Removes a block after the shared damage-family health slot commits a zero-or-lower value on the server. */
+	void TryDestroyBlockFromCommittedHealth(const FIntVector& BlockWorldPos, const SCustomDataChangeCall* ChangeCall);
+
+	/** Ensures WorldGenDef and runtime config expose enough custom-data channels for the active schema layout. */
+	void EnsureSchemaCustomDataCapacity();
+
+	/** Applies the actor-owned schema registry to the runtime schema component and adopts legacy component-authored values from older assets when needed. */
 	void SyncBlockTypeSchemaRegistry();
 
 	/** Single actor-level schema registry entry shown in details panels for chunk world setup. */

@@ -8,6 +8,23 @@
 #include "ChunkWorld/Hit/ChunkWorldBlockHitTypes.h"
 #include "PorismPredictedBlockStateComponent.generated.h"
 
+DECLARE_MULTICAST_DELEGATE_TwoParams(FPorismTrackedBlockStateChangedSignature, AChunkWorld* /*ChunkWorld*/, const FIntVector& /*BlockWorldPos*/);
+
+USTRUCT()
+struct FQueuedPredictedBlockDamage
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	TObjectPtr<AChunkWorld> ChunkWorld = nullptr;
+
+	UPROPERTY()
+	FIntVector BlockWorldPos = FIntVector::ZeroValue;
+
+	UPROPERTY()
+	int32 DamageAmount = 0;
+};
+
 /**
  * Local-only prediction cache for block health state keyed by resolved chunk world block hits.
  */
@@ -19,16 +36,20 @@ class PORISMDIMSWORLDGENERATOREXTENSION_API UPorismPredictedBlockStateComponent 
 public:
 	UPorismPredictedBlockStateComponent();
 
-	/**
-	 * Retires prediction state for one authoritative block update on the supplied chunk world.
-	 */
-	static void NotifyAuthoritativeBlockStateUpdated(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos);
+	/** Returns the shared notification fired whenever one tracked block changes predicted or authoritative state. */
+	FPorismTrackedBlockStateChangedSignature& OnTrackedBlockStateChanged() { return TrackedBlockStateChangedEvent; }
 
 	/**
 	 * Stores one new predicted damage result for later UI/gameplay reads.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld|Prediction")
 	void StorePredictedDamageResult(const FChunkWorldResolvedBlockHit& ResolvedHit, const FChunkWorldBlockDamageResult& DamageResult);
+
+	/**
+	 * Applies one local predicted block damage result, stores it in the shared prediction cache, and queues the matching authoritative server flush.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld|Prediction")
+	bool ApplyPredictedDamageAndQueueAuthoritativeFlush(const FChunkWorldResolvedBlockHit& ResolvedHit, int32 DamageAmount);
 
 	/**
 	 * Clears a stored prediction because authoritative state for the same block has arrived.
@@ -49,6 +70,10 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Prediction", meta = (ClampMin = "0.01", UIMin = "0.01", ToolTip = "How long one predicted block state stays alive without an authoritative update."))
 	float PredictionTimeoutSeconds = 10.0f;
 
+	/** Delay used to accumulate repeated local block damage requests before sending one authoritative flush to the server. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Prediction", meta = (ClampMin = "0.0", UIMin = "0.0", ToolTip = "Delay used to accumulate repeated local block damage requests before sending one authoritative flush to the server."))
+	float PendingDamageFlushDelaySeconds = 0.05f;
+
 private:
 	struct FPredictedBlockKey
 	{
@@ -66,10 +91,29 @@ private:
 		}
 	};
 
+	UFUNCTION()
+	void HandleObservedChunkWorldAuthoritativeBlockCustomDataUpdated(AChunkWorldExtended* ChunkWorld, const FIntVector& BlockWorldPos);
+
 	void PruneExpiredPredictions();
 	bool ShouldRegisterPredictionNotifications() const;
+	bool TryApplyPredictedDamageForResolvedBlockHit(const FChunkWorldResolvedBlockHit& ResolvedHit, int32 DamageAmount, float PredictionTimeSeconds, FChunkWorldBlockDamageResult& OutResult) const;
+	void QueueAuthoritativeDamage(const FChunkWorldResolvedBlockHit& ResolvedHit, int32 DamageAmount);
+	void FlushQueuedPredictedDamage();
+	void BroadcastTrackedBlockStateChanged(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos);
+	void BindObservedChunkWorld(AChunkWorld* ChunkWorld);
+	void BindObservedChunkWorlds();
+	void UnbindObservedChunkWorlds();
+	void HandleActorSpawned(AActor* SpawnedActor);
 	static FPredictedBlockKey MakeKey(const FChunkWorldResolvedBlockHit& ResolvedHit);
 	static FPredictedBlockKey MakeKey(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos);
 
+	UFUNCTION(Server, Reliable)
+	void ServerFlushQueuedPredictedDamage(const TArray<FQueuedPredictedBlockDamage>& QueuedDamageEntries);
+
 	TMap<FPredictedBlockKey, FChunkWorldBlockDamageResult> PredictedBlockStates;
+	TMap<FPredictedBlockKey, FQueuedPredictedBlockDamage> PendingAuthoritativeDamageByBlock;
+	FTimerHandle PendingDamageFlushHandle;
+	FPorismTrackedBlockStateChangedSignature TrackedBlockStateChangedEvent;
+	TArray<TWeakObjectPtr<class AChunkWorldExtended>> ObservedChunkWorlds;
+	FDelegateHandle ActorSpawnedHandle;
 };

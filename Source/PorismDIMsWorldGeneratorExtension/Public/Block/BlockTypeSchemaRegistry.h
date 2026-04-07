@@ -45,21 +45,15 @@ struct FBlockDefinitionBase
 	TSoftClassPtr<AActor> SwapActorClass;
 
 	/**
-	 * If true, project-side swap scanning should spawn the configured swap actor when the block swaps out.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Swap", meta = (DisplayPriority = "6", ToolTip = "If true, project-side swap scanning should spawn the configured swap actor when the block swaps out."))
-	bool bSpawnSwapActor = true;
-
-	/**
 	 * Distance at which the swap actor should replace the block.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Swap", meta = (DisplayPriority = "7", ClampMin = "0.0", UIMin = "0.0", ToolTip = "Distance at which the swap actor should replace the block."))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Swap", meta = (DisplayPriority = "6", ClampMin = "0.0", UIMin = "0.0", ToolTip = "Distance at which the swap actor should replace the block."))
 	float SwapInDistance = 600.0f;
 
 	/**
 	 * Distance at which the swap actor should be removed and the block restored.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Swap", meta = (DisplayPriority = "8", ClampMin = "0.0", UIMin = "0.0", ToolTip = "Distance at which the swap actor should be removed and the block restored."))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Swap", meta = (DisplayPriority = "7", ClampMin = "0.0", UIMin = "0.0", ToolTip = "Distance at which the swap actor should be removed and the block restored."))
 	float SwapOutDistance = 800.0f;
 
 	/**
@@ -73,32 +67,12 @@ struct FBlockDefinitionBase
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Definition", meta = (DisplayPriority = "11", ToolTip = "Optional Niagara system to spawn when this block type is destroyed."))
 	TObjectPtr<UNiagaraSystem> DestroyedEffect = nullptr;
-};
 
-/**
- * Shared swap payload resolved from a block definition for project-side swap scanning and presentation.
- */
-USTRUCT(BlueprintType)
-struct FChunkWorldBlockSwapDefinition
-{
-	GENERATED_BODY()
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Swap")
-	TSoftClassPtr<AActor> SwapActorClass;
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Swap")
-	bool bSpawnActor = true;
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Swap")
-	float SwapInDistance = 600.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Swap")
-	float SwapOutDistance = 800.0f;
-
-	bool IsConfigured() const
-	{
-		return !SwapActorClass.IsNull() || !bSpawnActor;
-	}
+	/**
+	 * If true, this block ignores damage requests entirely.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Definition", meta = (DisplayPriority = "12", ToolTip = "If true, this block ignores damage requests entirely."))
+	bool bInvincible = false;
 };
 
 /**
@@ -108,18 +82,6 @@ USTRUCT(BlueprintType)
 struct FBlockCustomDataBase
 {
 	GENERATED_BODY()
-
-	/**
-	 * If true, this block is invincible by default when materialized at runtime.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CustomData", meta = (DisplayPriority = "1", ToolTip = "If true, this block is invincible by default when materialized at runtime."))
-	bool bInvincible = false;
-
-	/**
-	 * If true, this block can participate in swaps by default.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CustomData", meta = (DisplayPriority = "2", ToolTip = "If true, this block can participate in swaps by default."))
-	bool bAllowSwap = false;
 };
 
 /**

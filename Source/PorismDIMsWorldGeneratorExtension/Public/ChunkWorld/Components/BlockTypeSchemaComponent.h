@@ -33,6 +33,18 @@ public:
 	UBlockTypeSchemaRegistry* GetBlockTypeSchemaRegistry() const { return BlockTypeSchemaRegistry; }
 
 	/**
+	 * Returns how many runtime custom-data channels this schema needs, including the reserved materialization marker slot.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld")
+	int32 GetRequiredCustomDataChannelCount() const;
+
+	/**
+	 * Returns the shared runtime slot index used by the `Health` field in the `FBlockDamageCustomData` family.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld")
+	int32 GetBlockDamageHealthCustomDataIndex() const;
+
+	/**
 	 * Sets the schema registry used by this component's runtime lookup maps.
 	 */
 	void SetBlockTypeSchemaRegistry(UBlockTypeSchemaRegistry* InBlockTypeSchemaRegistry) { BlockTypeSchemaRegistry = InBlockTypeSchemaRegistry; }
@@ -112,13 +124,6 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld")
 	bool IsBlockCustomDataMaterialized(const FIntVector& BlockWorldPos) const;
-
-	/**
-	 * Resolves swap authoring and eligibility for one block world position from shared definition/custom-data payloads.
-	 * When custom data has not been materialized yet, this falls back to authored defaults and can optionally initialize runtime custom data on authority.
-	 */
-	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld")
-	bool GetBlockSwapDefinitionForBlockWorldPos(const FIntVector& BlockWorldPos, FGameplayTag& OutBlockTypeName, FChunkWorldBlockSwapDefinition& OutSwapDefinition, bool& bOutAllowSwap, bool bInitializeCustomDataIfNeeded = true);
 
 	/**
 	 * Reconstructs the authored custom-data struct for the block at the supplied world position.
@@ -215,6 +220,18 @@ protected:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
+	/**
+	 * Returns how many custom-data channels the owning chunk world actually has available at runtime.
+	 */
+	int32 GetAvailableCustomDataChannelCount() const;
+
+	/**
+	 * Returns false when the supplied packed payload would overflow the chunk world's available custom-data channels.
+	 * This project-specific guard prevents schema-driven custom-data writes from crashing Porism when the world runtime
+	 * was configured with fewer custom channels than the schema layout requires.
+	 */
+	bool CanAccessCustomDataChannelCount(int32 RequiredChannelCount, const FIntVector& BlockWorldPos, const TCHAR* Context) const;
+
 	/**
 	 * Required schema registry asset that resolves block type schema rows and authored defaults.
 	 */

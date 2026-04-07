@@ -38,14 +38,13 @@ protected:
 private:
 	struct FBlockSwapBackup
 	{
-		int32 MaterialIndex = EmptyMaterial;
 		FMeshData MeshData;
 		bool bHasMesh = false;
 	};
 
 	bool CanApplySwapRequest(const FIntVector& BlockWorldPos) const;
 	void ApplySwapHiddenState(const FIntVector& BlockWorldPos, bool bEntering);
-	void CacheOriginalBlockState(const FIntVector& BlockWorldPos, FBlockSwapBackup& OutBackup) const;
+	bool CacheOriginalBlockState(const FIntVector& BlockWorldPos, FBlockSwapBackup& OutBackup) const;
 	AChunkWorldExtended* GetChunkWorldOwner() const;
 	UBlockTypeSchemaComponent* GetSchemaComponent() const;
 

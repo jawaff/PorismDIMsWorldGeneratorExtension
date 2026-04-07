@@ -9,6 +9,15 @@
 class UNiagaraSystem;
 class USoundBase;
 
+/** Lightweight local playback cache entry used to suppress predicted/authoritative duplicate feedback bursts. */
+struct FRecentChunkWorldBlockFeedback
+{
+	FVector WorldLocation = FVector::ZeroVector;
+	TObjectPtr<USoundBase> Sound = nullptr;
+	TObjectPtr<UNiagaraSystem> NiagaraSystem = nullptr;
+	float TimeSeconds = 0.0f;
+};
+
 /**
  * Replicates chunk-world block feedback so nearby clients and listen-server players hear and see authoritative block hit events.
  */
@@ -34,10 +43,23 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Feedback", meta = (ClampMin = "0.0", UIMin = "0.0", ToolTip = "Maximum local playback distance for replicated block feedback. Set to zero to disable local distance filtering."))
 	float FeedbackCullDistance = 5000.0f;
 
+	/** Time window used to suppress the same local block feedback from playing twice when predicted and authoritative paths both request it. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Feedback", meta = (ClampMin = "0.0", UIMin = "0.0", ToolTip = "Time window used to suppress the same local block feedback from playing twice when predicted and authoritative paths both request it."))
+	float FeedbackDeduplicationWindowSeconds = 0.15f;
+
+	/** Distance tolerance used to match repeated block feedback requests for the same local event. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Feedback", meta = (ClampMin = "0.0", UIMin = "0.0", ToolTip = "Distance tolerance used to match repeated block feedback requests for the same local event."))
+	float FeedbackDeduplicationDistance = 32.0f;
+
 private:
 	UFUNCTION(NetMulticast, Unreliable)
 	void MulticastBroadcastFeedback(const FVector_NetQuantize& WorldLocation, USoundBase* Sound, UNiagaraSystem* NiagaraSystem);
 
 	bool ShouldPlayFeedbackAtLocation(const FVector& WorldLocation) const;
+	bool ShouldSuppressDuplicateFeedback(const FVector& WorldLocation, USoundBase* Sound, UNiagaraSystem* NiagaraSystem) const;
+	void RememberFeedbackPlayback(const FVector& WorldLocation, USoundBase* Sound, UNiagaraSystem* NiagaraSystem) const;
 	void PlayFeedbackAtLocation(const FVector& WorldLocation, USoundBase* Sound, UNiagaraSystem* NiagaraSystem) const;
+
+	/** Local recent-playback cache used only to suppress short-lived duplicate feedback requests on this machine. */
+	mutable TArray<FRecentChunkWorldBlockFeedback> RecentFeedbackPlaybacks;
 };

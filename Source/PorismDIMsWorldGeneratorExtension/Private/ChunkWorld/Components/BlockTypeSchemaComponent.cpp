@@ -3,6 +3,7 @@
 #include "ChunkWorld/Components/BlockTypeSchemaComponent.h"
 
 #include "Block/BlockCustomDataLayout.h"
+#include "ChunkWorld/Actors/ChunkWorldExtended.h"
 #include "ChunkWorld/ChunkWorld.h"
 #include "ChunkWorld/ChunkWorldBase.h"
 #include "ChunkWorldStructs/ChunkWorldStructs.h"
@@ -13,6 +14,84 @@ DEFINE_LOG_CATEGORY_STATIC(LogBlockTypeSchemaComponent, Log, All);
 UBlockTypeSchemaComponent::UBlockTypeSchemaComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
+}
+
+int32 UBlockTypeSchemaComponent::GetBlockDamageHealthCustomDataIndex() const
+{
+	static const int32 CachedHealthSlotIndex = []()
+	{
+		FBlockCustomDataLayout Layout;
+		if (!Layout.Build(FBlockDamageCustomData::StaticStruct()))
+		{
+			return static_cast<int32>(INDEX_NONE);
+		}
+
+		// Layout packing walks base struct properties before child struct properties, so the shared damage-family
+		// `Health` slot remains stable for every custom-data struct derived from `FBlockDamageCustomData`.
+		return static_cast<int32>(Layout.GetValueSlotCount() - 1);
+	}();
+
+	return CachedHealthSlotIndex;
+}
+
+int32 UBlockTypeSchemaComponent::GetRequiredCustomDataChannelCount() const
+{
+	if (BlockTypeSchemaRegistry == nullptr)
+	{
+		return 0;
+	}
+
+	int32 RequiredChannelCount = 0;
+	for (const FBlockTypeSchema& BlockTypeDefinition : BlockTypeSchemaRegistry->GetBlockTypeDefinitions())
+	{
+		if (!BlockTypeDefinition.CustomData.IsValid())
+		{
+			continue;
+		}
+
+		const FBlockCustomDataLayout* Layout = GetOrBuildBlockCustomDataLayout(BlockTypeDefinition.CustomData.GetScriptStruct());
+		if (Layout == nullptr)
+		{
+			continue;
+		}
+
+		// Reserve one extra runtime channel for the materialization marker that lives
+		// alongside the authored custom-data payload but is not declared in the schema asset.
+		RequiredChannelCount = FMath::Max(RequiredChannelCount, Layout->GetValueSlotCount() + 1);
+	}
+
+	return RequiredChannelCount;
+}
+
+int32 UBlockTypeSchemaComponent::GetAvailableCustomDataChannelCount() const
+{
+	const AChunkWorldBase* ChunkWorld = Cast<AChunkWorldBase>(GetOwner());
+	if (ChunkWorld == nullptr || ChunkWorld->RuntimeConfig == nullptr)
+	{
+		return 0;
+	}
+
+	return ChunkWorld->RuntimeConfig->CustomFeatureDefaultData.Num();
+}
+
+bool UBlockTypeSchemaComponent::CanAccessCustomDataChannelCount(int32 RequiredChannelCount, const FIntVector& BlockWorldPos, const TCHAR* Context) const
+{
+	const int32 AvailableChannelCount = GetAvailableCustomDataChannelCount();
+	if (RequiredChannelCount <= AvailableChannelCount)
+	{
+		return true;
+	}
+
+	UE_LOG(
+		LogBlockTypeSchemaComponent,
+		Error,
+		TEXT("%s on %s at %s requires %d custom-data channels, but the chunk world runtime only provides %d. Increase RuntimeConfig->CustomFeatureDefaultData to match the schema layout."),
+		Context,
+		*GetNameSafe(GetOwner()),
+		*BlockWorldPos.ToString(),
+		RequiredChannelCount,
+		AvailableChannelCount);
+	return false;
 }
 
 bool UBlockTypeSchemaComponent::GetBlockDefinitionForMaterialIndex(int32 MaterialIndex, FInstancedStruct& OutDefinition) const
@@ -81,8 +160,14 @@ bool UBlockTypeSchemaComponent::ReadBlockCustomDataSlots(const FIntVector& Block
 		return false;
 	}
 
-	OutPackedValues.Reset(Layout.GetValueSlotCount() + 1);
-	for (int32 SlotIndex = 0; SlotIndex < Layout.GetValueSlotCount() + 1; ++SlotIndex)
+	const int32 RequiredChannelCount = Layout.GetValueSlotCount() + 1;
+	if (!CanAccessCustomDataChannelCount(RequiredChannelCount, BlockWorldPos, TEXT("Cannot read block custom data")))
+	{
+		return false;
+	}
+
+	OutPackedValues.Reset(RequiredChannelCount);
+	for (int32 SlotIndex = 0; SlotIndex < RequiredChannelCount; ++SlotIndex)
 	{
 		OutPackedValues.Add(ChunkWorld->GetBlockValueByBlockWorldPos(BlockWorldPos, ERessourceType::CustomData, SlotIndex));
 	}
@@ -98,9 +183,21 @@ void UBlockTypeSchemaComponent::WriteBlockCustomDataSlots(const FIntVector& Bloc
 		return;
 	}
 
+	if (!CanAccessCustomDataChannelCount(PackedValues.Num(), BlockWorldPos, TEXT("Cannot write block custom data")))
+	{
+		return;
+	}
+
 	for (int32 SlotIndex = 0; SlotIndex < PackedValues.Num(); ++SlotIndex)
 	{
 		ChunkWorld->SetBlockCustomValueByBlockWorldPos(BlockWorldPos, PackedValues[SlotIndex], SlotIndex);
+	}
+
+	// Authoritative schema writes do not flow through Porism's replicated custom-data apply callback on the
+	// server, so trigger the changes to be processed by the chunk world.
+	if (AChunkWorldExtended* ExtendedChunkWorld = Cast<AChunkWorldExtended>(ChunkWorld); ExtendedChunkWorld != nullptr && ExtendedChunkWorld->HasAuthority())
+	{
+		ExtendedChunkWorld->ProcessAuthoritativeCustomDataChanges(BlockWorldPos, PackedValues);
 	}
 }
 
@@ -144,6 +241,11 @@ bool UBlockTypeSchemaComponent::GetBlockCustomDataForBlockWorldPos(const FIntVec
 		return false;
 	}
 
+	if (!CanAccessCustomDataChannelCount(Layout->GetValueSlotCount() + 1, BlockWorldPos, TEXT("Cannot reconstruct block custom data")))
+	{
+		return false;
+	}
+
 	TArray<int32> PackedValues;
 	if (!ReadBlockCustomDataSlots(BlockWorldPos, *Layout, PackedValues))
 	{
@@ -151,7 +253,7 @@ bool UBlockTypeSchemaComponent::GetBlockCustomDataForBlockWorldPos(const FIntVec
 	}
 
 	const int32 MarkerSlotIndex = Layout->GetValueSlotCount();
-	if (!PackedValues.IsValidIndex(MarkerSlotIndex) || PackedValues[MarkerSlotIndex] == 0)
+	if (!PackedValues.IsValidIndex(MarkerSlotIndex) || PackedValues[MarkerSlotIndex] <= 0)
 	{
 		return false;
 	}
@@ -176,6 +278,11 @@ bool UBlockTypeSchemaComponent::SetBlockCustomDataForBlockWorldPos(const FIntVec
 	const UScriptStruct* StructType = CustomData.GetScriptStruct();
 	const FBlockCustomDataLayout* Layout = GetOrBuildBlockCustomDataLayout(StructType);
 	if (Layout == nullptr)
+	{
+		return false;
+	}
+
+	if (!CanAccessCustomDataChannelCount(Layout->GetValueSlotCount() + 1, BlockWorldPos, TEXT("Cannot write block custom data struct")))
 	{
 		return false;
 	}
@@ -336,6 +443,11 @@ bool UBlockTypeSchemaComponent::InitializeBlockCustomData(const FIntVector& Bloc
 		return false;
 	}
 
+	if (!CanAccessCustomDataChannelCount(Layout->GetValueSlotCount() + 1, BlockWorldPos, TEXT("Cannot initialize block custom data")))
+	{
+		return false;
+	}
+
 	TArray<int32> PackedCustomData;
 	if (!Layout->Pack(BlockType->CustomData.GetMemory(), PackedCustomData))
 	{
@@ -347,7 +459,7 @@ bool UBlockTypeSchemaComponent::InitializeBlockCustomData(const FIntVector& Bloc
 
 	const int32 MaterializationSlotIndex = PackedCustomData.Num() - 1;
 	const int32 StoredMarker = ChunkWorld->GetBlockValueByBlockWorldPos(BlockWorldPos, ERessourceType::CustomData, MaterializationSlotIndex);
-	if (StoredMarker != 0)
+	if (StoredMarker > 0)
 	{
 		return false;
 	}
@@ -385,69 +497,13 @@ bool UBlockTypeSchemaComponent::IsBlockCustomDataMaterialized(const FIntVector& 
 		return false;
 	}
 
+	if (!CanAccessCustomDataChannelCount(Layout->GetValueSlotCount() + 1, BlockWorldPos, TEXT("Cannot query block custom-data materialization")))
+	{
+		return false;
+	}
+
 	const int32 MaterializationSlotIndex = Layout->GetValueSlotCount();
-	return ChunkWorld->GetBlockValueByBlockWorldPos(BlockWorldPos, ERessourceType::CustomData, MaterializationSlotIndex) != 0;
-}
-
-bool UBlockTypeSchemaComponent::GetBlockSwapDefinitionForBlockWorldPos(const FIntVector& BlockWorldPos, FGameplayTag& OutBlockTypeName, FChunkWorldBlockSwapDefinition& OutSwapDefinition, bool& bOutAllowSwap, bool bInitializeCustomDataIfNeeded)
-{
-	OutBlockTypeName = FGameplayTag();
-	OutSwapDefinition = FChunkWorldBlockSwapDefinition();
-	bOutAllowSwap = false;
-
-	if (!bBlockDefinitionLookupReady)
-	{
-		UE_LOG(LogBlockTypeSchemaComponent, Warning, TEXT("Cannot resolve block swap definition on %s because the lookup maps are not ready."), *GetNameSafe(GetOwner()));
-		return false;
-	}
-
-	AChunkWorldBase* ChunkWorld = Cast<AChunkWorldBase>(GetOwner());
-	if (ChunkWorld == nullptr)
-	{
-		UE_LOG(LogBlockTypeSchemaComponent, Warning, TEXT("Cannot resolve block swap definition on %s because the owning actor is not a chunk world base."), *GetNameSafe(GetOwner()));
-		return false;
-	}
-
-	const int32 MaterialIndex = ChunkWorld->GetBlockValueByBlockWorldPos(BlockWorldPos, ERessourceType::MaterialIndex);
-	const int32 MeshIndex = ChunkWorld->GetBlockValueByBlockWorldPos(BlockWorldPos, ERessourceType::MeshIndex);
-	const FBlockTypeSchema* BlockType = FindBlockTypeSchemaForIndexes(MaterialIndex, MeshIndex);
-	if (BlockType == nullptr || !BlockType->Definition.IsValid())
-	{
-		return false;
-	}
-
-	const FBlockDefinitionBase* Definition = BlockType->Definition.GetPtr<FBlockDefinitionBase>();
-	if (Definition == nullptr)
-	{
-		return false;
-	}
-
-	OutBlockTypeName = BlockType->BlockTypeName;
-	OutSwapDefinition.SwapActorClass = Definition->SwapActorClass;
-	OutSwapDefinition.bSpawnActor = Definition->bSpawnSwapActor;
-	OutSwapDefinition.SwapInDistance = Definition->SwapInDistance;
-	OutSwapDefinition.SwapOutDistance = Definition->SwapOutDistance;
-
-	const FBlockCustomDataBase* AuthoredCustomData = BlockType->CustomData.GetPtr<FBlockCustomDataBase>();
-	if (AuthoredCustomData != nullptr)
-	{
-		bOutAllowSwap = AuthoredCustomData->bAllowSwap;
-	}
-
-	if (bInitializeCustomDataIfNeeded && ChunkWorld->GetNetMode() != NM_Client)
-	{
-		(void)InitializeBlockCustomData(BlockWorldPos);
-	}
-
-	FGameplayTag RuntimeBlockTypeName;
-	FBlockCustomDataBase RuntimeCustomData;
-	if (GetBlockCustomDataForBlockWorldPos(BlockWorldPos, RuntimeBlockTypeName, RuntimeCustomData))
-	{
-		OutBlockTypeName = RuntimeBlockTypeName;
-		bOutAllowSwap = RuntimeCustomData.bAllowSwap;
-	}
-
-	return true;
+	return ChunkWorld->GetBlockValueByBlockWorldPos(BlockWorldPos, ERessourceType::CustomData, MaterializationSlotIndex) > 0;
 }
 
 void UBlockTypeSchemaComponent::RebuildBlockDefinitionLookupMaps()
@@ -540,6 +596,16 @@ void UBlockTypeSchemaComponent::RebuildBlockDefinitionLookupMaps()
 	}
 
 	bBlockDefinitionLookupReady = true;
+	UE_LOG(
+		LogBlockTypeSchemaComponent,
+		Log,
+		TEXT("Built block definition lookup maps on %s. Registry=%s MaterialMappings=%d MeshMappings=%d SchemaRows=%d WorldGenDef=%s"),
+		*GetNameSafe(GetOwner()),
+		*GetNameSafe(BlockTypeSchemaRegistry),
+		MaterialDefinitionLookup.Num(),
+		MeshDefinitionLookup.Num(),
+		BlockTypeSchemaRegistry->GetBlockTypeDefinitions().Num(),
+		*GetNameSafe(ChunkWorld->WorldGenDef));
 }
 
 void UBlockTypeSchemaComponent::ClearBlockDefinitionLookupMaps()

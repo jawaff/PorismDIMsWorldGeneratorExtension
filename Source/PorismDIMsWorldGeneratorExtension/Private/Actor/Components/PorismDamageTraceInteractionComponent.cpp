@@ -4,10 +4,11 @@
 
 #include "Actor/Components/PorismPredictedBlockStateComponent.h"
 #include "Block/BlockTypeSchemaRegistry.h"
+#include "ChunkWorld/Actors/ChunkWorldExtended.h"
 #include "ChunkWorld/Blueprint/ChunkWorldBlockDamageBlueprintLibrary.h"
-#include "ChunkWorld/Blueprint/ChunkWorldHitBlueprintLibrary.h"
 #include "ChunkWorld/Components/BlockTypeSchemaComponent.h"
-#include "GameFramework/Pawn.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogPorismDamageTraceInteraction, Log, All);
 
 UPorismDamageTraceInteractionComponent::UPorismDamageTraceInteractionComponent()
 {
@@ -25,70 +26,32 @@ bool UPorismDamageTraceInteractionComponent::CanApplyDamageToCurrentBlock() cons
 		&& LastDamageBlockInteractionResult.bIsDestructible;
 }
 
-bool UPorismDamageTraceInteractionComponent::ApplyDamageToCurrentBlock(int32 DamageAmount, int32& OutNewHealth)
+bool UPorismDamageTraceInteractionComponent::ApplyDamageToCurrentBlock(int32 DamageAmount)
 {
-	OutNewHealth = 0;
 	if (DamageAmount <= 0 || !CanApplyDamageToCurrentBlock())
 	{
 		return false;
 	}
 
 	const FChunkWorldDamageBlockInteractionResult DamageInteractionResult = LastDamageBlockInteractionResult;
-	const FVector TraceVector = DamageInteractionResult.Hit.TraceEnd - DamageInteractionResult.Hit.TraceStart;
-	const FVector TraceDirection = TraceVector.IsNearlyZero() ? FVector::ZeroVector : TraceVector.GetSafeNormal();
-	if (TraceDirection.IsNearlyZero())
+	if (GetOwner() == nullptr)
 	{
 		return false;
 	}
 
-	APawn* PawnOwner = Cast<APawn>(GetOwner());
-	if (PawnOwner == nullptr)
+	if (UPorismPredictedBlockStateComponent* CachedPredictedBlockStateComponent = GetPredictedBlockStateComponent())
 	{
-		return false;
+		return CachedPredictedBlockStateComponent->ApplyPredictedDamageAndQueueAuthoritativeFlush(DamageInteractionResult.ResolvedBlockHit, DamageAmount);
 	}
 
-	if (!PawnOwner->HasAuthority())
-	{
-		if (UPorismPredictedBlockStateComponent* PredictedBlockStateComponent = GetPredictedBlockStateComponent())
-		{
-			FChunkWorldBlockDamageResult PredictedResult;
-			const float PredictionTimeSeconds = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-			if (UChunkWorldBlockDamageBlueprintLibrary::TryApplyPredictedBlockDamageForResolvedBlockHit(
-				DamageInteractionResult.ResolvedBlockHit,
-				DamageAmount,
-				PredictionTimeSeconds,
-				PredictedResult))
-			{
-				PredictedBlockStateComponent->StorePredictedDamageResult(DamageInteractionResult.ResolvedBlockHit, PredictedResult);
-				if (PredictedResult.bAppliedDamage)
-				{
-					if (PredictedResult.bDestroyed)
-					{
-						(void)UChunkWorldHitBlueprintLibrary::TryBroadcastDestroyedFeedbackForResolvedBlockHit(DamageInteractionResult.ResolvedBlockHit);
-					}
-					else
-					{
-						(void)UChunkWorldBlockDamageBlueprintLibrary::TryBroadcastHitFeedbackForResolvedBlockHit(DamageInteractionResult.ResolvedBlockHit);
-					}
-				}
-				OutNewHealth = PredictedResult.NewHealth;
-				RefreshDamageInteractionState(true);
-			}
-		}
+	UE_LOG(
+		LogPorismDamageTraceInteraction,
+		Error,
+		TEXT("Damage trace interaction '%s' attempted to apply block damage without a UPorismPredictedBlockStateComponent on owner '%s'."),
+		*GetNameSafe(this),
+		*GetNameSafe(GetOwner()));
 
-		ServerApplyDamageToCurrentBlock(DamageInteractionResult.Hit, FVector_NetQuantizeNormal(TraceDirection), DamageAmount);
-		return true;
-	}
-
-	FChunkWorldBlockDamageResult DamageResult;
-	if (!UChunkWorldBlockDamageBlueprintLibrary::TryApplyBlockDamageForResolvedBlockHit(DamageInteractionResult.ResolvedBlockHit, DamageAmount, DamageResult))
-	{
-		return false;
-	}
-
-	OutNewHealth = DamageResult.NewHealth;
-	RefreshDamageInteractionState(true);
-	return true;
+	return false;
 }
 
 void UPorismDamageTraceInteractionComponent::BeginPlay()
@@ -99,6 +62,7 @@ void UPorismDamageTraceInteractionComponent::BeginPlay()
 	OnBlockInteractionEnded.AddDynamic(this, &UPorismDamageTraceInteractionComponent::HandleBlockInteractionEnded);
 	OnBlockInteractionUpdated.AddDynamic(this, &UPorismDamageTraceInteractionComponent::HandleBlockInteractionUpdated);
 	OnBlockCustomDataMaterialized.AddDynamic(this, &UPorismDamageTraceInteractionComponent::HandleBlockCustomDataMaterialized);
+	BindPredictedBlockStateComponent();
 
 	RefreshDamageInteractionState(false);
 }
@@ -109,6 +73,7 @@ void UPorismDamageTraceInteractionComponent::EndPlay(const EEndPlayReason::Type 
 	OnBlockInteractionEnded.RemoveAll(this);
 	OnBlockInteractionUpdated.RemoveAll(this);
 	OnBlockCustomDataMaterialized.RemoveAll(this);
+	UnbindPredictedBlockStateComponent();
 
 	const bool bHadActiveDamageInteraction = bHasActiveDamageBlockInteraction;
 	const FChunkWorldDamageBlockInteractionResult PreviousDamageInteractionResult = LastDamageBlockInteractionResult;
@@ -218,21 +183,45 @@ void UPorismDamageTraceInteractionComponent::HandleBlockCustomDataMaterialized(c
 	}
 }
 
-void UPorismDamageTraceInteractionComponent::ServerApplyDamageToCurrentBlock_Implementation(const FHitResult& BlockHit, const FVector_NetQuantizeNormal& TraceDirection, int32 DamageAmount)
+void UPorismDamageTraceInteractionComponent::HandleAuthoritativeBlockCustomDataUpdated(const FIntVector& BlockWorldPos)
 {
-	if (DamageAmount <= 0)
+	if (!bHasActiveDamageBlockInteraction || LastDamageBlockInteractionResult.ResolvedBlockHit.BlockWorldPos != BlockWorldPos)
 	{
 		return;
 	}
 
-	FChunkWorldResolvedBlockHit ResolvedHit;
-	if (!UChunkWorldHitBlueprintLibrary::TryResolveBlockHitContextFromHitResult(BlockHit, TraceDirection, ResolvedHit) || !ResolvedHit.bHasBlock)
+	const bool bHadActiveDamageInteraction = bHasActiveDamageBlockInteraction;
+	const FChunkWorldDamageBlockInteractionResult PreviousDamageInteractionResult = LastDamageBlockInteractionResult;
+	const bool bPreviouslyHadCustomData = PreviousDamageInteractionResult.bHasCustomData;
+	RefreshDamageInteractionState(false);
+
+	if (!bHasActiveDamageBlockInteraction)
 	{
+		if (bHadActiveDamageInteraction)
+		{
+			OnDamageBlockInteractionEnded.Broadcast(PreviousDamageInteractionResult);
+		}
 		return;
 	}
 
-	FChunkWorldBlockDamageResult DamageResult;
-	(void)UChunkWorldBlockDamageBlueprintLibrary::TryApplyBlockDamageForResolvedBlockHit(ResolvedHit, DamageAmount, DamageResult);
+	if (!bHadActiveDamageInteraction)
+	{
+		OnDamageBlockInteractionStarted.Broadcast(LastDamageBlockInteractionResult);
+		return;
+	}
+
+	if (PreviousDamageInteractionResult.ResolvedBlockHit.BlockWorldPos != LastDamageBlockInteractionResult.ResolvedBlockHit.BlockWorldPos)
+	{
+		OnDamageBlockInteractionEnded.Broadcast(PreviousDamageInteractionResult);
+		OnDamageBlockInteractionStarted.Broadcast(LastDamageBlockInteractionResult);
+		return;
+	}
+
+	OnDamageBlockInteractionUpdated.Broadcast(LastDamageBlockInteractionResult);
+	if (bHasActiveDamageBlockInteraction && !bPreviouslyHadCustomData && LastDamageBlockInteractionResult.bHasCustomData)
+	{
+		OnDamageBlockCustomDataMaterialized.Broadcast(LastDamageBlockInteractionResult);
+	}
 }
 
 void UPorismDamageTraceInteractionComponent::RefreshDamageInteractionState(bool bBroadcastUpdate)
@@ -256,6 +245,36 @@ void UPorismDamageTraceInteractionComponent::RefreshDamageInteractionState(bool 
 	}
 }
 
+void UPorismDamageTraceInteractionComponent::BindPredictedBlockStateComponent()
+{
+	if (UPorismPredictedBlockStateComponent* CachedPredictedBlockStateComponent = GetPredictedBlockStateComponent())
+	{
+		CachedPredictedBlockStateComponent->OnTrackedBlockStateChanged().AddUObject(this, &UPorismDamageTraceInteractionComponent::HandleTrackedBlockStateChanged);
+	}
+}
+
+void UPorismDamageTraceInteractionComponent::UnbindPredictedBlockStateComponent()
+{
+	if (UPorismPredictedBlockStateComponent* CachedPredictedBlockStateComponent = PredictedBlockStateComponent.Get())
+	{
+		CachedPredictedBlockStateComponent->OnTrackedBlockStateChanged().RemoveAll(this);
+	}
+
+	PredictedBlockStateComponent.Reset();
+}
+
+void UPorismDamageTraceInteractionComponent::HandleTrackedBlockStateChanged(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos)
+{
+	if (!bHasActiveDamageBlockInteraction
+		|| LastDamageBlockInteractionResult.ResolvedBlockHit.ChunkWorld != ChunkWorld
+		|| LastDamageBlockInteractionResult.ResolvedBlockHit.BlockWorldPos != BlockWorldPos)
+	{
+		return;
+	}
+
+	HandleAuthoritativeBlockCustomDataUpdated(BlockWorldPos);
+}
+
 bool UPorismDamageTraceInteractionComponent::TryBuildDamageBlockInteractionResult(const FChunkWorldBlockInteractionResult& BlockResult, FChunkWorldDamageBlockInteractionResult& OutResult) const
 {
 	OutResult = FChunkWorldDamageBlockInteractionResult();
@@ -270,9 +289,9 @@ bool UPorismDamageTraceInteractionComponent::TryBuildDamageBlockInteractionResul
 	bool bIsInvincible = false;
 	bool bUsingPredictedHealth = false;
 	FGameplayTag CurrentHealthBlockTypeName;
-	if (UPorismPredictedBlockStateComponent* PredictedBlockStateComponent = GetPredictedBlockStateComponent())
+	if (UPorismPredictedBlockStateComponent* CachedPredictedBlockStateComponent = GetPredictedBlockStateComponent())
 	{
-		if (!PredictedBlockStateComponent->TryGetCurrentHealthState(BlockResult.ResolvedBlockHit, CurrentHealth, bIsInvincible, bUsingPredictedHealth, CurrentHealthBlockTypeName))
+		if (!CachedPredictedBlockStateComponent->TryGetCurrentHealthState(BlockResult.ResolvedBlockHit, CurrentHealth, bIsInvincible, bUsingPredictedHealth, CurrentHealthBlockTypeName))
 		{
 			return false;
 		}
@@ -310,5 +329,12 @@ bool UPorismDamageTraceInteractionComponent::TryBuildDamageBlockInteractionResul
 
 UPorismPredictedBlockStateComponent* UPorismDamageTraceInteractionComponent::GetPredictedBlockStateComponent() const
 {
-	return GetOwner() ? GetOwner()->FindComponentByClass<UPorismPredictedBlockStateComponent>() : nullptr;
+	if (UPorismPredictedBlockStateComponent* CachedPredictedBlockStateComponent = PredictedBlockStateComponent.Get())
+	{
+		return CachedPredictedBlockStateComponent;
+	}
+
+	UPorismDamageTraceInteractionComponent* MutableThis = const_cast<UPorismDamageTraceInteractionComponent*>(this);
+	MutableThis->PredictedBlockStateComponent = GetOwner() ? GetOwner()->FindComponentByClass<UPorismPredictedBlockStateComponent>() : nullptr;
+	return MutableThis->PredictedBlockStateComponent.Get();
 }

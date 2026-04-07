@@ -39,7 +39,7 @@ public:
 
 	/** Applies damage to the current active block target when it supports the shared health schema family. */
 	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld|Damage")
-	bool ApplyDamageToCurrentBlock(int32 DamageAmount, int32& OutNewHealth);
+	bool ApplyDamageToCurrentBlock(int32 DamageAmount);
 
 	UPROPERTY(BlueprintAssignable, Category = "Block|ChunkWorld|Damage")
 	FOnChunkWorldDamageBlockInteractionChanged OnDamageBlockInteractionStarted;
@@ -63,6 +63,7 @@ protected:
 private:
 	FChunkWorldDamageBlockInteractionResult LastDamageBlockInteractionResult;
 	bool bHasActiveDamageBlockInteraction = false;
+	TWeakObjectPtr<UPorismPredictedBlockStateComponent> PredictedBlockStateComponent;
 
 	UFUNCTION()
 	void HandleBlockInteractionStarted(const FChunkWorldBlockInteractionResult& Result);
@@ -76,10 +77,13 @@ private:
 	UFUNCTION()
 	void HandleBlockCustomDataMaterialized(const FChunkWorldBlockInteractionResult& Result);
 
-	UFUNCTION(Server, Reliable)
-	void ServerApplyDamageToCurrentBlock(const FHitResult& BlockHit, const FVector_NetQuantizeNormal& TraceDirection, int32 DamageAmount);
+	UFUNCTION()
+	void HandleAuthoritativeBlockCustomDataUpdated(const FIntVector& BlockWorldPos);
 
+	void HandleTrackedBlockStateChanged(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos);
 	void RefreshDamageInteractionState(bool bBroadcastUpdate);
+	void BindPredictedBlockStateComponent();
+	void UnbindPredictedBlockStateComponent();
 	bool TryBuildDamageBlockInteractionResult(const FChunkWorldBlockInteractionResult& BlockResult, FChunkWorldDamageBlockInteractionResult& OutResult) const;
 	UPorismPredictedBlockStateComponent* GetPredictedBlockStateComponent() const;
 };

@@ -161,7 +161,7 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Debug", meta = (ClampMin = "1.0", UIMin = "1.0", ToolTip = "Multiplier applied to the debug cube size so it draws slightly larger than the represented block mesh."))
 	float DebugBlockCubeScale = 1.05f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Porism|Interaction", meta = (ToolTip = "Optional interfaces that mark actor hits as interactable for the generic actor branch."))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Porism|Interaction", meta = (ToolTip = "Optional interfaces that mark actor hits as interactable for the generic actor branch. The shared Porism interactable interface is included by default."))
 	TArray<TSubclassOf<UInterface>> InteractableInterfaces;
 
 private:

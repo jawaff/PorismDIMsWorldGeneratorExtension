@@ -96,6 +96,45 @@ bool UBlockTypeSchemaRegistry::ValidateSchema(FString* OutErrorMessage) const
 			}
 			return false;
 		}
+
+		if (const FBlockDefinitionBase* TypedDefinition = Definition.Definition.GetPtr<FBlockDefinitionBase>())
+		{
+			const bool bHasMaterialAssociation = !TypedDefinition->MaterialAsset.IsNull();
+			const bool bHasMeshAssociation = !TypedDefinition->MeshAsset.IsNull();
+			if (bHasMaterialAssociation == bHasMeshAssociation)
+			{
+				if (OutErrorMessage != nullptr)
+				{
+					*OutErrorMessage = FString::Printf(
+						TEXT("Definition payload for block type '%s' must assign exactly one association asset: either MaterialAsset or MeshAsset."),
+						*Definition.BlockTypeName.ToString());
+				}
+				return false;
+			}
+
+			const bool bHasSwapActor = !TypedDefinition->SwapActorClass.IsNull();
+			if (bHasSwapActor && !bHasMeshAssociation)
+			{
+				if (OutErrorMessage != nullptr)
+				{
+					*OutErrorMessage = FString::Printf(
+						TEXT("Definition payload for block type '%s' can only assign SwapActorClass when the block is mesh-backed."),
+						*Definition.BlockTypeName.ToString());
+				}
+				return false;
+			}
+
+			if (bHasSwapActor && TypedDefinition->SwapOutDistance < TypedDefinition->SwapInDistance)
+			{
+				if (OutErrorMessage != nullptr)
+				{
+					*OutErrorMessage = FString::Printf(
+						TEXT("Definition payload for block type '%s' must use SwapOutDistance greater than or equal to SwapInDistance."),
+						*Definition.BlockTypeName.ToString());
+				}
+				return false;
+			}
+		}
 	}
 
 	return true;

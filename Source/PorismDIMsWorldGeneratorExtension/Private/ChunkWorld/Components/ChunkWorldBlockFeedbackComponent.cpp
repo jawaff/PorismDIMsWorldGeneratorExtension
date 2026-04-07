@@ -24,6 +24,7 @@ bool UChunkWorldBlockFeedbackComponent::BroadcastFeedbackAtLocation(const FVecto
 
 	if (GetOwner() != nullptr && GetOwner()->HasAuthority())
 	{
+		PlayFeedbackAtLocation(WorldLocation, Sound, NiagaraSystem);
 		MulticastBroadcastFeedback(WorldLocation, Sound, NiagaraSystem);
 		return true;
 	}
@@ -34,6 +35,11 @@ bool UChunkWorldBlockFeedbackComponent::BroadcastFeedbackAtLocation(const FVecto
 
 void UChunkWorldBlockFeedbackComponent::MulticastBroadcastFeedback_Implementation(const FVector_NetQuantize& WorldLocation, USoundBase* Sound, UNiagaraSystem* NiagaraSystem)
 {
+	if (GetOwner() != nullptr && GetOwner()->HasAuthority())
+	{
+		return;
+	}
+
 	PlayFeedbackAtLocation(WorldLocation, Sound, NiagaraSystem);
 }
 
@@ -73,9 +79,59 @@ bool UChunkWorldBlockFeedbackComponent::ShouldPlayFeedbackAtLocation(const FVect
 	return FVector::DistSquared(ListenerLocation, WorldLocation) <= FMath::Square(FeedbackCullDistance);
 }
 
+bool UChunkWorldBlockFeedbackComponent::ShouldSuppressDuplicateFeedback(const FVector& WorldLocation, USoundBase* Sound, UNiagaraSystem* NiagaraSystem) const
+{
+	const UWorld* World = GetWorld();
+	if (World == nullptr || FeedbackDeduplicationWindowSeconds <= 0.0f)
+	{
+		return false;
+	}
+
+	const float CurrentTimeSeconds = World->GetTimeSeconds();
+	const float MaxDistanceSquared = FMath::Square(FeedbackDeduplicationDistance);
+	for (int32 Index = RecentFeedbackPlaybacks.Num() - 1; Index >= 0; --Index)
+	{
+		const FRecentChunkWorldBlockFeedback& RecentPlayback = RecentFeedbackPlaybacks[Index];
+		if ((CurrentTimeSeconds - RecentPlayback.TimeSeconds) > FeedbackDeduplicationWindowSeconds)
+		{
+			RecentFeedbackPlaybacks.RemoveAtSwap(Index);
+			continue;
+		}
+
+		if (RecentPlayback.Sound == Sound
+			&& RecentPlayback.NiagaraSystem == NiagaraSystem
+			&& FVector::DistSquared(RecentPlayback.WorldLocation, WorldLocation) <= MaxDistanceSquared)
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+void UChunkWorldBlockFeedbackComponent::RememberFeedbackPlayback(const FVector& WorldLocation, USoundBase* Sound, UNiagaraSystem* NiagaraSystem) const
+{
+	const UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	FRecentChunkWorldBlockFeedback& Playback = RecentFeedbackPlaybacks.AddDefaulted_GetRef();
+	Playback.WorldLocation = WorldLocation;
+	Playback.Sound = Sound;
+	Playback.NiagaraSystem = NiagaraSystem;
+	Playback.TimeSeconds = World->GetTimeSeconds();
+}
+
 void UChunkWorldBlockFeedbackComponent::PlayFeedbackAtLocation(const FVector& WorldLocation, USoundBase* Sound, UNiagaraSystem* NiagaraSystem) const
 {
 	if (!ShouldPlayFeedbackAtLocation(WorldLocation))
+	{
+		return;
+	}
+
+	if (ShouldSuppressDuplicateFeedback(WorldLocation, Sound, NiagaraSystem))
 	{
 		return;
 	}
@@ -89,4 +145,6 @@ void UChunkWorldBlockFeedbackComponent::PlayFeedbackAtLocation(const FVector& Wo
 	{
 		UNiagaraFunctionLibrary::SpawnSystemAtLocation(this, NiagaraSystem, WorldLocation);
 	}
+
+	RememberFeedbackPlayback(WorldLocation, Sound, NiagaraSystem);
 }
