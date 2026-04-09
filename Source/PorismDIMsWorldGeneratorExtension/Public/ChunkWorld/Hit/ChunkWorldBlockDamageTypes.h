@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
+#include "ChunkWorld/Hit/ChunkWorldBlockHitTypes.h"
 #include "ChunkWorldBlockDamageTypes.generated.h"
 
 class AChunkWorld;
@@ -75,4 +76,62 @@ struct FChunkWorldBlockDamageResult
 	/** Timestamp in world seconds for local-only predicted writes. */
 	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")
 	float PredictionTimeSeconds = 0.0f;
+};
+
+/**
+ * Shared block-damage request used after higher-level gameplay has already computed final damage.
+ */
+USTRUCT(BlueprintType)
+struct FChunkWorldBlockDamageRequest
+{
+	GENERATED_BODY()
+
+	/** Resolved block identity for the damage request. */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Block|ChunkWorld|Damage")
+	FChunkWorldResolvedBlockHit ResolvedHit;
+
+	/** Final integer damage amount to apply. */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Block|ChunkWorld|Damage", meta = (ClampMin = "0", UIMin = "0"))
+	int32 DamageAmount = 0;
+
+	/** Optional caller-owned context tag that can be used for audit or future routing. */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Block|ChunkWorld|Damage")
+	FName RequestContextTag = NAME_None;
+
+	/** If true, the local initiating process may play immediate non-authoritative feedback for this request. */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Block|ChunkWorld|Damage")
+	bool bAllowImmediateLocalFeedback = false;
+};
+
+/**
+ * Shared block-damage request result describing which prediction and authority paths ran.
+ */
+USTRUCT(BlueprintType)
+struct FChunkWorldBlockDamageRequestResult
+{
+	GENERATED_BODY()
+
+	/** True when the request was valid enough to enter the shared processing pipeline. */
+	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")
+	bool bAccepted = false;
+
+	/** True when local predicted state changed and was written to the prediction cache. */
+	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")
+	bool bPredictionWritten = false;
+
+	/** True when authoritative damage was applied immediately on this process. */
+	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")
+	bool bAuthoritativeDamageApplied = false;
+
+	/** True when a client-side aggregate flush was queued for later server submission. */
+	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")
+	bool bQueuedAuthoritativeFlush = false;
+
+	/** True when immediate local feedback played for the initiating process. */
+	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")
+	bool bPlayedImmediateLocalFeedback = false;
+
+	/** Final shared damage result produced by either prediction or authoritative mutation. */
+	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")
+	FChunkWorldBlockDamageResult DamageResult;
 };

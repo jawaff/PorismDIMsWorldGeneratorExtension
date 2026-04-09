@@ -7,7 +7,7 @@
 #include "ChunkWorldProximityComponent.generated.h"
 
 /**
- * Generic chunk-world proximity source used by shared proximity-driven systems such as block swap scanning.
+ * Actor-owned chunk-world proximity source used by shared proximity-driven systems such as block swap scanning.
  */
 UCLASS(ClassGroup = (Block), BlueprintType, meta = (BlueprintSpawnableComponent, DisplayName = "ChunkWorld Proximity Component"))
 class PORISMDIMSWORLDGENERATOREXTENSION_API UChunkWorldProximityComponent : public UActorComponent

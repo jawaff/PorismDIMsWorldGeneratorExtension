@@ -39,16 +39,43 @@ public:
 	static bool TryGetCurrentBlockHealthStateForResolvedBlockHit(const FChunkWorldResolvedBlockHit& ResolvedHit, int32& OutHealth, bool& bOutInvincible, FGameplayTag& OutBlockTypeName);
 
 	/**
-	 * Resolves one block world position and returns current health, authored max health, invincibility, and whether runtime custom data is materialized.
+	 * Reads the block's current health, falling back to authored max health when runtime custom data is not initialized yet.
+	 * `bOutHasRuntimeHealth` reports whether the returned value came from initialized runtime custom data.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld|Damage")
+	static bool TryGetRuntimeBlockHealthStateForResolvedBlockHit(
+		const FChunkWorldResolvedBlockHit& ResolvedHit,
+		int32& OutHealth,
+		int32& OutMaxHealth,
+		bool& bOutInvincible,
+		bool& bOutHasRuntimeHealth,
+		FGameplayTag& OutBlockTypeName);
+
+	/**
+	 * Resolves one block world position and returns current health, authored max health, invincibility, and whether runtime custom data is initialized.
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld|Damage")
 	static bool TryGetBlockHealthStateForBlockWorldPos(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos, int32& OutHealth, int32& OutMaxHealth, bool& bOutInvincible, bool& bOutHasStoredHealth, FGameplayTag& OutBlockTypeName);
 
+	/**
+	 * Resolves one block world position and reads current health, falling back to authored max health when runtime custom data is not initialized yet.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld|Damage")
+	static bool TryGetRuntimeBlockHealthStateForBlockWorldPos(
+		AChunkWorld* ChunkWorld,
+		const FIntVector& BlockWorldPos,
+		int32& OutHealth,
+		int32& OutMaxHealth,
+		bool& bOutInvincible,
+		bool& bOutHasRuntimeHealth,
+		FGameplayTag& OutBlockTypeName);
+
 private:
 	static bool TryResolveDamageSchemaForResolvedBlockHit(
 		const FChunkWorldResolvedBlockHit& ResolvedHit,
-		bool bAllowMaterialization,
+		bool bAllowInitialization,
 		FGameplayTag& OutBlockTypeName,
 		FBlockDamageDefinition& OutDefinition,
+		FInstancedStruct& OutCustomDataPayload,
 		FBlockDamageCustomData& OutCustomData);
 };

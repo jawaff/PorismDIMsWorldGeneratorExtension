@@ -1,6 +1,6 @@
 // Copyright 2026 Spotted Loaf Studio
 
-#include "ChunkWorld/Blueprint/ChunkWorldHitBlueprintLibrary.h"
+#include "ChunkWorld/Blueprint/ChunkWorldBlockHitBlueprintLibrary.h"
 
 #include "Block/BlockTypeSchemaBlueprintLibrary.h"
 #include "Components/InstancedStaticMeshComponent.h"
@@ -11,7 +11,7 @@
 #include "ChunkWorld/Components/ChunkWorldBlockFeedbackComponent.h"
 #include "ChunkWorld/Components/BlockTypeSchemaComponent.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogChunkWorldHitBlueprintLibrary, Log, All);
+DEFINE_LOG_CATEGORY_STATIC(LogChunkWorldBlockHitBlueprintLibrary, Log, All);
 
 namespace
 {
@@ -85,7 +85,7 @@ namespace
 	}
 }
 
-bool UChunkWorldHitBlueprintLibrary::GetChunkWorldFromHitResult(const FHitResult& Hit, AChunkWorld*& OutChunkWorld)
+bool UChunkWorldBlockHitBlueprintLibrary::GetChunkWorldFromHitResult(const FHitResult& Hit, AChunkWorld*& OutChunkWorld)
 {
 	OutChunkWorld = nullptr;
 
@@ -110,7 +110,7 @@ bool UChunkWorldHitBlueprintLibrary::GetChunkWorldFromHitResult(const FHitResult
 	return false;
 }
 
-bool UChunkWorldHitBlueprintLibrary::GetBlockTypeSchemaComponentFromChunkWorld(AChunkWorld* ChunkWorld, UBlockTypeSchemaComponent*& OutSchemaComponent)
+bool UChunkWorldBlockHitBlueprintLibrary::GetBlockTypeSchemaComponentFromChunkWorld(AChunkWorld* ChunkWorld, UBlockTypeSchemaComponent*& OutSchemaComponent)
 {
 	OutSchemaComponent = nullptr;
 	if (!IsValid(ChunkWorld))
@@ -122,7 +122,7 @@ bool UChunkWorldHitBlueprintLibrary::GetBlockTypeSchemaComponentFromChunkWorld(A
 	return IsValid(OutSchemaComponent);
 }
 
-bool UChunkWorldHitBlueprintLibrary::GetBlockFeedbackComponentFromChunkWorld(AChunkWorld* ChunkWorld, UChunkWorldBlockFeedbackComponent*& OutFeedbackComponent)
+bool UChunkWorldBlockHitBlueprintLibrary::GetBlockFeedbackComponentFromChunkWorld(AChunkWorld* ChunkWorld, UChunkWorldBlockFeedbackComponent*& OutFeedbackComponent)
 {
 	OutFeedbackComponent = nullptr;
 	if (!IsValid(ChunkWorld))
@@ -134,7 +134,7 @@ bool UChunkWorldHitBlueprintLibrary::GetBlockFeedbackComponentFromChunkWorld(ACh
 	return IsValid(OutFeedbackComponent);
 }
 
-bool UChunkWorldHitBlueprintLibrary::TryResolveBlockHitContextFromHitResult(const FHitResult& Hit, const FVector& TraceDirection, FChunkWorldResolvedBlockHit& OutResolvedHit)
+bool UChunkWorldBlockHitBlueprintLibrary::TryResolveBlockHitContextFromHitResult(const FHitResult& Hit, const FVector& TraceDirection, FChunkWorldResolvedBlockHit& OutResolvedHit)
 {
 	OutResolvedHit = FChunkWorldResolvedBlockHit();
 
@@ -265,7 +265,7 @@ bool UChunkWorldHitBlueprintLibrary::TryResolveBlockHitContextFromHitResult(cons
 	return false;
 }
 
-bool UChunkWorldHitBlueprintLibrary::TryResolveBlockHitContextFromBlockWorldPos(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos, FChunkWorldResolvedBlockHit& OutResolvedHit)
+bool UChunkWorldBlockHitBlueprintLibrary::TryResolveBlockHitContextFromBlockWorldPos(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos, FChunkWorldResolvedBlockHit& OutResolvedHit)
 {
 	OutResolvedHit = FChunkWorldResolvedBlockHit();
 	if (!IsValid(ChunkWorld)
@@ -296,7 +296,7 @@ bool UChunkWorldHitBlueprintLibrary::TryResolveBlockHitContextFromBlockWorldPos(
 	return true;
 }
 
-bool UChunkWorldHitBlueprintLibrary::TryGetBlockCustomDataForResolvedBlockHit(const FChunkWorldResolvedBlockHit& ResolvedHit, FGameplayTag& OutBlockTypeName, FInstancedStruct& OutCustomData)
+bool UChunkWorldBlockHitBlueprintLibrary::TryGetBlockCustomDataForResolvedBlockHit(const FChunkWorldResolvedBlockHit& ResolvedHit, FGameplayTag& OutBlockTypeName, FInstancedStruct& OutCustomData)
 {
 	OutBlockTypeName = FGameplayTag();
 	OutCustomData.Reset();
@@ -309,7 +309,7 @@ bool UChunkWorldHitBlueprintLibrary::TryGetBlockCustomDataForResolvedBlockHit(co
 	return ResolvedHit.BlockTypeSchemaComponent->GetBlockCustomDataForBlockWorldPos(ResolvedHit.BlockWorldPos, OutBlockTypeName, OutCustomData);
 }
 
-bool UChunkWorldHitBlueprintLibrary::TryGetBlockDefinitionForResolvedBlockHit(const FChunkWorldResolvedBlockHit& ResolvedHit, FGameplayTag& OutBlockTypeName, FInstancedStruct& OutDefinition)
+bool UChunkWorldBlockHitBlueprintLibrary::TryGetBlockDefinitionForResolvedBlockHit(const FChunkWorldResolvedBlockHit& ResolvedHit, FGameplayTag& OutBlockTypeName, FInstancedStruct& OutDefinition)
 {
 	OutBlockTypeName = FGameplayTag();
 	OutDefinition.Reset();
@@ -344,7 +344,7 @@ bool UChunkWorldHitBlueprintLibrary::TryGetBlockDefinitionForResolvedBlockHit(co
 	return true;
 }
 
-bool UChunkWorldHitBlueprintLibrary::TryGetBlockCustomDataForBlockTypeName(UBlockTypeSchemaComponent* SchemaComponent, FGameplayTag BlockTypeName, FInstancedStruct& OutCustomData)
+bool UChunkWorldBlockHitBlueprintLibrary::TryGetBlockCustomDataForBlockTypeName(UBlockTypeSchemaComponent* SchemaComponent, FGameplayTag BlockTypeName, FInstancedStruct& OutCustomData)
 {
 	OutCustomData.Reset();
 	if (!IsValid(SchemaComponent) || !BlockTypeName.IsValid())
@@ -361,7 +361,7 @@ bool UChunkWorldHitBlueprintLibrary::TryGetBlockCustomDataForBlockTypeName(UBloc
 	return Registry->TryGetBlockCustomData(BlockTypeName, OutCustomData);
 }
 
-bool UChunkWorldHitBlueprintLibrary::TryGetBlockDefinitionForBlockTypeName(UBlockTypeSchemaComponent* SchemaComponent, FGameplayTag BlockTypeName, FInstancedStruct& OutDefinition)
+bool UChunkWorldBlockHitBlueprintLibrary::TryGetBlockDefinitionForBlockTypeName(UBlockTypeSchemaComponent* SchemaComponent, FGameplayTag BlockTypeName, FInstancedStruct& OutDefinition)
 {
 	OutDefinition.Reset();
 	if (!IsValid(SchemaComponent) || !BlockTypeName.IsValid())
@@ -378,7 +378,7 @@ bool UChunkWorldHitBlueprintLibrary::TryGetBlockDefinitionForBlockTypeName(UBloc
 	return Registry->TryGetBlockDefinition(BlockTypeName, OutDefinition);
 }
 
-bool UChunkWorldHitBlueprintLibrary::TryBroadcastDestroyedFeedbackForResolvedBlockHit(const FChunkWorldResolvedBlockHit& ResolvedHit)
+bool UChunkWorldBlockHitBlueprintLibrary::TryBroadcastDestroyedFeedbackForResolvedBlockHit(const FChunkWorldResolvedBlockHit& ResolvedHit)
 {
 	if (!ResolvedHit.bHasBlock || !IsValid(ResolvedHit.ChunkWorld))
 	{
@@ -391,21 +391,5 @@ bool UChunkWorldHitBlueprintLibrary::TryBroadcastDestroyedFeedbackForResolvedBlo
 		return false;
 	}
 
-	FGameplayTag BlockTypeName;
-	FInstancedStruct DefinitionStruct;
-	if (!TryGetBlockDefinitionForResolvedBlockHit(ResolvedHit, BlockTypeName, DefinitionStruct))
-	{
-		return false;
-	}
-
-	FBlockDefinitionBase BlockDefinition;
-	if (!UBlockTypeSchemaBlueprintLibrary::TryGetBlockDefinitionBase(DefinitionStruct, BlockDefinition))
-	{
-		return false;
-	}
-
-	const FVector FeedbackLocation = ResolvedHit.RepresentativeWorldPos.IsNearlyZero()
-		? ResolvedHit.ChunkWorld->BlockWorldPosToUEWorldPos(ResolvedHit.BlockWorldPos)
-		: ResolvedHit.RepresentativeWorldPos;
-	return FeedbackComponent->BroadcastFeedbackAtLocation(FeedbackLocation, BlockDefinition.DestroyedSound, BlockDefinition.DestroyedEffect);
+	return FeedbackComponent->BroadcastAuthoritativeDestroyFeedback(ResolvedHit);
 }

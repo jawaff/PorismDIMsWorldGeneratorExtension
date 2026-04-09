@@ -5,7 +5,7 @@
 #include "Actor/Interaction/PorismInteractableInterface.h"
 #include "Actor/Interaction/PorismInteractionTraceViewProviderInterface.h"
 #include "ChunkWorld/ChunkWorld.h"
-#include "ChunkWorld/Blueprint/ChunkWorldHitBlueprintLibrary.h"
+#include "ChunkWorld/Blueprint/ChunkWorldBlockHitBlueprintLibrary.h"
 #include "ChunkWorld/Components/BlockTypeSchemaComponent.h"
 #include "DrawDebugHelpers.h"
 #include "GameFramework/Controller.h"
@@ -48,7 +48,7 @@ void UPorismTraceInteractionComponent::EndPlay(const EEndPlayReason::Type EndPla
 
 	bHasLastBlockDebugDraw = false;
 	LastBlockDebugDrawTimeSeconds = 0.0;
-	ResetTrackedBlockCustomDataMaterialization();
+	ResetTrackedBlockCustomDataInitialization();
 
 	if (LastTraceResult.TargetType != EPorismTraceInteractionTargetType::None)
 	{
@@ -350,11 +350,11 @@ void UPorismTraceInteractionComponent::PerformTrace()
 
 	if (bHasActiveBlockInteraction)
 	{
-		EvaluateBlockCustomDataMaterialization(LastBlockInteractionResult);
+		EvaluateBlockCustomDataInitialization(LastBlockInteractionResult);
 	}
 	else
 	{
-		ResetTrackedBlockCustomDataMaterialization();
+		ResetTrackedBlockCustomDataInitialization();
 	}
 }
 
@@ -377,10 +377,10 @@ bool UPorismTraceInteractionComponent::TryBuildActorResult(const FHitResult& Hit
 bool UPorismTraceInteractionComponent::TryBuildBlockResult(const FVector& TraceDirection, const FHitResult& Hit, FChunkWorldBlockInteractionResult& InOutResult) const
 {
 	FChunkWorldResolvedBlockHit ResolvedHit;
-	if (!UChunkWorldHitBlueprintLibrary::TryResolveBlockHitContextFromHitResult(Hit, TraceDirection, ResolvedHit) || !ResolvedHit.bHasBlock)
+	if (!UChunkWorldBlockHitBlueprintLibrary::TryResolveBlockHitContextFromHitResult(Hit, TraceDirection, ResolvedHit) || !ResolvedHit.bHasBlock)
 	{
 		AChunkWorld* ApproximateChunkWorld = nullptr;
-		if (bDebugDrawBlockLookup && UChunkWorldHitBlueprintLibrary::GetChunkWorldFromHitResult(Hit, ApproximateChunkWorld) && IsValid(ApproximateChunkWorld))
+		if (bDebugDrawBlockLookup && UChunkWorldBlockHitBlueprintLibrary::GetChunkWorldFromHitResult(Hit, ApproximateChunkWorld) && IsValid(ApproximateChunkWorld))
 		{
 			const FIntVector ApproximateBlockWorldPos = ApproximateChunkWorld->UEWorldPosToBlockWorldPos(Hit.ImpactPoint);
 			DrawDebugBlockLookupCube(ApproximateChunkWorld, ApproximateBlockWorldPos, FColor::Red);
@@ -395,7 +395,7 @@ bool UPorismTraceInteractionComponent::TryBuildBlockResult(const FVector& TraceD
 
 	FGameplayTag BlockTypeName;
 	FInstancedStruct Definition;
-	if (!UChunkWorldHitBlueprintLibrary::TryGetBlockDefinitionForResolvedBlockHit(ResolvedHit, BlockTypeName, Definition) || !BlockTypeName.IsValid())
+	if (!UChunkWorldBlockHitBlueprintLibrary::TryGetBlockDefinitionForResolvedBlockHit(ResolvedHit, BlockTypeName, Definition) || !BlockTypeName.IsValid())
 	{
 		DrawDebugBlockLookupCube(ResolvedHit.ChunkWorld, ResolvedHit.BlockWorldPos, FColor::Red);
 		LogBlockLookupDiagnostic(TEXT("ResolveBlockTypeFailed"), &Hit, &ResolvedHit.BlockWorldPos);
@@ -544,46 +544,46 @@ void UPorismTraceInteractionComponent::ExecuteActorInteraction(AActor* Actor, co
 	}
 }
 
-void UPorismTraceInteractionComponent::EvaluateBlockCustomDataMaterialization(const FChunkWorldBlockInteractionResult& BlockResult)
+void UPorismTraceInteractionComponent::EvaluateBlockCustomDataInitialization(const FChunkWorldBlockInteractionResult& BlockResult)
 {
 	if (!BlockResult.bHasBlock || !BlockResult.ResolvedBlockHit.bHasBlock || !IsValid(BlockResult.ResolvedBlockHit.BlockTypeSchemaComponent))
 	{
-		ResetTrackedBlockCustomDataMaterialization();
+		ResetTrackedBlockCustomDataInitialization();
 		return;
 	}
 
 	const FIntVector& BlockWorldPos = BlockResult.ResolvedBlockHit.BlockWorldPos;
-	const bool bIsNewTrackedBlock = !bHasTrackedMaterializationBlock || LastMaterializationTrackedBlockWorldPos != BlockWorldPos;
-	const bool bIsMaterialized = BlockResult.ResolvedBlockHit.BlockTypeSchemaComponent->IsBlockCustomDataMaterialized(BlockWorldPos);
+	const bool bIsNewTrackedBlock = !bHasTrackedInitializedBlock || LastInitializedTrackedBlockWorldPos != BlockWorldPos;
+	const bool bIsInitialized = BlockResult.ResolvedBlockHit.BlockTypeSchemaComponent->IsBlockCustomDataInitialized(BlockWorldPos);
 
-	LastMaterializationTrackedBlockWorldPos = BlockWorldPos;
-	bHasTrackedMaterializationBlock = true;
+	LastInitializedTrackedBlockWorldPos = BlockWorldPos;
+	bHasTrackedInitializedBlock = true;
 
 	if (bIsNewTrackedBlock)
 	{
-		bWasTrackedBlockCustomDataMaterialized = bIsMaterialized;
-		if (bIsMaterialized)
+		bWasTrackedBlockCustomDataInitialized = bIsInitialized;
+		if (bIsInitialized)
 		{
-			OnBlockCustomDataMaterialized.Broadcast(BlockResult);
+			OnBlockCustomDataInitialized.Broadcast(BlockResult);
 		}
 		return;
 	}
 
-	if (!bWasTrackedBlockCustomDataMaterialized && bIsMaterialized)
+	if (!bWasTrackedBlockCustomDataInitialized && bIsInitialized)
 	{
-		bWasTrackedBlockCustomDataMaterialized = true;
-		OnBlockCustomDataMaterialized.Broadcast(BlockResult);
+		bWasTrackedBlockCustomDataInitialized = true;
+		OnBlockCustomDataInitialized.Broadcast(BlockResult);
 		return;
 	}
 
-	bWasTrackedBlockCustomDataMaterialized = bIsMaterialized;
+	bWasTrackedBlockCustomDataInitialized = bIsInitialized;
 }
 
-void UPorismTraceInteractionComponent::ResetTrackedBlockCustomDataMaterialization()
+void UPorismTraceInteractionComponent::ResetTrackedBlockCustomDataInitialization()
 {
-	bHasTrackedMaterializationBlock = false;
-	bWasTrackedBlockCustomDataMaterialized = false;
-	LastMaterializationTrackedBlockWorldPos = FIntVector::ZeroValue;
+	bHasTrackedInitializedBlock = false;
+	bWasTrackedBlockCustomDataInitialized = false;
+	LastInitializedTrackedBlockWorldPos = FIntVector::ZeroValue;
 }
 
 bool UPorismTraceInteractionComponent::IsResultCloser(const FVector& TraceStart, const FPorismTraceInteractionResult& CandidateResult, const FPorismTraceInteractionResult& CurrentBestResult) const

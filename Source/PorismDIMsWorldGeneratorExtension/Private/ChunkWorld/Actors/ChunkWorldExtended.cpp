@@ -3,7 +3,7 @@
 #include "ChunkWorld/Actors/ChunkWorldExtended.h"
 
 #include "Block/BlockTypeSchemaRegistry.h"
-#include "ChunkWorld/Blueprint/ChunkWorldHitBlueprintLibrary.h"
+#include "ChunkWorld/Blueprint/ChunkWorldBlockHitBlueprintLibrary.h"
 #include "ChunkWorld/Components/BlockTypeSchemaComponent.h"
 #include "ChunkWorld/Blueprint/ChunkWorldBlockDamageBlueprintLibrary.h"
 #include "ChunkWorld/Components/ChunkWorldBlockFeedbackComponent.h"
@@ -17,6 +17,11 @@ DEFINE_LOG_CATEGORY_STATIC(LogChunkWorldExtended, Log, All);
 
 namespace
 {
+	struct FObservedBlockCustomDataChange
+	{
+		bool bTouchedHealth = false;
+	};
+
 	void EnsureCustomFeatureDefaultCapacity(TArray<int32>& CustomFeatureDefaultData, int32 RequiredChannelCount)
 	{
 		if (RequiredChannelCount > 0 && CustomFeatureDefaultData.Num() < RequiredChannelCount)
@@ -24,36 +29,6 @@ namespace
 			CustomFeatureDefaultData.SetNumZeroed(RequiredChannelCount);
 		}
 	}
-
-	void LogCustomDataStartupState(
-		const AChunkWorldExtended* ChunkWorld,
-		const TCHAR* StageLabel,
-		int32 RequiredCustomDataChannels)
-	{
-		const int32 WorldGenDefChannels = ChunkWorld != nullptr && ChunkWorld->WorldGenDef != nullptr
-			? ChunkWorld->WorldGenDef->CustomFeatureDefaultData.Num()
-			: INDEX_NONE;
-		const int32 RuntimeChannels = ChunkWorld != nullptr && ChunkWorld->RuntimeConfig != nullptr
-			? ChunkWorld->RuntimeConfig->CustomFeatureDefaultData.Num()
-			: INDEX_NONE;
-		const int32 CustomSaveCount = ChunkWorld != nullptr
-			? static_cast<int32>(ChunkWorld->CustomSave.size())
-			: INDEX_NONE;
-
-		UE_LOG(
-			LogChunkWorldExtended,
-			Warning,
-			TEXT("Temporary custom-data startup diagnostic [%s] ChunkWorld=%s RequiredChannels=%d WorldGenDefChannels=%d RuntimeChannels=%d CustomSaveCount=%d WorldGenDef=%s Registry=%s"),
-			StageLabel,
-			*GetNameSafe(ChunkWorld),
-			RequiredCustomDataChannels,
-			WorldGenDefChannels,
-			RuntimeChannels,
-			CustomSaveCount,
-			*GetNameSafe(ChunkWorld != nullptr ? ChunkWorld->WorldGenDef : nullptr),
-			*GetNameSafe(ChunkWorld != nullptr ? ChunkWorld->GetBlockTypeSchemaRegistry() : nullptr));
-	}
-
 }
 
 AChunkWorldExtended::AChunkWorldExtended()
@@ -69,21 +44,13 @@ SCacheKey AChunkWorldExtended::StartGenDTs()
 {
 	SyncBlockTypeSchemaRegistry();
 	EnsureSchemaCustomDataCapacity();
-	LogCustomDataStartupState(this, TEXT("BeforeSuperStartGenDTs"), BlockTypeSchemaComponent != nullptr ? BlockTypeSchemaComponent->GetRequiredCustomDataChannelCount() : 0);
-
-	SCacheKey Result = Super::StartGenDTs();
-
-	LogCustomDataStartupState(this, TEXT("AfterSuperStartGenDTs"), BlockTypeSchemaComponent != nullptr ? BlockTypeSchemaComponent->GetRequiredCustomDataChannelCount() : 0);
-	return Result;
+	return Super::StartGenDTs();
 }
 
 void AChunkWorldExtended::StartGen()
 {
 	SyncBlockTypeSchemaRegistry();
-	LogCustomDataStartupState(this, TEXT("BeforeSuperStartGen"), BlockTypeSchemaComponent != nullptr ? BlockTypeSchemaComponent->GetRequiredCustomDataChannelCount() : 0);
-
 	Super::StartGen();
-	LogCustomDataStartupState(this, TEXT("AfterSuperStartGen"), BlockTypeSchemaComponent != nullptr ? BlockTypeSchemaComponent->GetRequiredCustomDataChannelCount() : 0);
 
 	if (BlockTypeSchemaComponent != nullptr)
 	{
@@ -187,6 +154,11 @@ void AChunkWorldExtended::WriteCustomDataValuesAndUpdate(const TArray<SCustomDat
 {
 	Super::WriteCustomDataValuesAndUpdate(NetCustomDataChangeCalls);
 
+	const int32 HealthCustomDataIndex = BlockTypeSchemaComponent != nullptr
+		? BlockTypeSchemaComponent->GetBlockDamageHealthCustomDataIndex()
+		: INDEX_NONE;
+	TMap<FIntVector, FObservedBlockCustomDataChange> ObservedBlockChanges;
+
 	for (const SCustomDataChangeCall& ChangeCall : NetCustomDataChangeCalls)
 	{
 		if (ChangeCall.chunkDataIndex < 0
@@ -203,47 +175,50 @@ void AChunkWorldExtended::WriteCustomDataValuesAndUpdate(const TArray<SCustomDat
 
 		const FIntVector BlockWorldPos = ChunkGridPosToBlockWorldPos(ChangeCall.chunkPose, ChunkData)
 			+ BlockChunkIndexToBlockChunkPos(ChangeCall.blockChunkIndex, ChunkData);
-		OnAuthoritativeBlockCustomDataUpdated.Broadcast(this, BlockWorldPos);
+
+		FObservedBlockCustomDataChange& ObservedBlockChange = ObservedBlockChanges.FindOrAdd(BlockWorldPos);
+		ObservedBlockChange.bTouchedHealth |= HealthCustomDataIndex != INDEX_NONE && ChangeCall.customDataIndex == HealthCustomDataIndex;
+	}
+
+	// Coalesce slot-level replicated writes into one block notification so
+	// prediction/UI refresh runs against the settled block view for that apply batch.
+	for (const TPair<FIntVector, FObservedBlockCustomDataChange>& ObservedBlockChange : ObservedBlockChanges)
+	{
+		QueueBlockCustomDataChanged(ObservedBlockChange.Key, ObservedBlockChange.Value.bTouchedHealth, TEXT("ReplicatedApplyBatch"));
 	}
 }
 
-void AChunkWorldExtended::ProcessAuthoritativeCustomDataChanges(const FIntVector& BlockWorldPos, const TArray<int32>& PackedValues)
+void AChunkWorldExtended::HandleBlockCustomDataCommit(const FIntVector& BlockWorldPos, const TArray<int32>& PackedValues)
 {
-	if (!HasAuthority() || PackedValues.Num() <= 0)
+	if (!HasAuthority())
+	{
+		UE_LOG(
+			LogChunkWorldExtended,
+			Warning,
+			TEXT("HandleBlockCustomDataCommit ignored on non-authority chunk world '%s' at block %s."),
+			*GetNameSafe(this),
+			*BlockWorldPos.ToString());
+		return;
+	}
+
+	if (PackedValues.Num() <= 0)
 	{
 		return;
 	}
 
-	if (BlockTypeSchemaComponent == nullptr)
-	{
-		OnAuthoritativeBlockCustomDataUpdated.Broadcast(this, BlockWorldPos);
-		return;
-	}
-
-	const int32 HealthCustomDataIndex = BlockTypeSchemaComponent->GetBlockDamageHealthCustomDataIndex();
-	if (HealthCustomDataIndex != INDEX_NONE && PackedValues.IsValidIndex(HealthCustomDataIndex))
-	{
-		FGameplayTag BlockTypeName;
-		FInstancedStruct BlockCustomData;
-		if (BlockTypeSchemaComponent->GetBlockCustomDataForBlockWorldPos(BlockWorldPos, BlockTypeName, BlockCustomData))
-		{
-			const UScriptStruct* CustomDataStruct = BlockCustomData.GetScriptStruct();
-			if (CustomDataStruct != nullptr
-				&& CustomDataStruct->IsChildOf(FBlockDamageCustomData::StaticStruct())
-				&& PackedValues[HealthCustomDataIndex] <= 0)
-			{
-				DestroyBlock(BlockWorldPos, true);
-			}
-		}
-	}
-
-	OnAuthoritativeBlockCustomDataUpdated.Broadcast(this, BlockWorldPos);
+	HandleCommittedBlockCustomData(BlockWorldPos, PackedValues);
 }
 
 bool AChunkWorldExtended::DestroyBlock(const FIntVector& BlockWorldPos, bool bRefreshChunks)
 {
 	if (!HasAuthority())
 	{
+		UE_LOG(
+			LogChunkWorldExtended,
+			Warning,
+			TEXT("DestroyBlock ignored on non-authority chunk world '%s' at block %s."),
+			*GetNameSafe(this),
+			*BlockWorldPos.ToString());
 		return false;
 	}
 
@@ -253,7 +228,7 @@ bool AChunkWorldExtended::DestroyBlock(const FIntVector& BlockWorldPos, bool bRe
 	}
 
 	FChunkWorldResolvedBlockHit DestroyedFeedbackHit;
-	const bool bHasDestroyedFeedbackHit = UChunkWorldHitBlueprintLibrary::TryResolveBlockHitContextFromBlockWorldPos(this, BlockWorldPos, DestroyedFeedbackHit);
+	const bool bHasDestroyedFeedbackHit = UChunkWorldBlockHitBlueprintLibrary::TryResolveBlockHitContextFromBlockWorldPos(this, BlockWorldPos, DestroyedFeedbackHit);
 
 	FGameplayTag BlockTypeName;
 	FBlockDefinitionBase Definition;
@@ -263,9 +238,9 @@ bool AChunkWorldExtended::DestroyBlock(const FIntVector& BlockWorldPos, bool bRe
 		{
 			FMeshData EmptyMeshData;
 			EmptyMeshData.MeshId = EmptyMesh;
-			if (bHasDestroyedFeedbackHit)
+			if (bHasDestroyedFeedbackHit && BlockFeedbackComponent != nullptr)
 			{
-				(void)UChunkWorldHitBlueprintLibrary::TryBroadcastDestroyedFeedbackForResolvedBlockHit(DestroyedFeedbackHit);
+				(void)BlockFeedbackComponent->BroadcastAuthoritativeDestroyFeedback(DestroyedFeedbackHit);
 			}
 			SetMeshDataByBlockWorldPos(BlockWorldPos, EmptyMeshData, bRefreshChunks);
 		    return true;
@@ -273,9 +248,9 @@ bool AChunkWorldExtended::DestroyBlock(const FIntVector& BlockWorldPos, bool bRe
 
 		if (!Definition.MaterialAsset.IsNull())
 		{
-			if (bHasDestroyedFeedbackHit)
+			if (bHasDestroyedFeedbackHit && BlockFeedbackComponent != nullptr)
 			{
-				(void)UChunkWorldHitBlueprintLibrary::TryBroadcastDestroyedFeedbackForResolvedBlockHit(DestroyedFeedbackHit);
+				(void)BlockFeedbackComponent->BroadcastAuthoritativeDestroyFeedback(DestroyedFeedbackHit);
 			}
 			SetBlockValueByBlockWorldPos(BlockWorldPos, EmptyMaterial, bRefreshChunks);
 		    return true;
@@ -289,9 +264,9 @@ bool AChunkWorldExtended::DestroyBlock(const FIntVector& BlockWorldPos, bool bRe
 	{
 		FMeshData EmptyMeshData;
 		EmptyMeshData.MeshId = EmptyMesh;
-		if (bHasDestroyedFeedbackHit)
+		if (bHasDestroyedFeedbackHit && BlockFeedbackComponent != nullptr)
 		{
-			(void)UChunkWorldHitBlueprintLibrary::TryBroadcastDestroyedFeedbackForResolvedBlockHit(DestroyedFeedbackHit);
+			(void)BlockFeedbackComponent->BroadcastAuthoritativeDestroyFeedback(DestroyedFeedbackHit);
 		}
 		SetMeshDataByBlockWorldPos(BlockWorldPos, EmptyMeshData, bRefreshChunks);
 		return true;
@@ -299,13 +274,99 @@ bool AChunkWorldExtended::DestroyBlock(const FIntVector& BlockWorldPos, bool bRe
 
 	if (MaterialIndex != EmptyMaterial)
 	{
-		if (bHasDestroyedFeedbackHit)
+		if (bHasDestroyedFeedbackHit && BlockFeedbackComponent != nullptr)
 		{
-			(void)UChunkWorldHitBlueprintLibrary::TryBroadcastDestroyedFeedbackForResolvedBlockHit(DestroyedFeedbackHit);
+			(void)BlockFeedbackComponent->BroadcastAuthoritativeDestroyFeedback(DestroyedFeedbackHit);
 		}
 		SetBlockValueByBlockWorldPos(BlockWorldPos, EmptyMaterial, bRefreshChunks);
 		return true;
 	}
 	
 	return false;
+}
+
+void AChunkWorldExtended::HandleCommittedBlockCustomData(const FIntVector& BlockWorldPos, const TArray<int32>& PackedValues)
+{
+	const int32 HealthCustomDataIndex = BlockTypeSchemaComponent != nullptr
+		? BlockTypeSchemaComponent->GetBlockDamageHealthCustomDataIndex()
+		: INDEX_NONE;
+	const bool bTouchedHealth = HealthCustomDataIndex != INDEX_NONE && PackedValues.IsValidIndex(HealthCustomDataIndex);
+
+	TryDestroyBlockFromCommittedHealth(BlockWorldPos, bTouchedHealth);
+	QueueBlockCustomDataChanged(BlockWorldPos, bTouchedHealth, TEXT("CommittedWrite"));
+}
+
+void AChunkWorldExtended::QueueBlockCustomDataChanged(
+	const FIntVector& BlockWorldPos,
+	const bool bTouchedHealth,
+	const TCHAR* SourceLabel)
+{
+	FDeferredBlockCustomDataChange& DeferredChange = DeferredBlockCustomDataChanges.FindOrAdd(BlockWorldPos);
+	DeferredChange.bTouchedHealth |= bTouchedHealth;
+
+	if (bHasDeferredBlockCustomDataFlushQueued)
+	{
+		return;
+	}
+
+	if (UWorld* World = GetWorld())
+	{
+		bHasDeferredBlockCustomDataFlushQueued = true;
+		World->GetTimerManager().SetTimerForNextTick(this, &AChunkWorldExtended::FlushDeferredBlockCustomDataChanges);
+	}
+}
+
+void AChunkWorldExtended::FlushDeferredBlockCustomDataChanges()
+{
+	bHasDeferredBlockCustomDataFlushQueued = false;
+
+	TMap<FIntVector, FDeferredBlockCustomDataChange> PendingChanges = MoveTemp(DeferredBlockCustomDataChanges);
+	DeferredBlockCustomDataChanges.Reset();
+
+	for (const TPair<FIntVector, FDeferredBlockCustomDataChange>& PendingChange : PendingChanges)
+	{
+		NotifyBlockCustomDataChanged(PendingChange.Key, PendingChange.Value.bTouchedHealth, TEXT("DeferredBlockUpdate"));
+	}
+}
+
+void AChunkWorldExtended::NotifyBlockCustomDataChanged(
+	const FIntVector& BlockWorldPos,
+	const bool bTouchedHealth,
+	const TCHAR* /*SourceLabel*/)
+{
+	OnBlockCustomDataChanged.Broadcast(this, BlockWorldPos, bTouchedHealth);
+}
+
+void AChunkWorldExtended::TryDestroyBlockFromCommittedHealth(const FIntVector& BlockWorldPos, const bool bTouchedHealth)
+{
+	if (!HasAuthority() || BlockTypeSchemaComponent == nullptr)
+	{
+		return;
+	}
+
+	const int32 HealthCustomDataIndex = BlockTypeSchemaComponent->GetBlockDamageHealthCustomDataIndex();
+	if (HealthCustomDataIndex == INDEX_NONE)
+	{
+		return;
+	}
+
+	if (!bTouchedHealth)
+	{
+		return;
+	}
+
+	FGameplayTag BlockTypeName;
+	FInstancedStruct BlockCustomData;
+	if (!BlockTypeSchemaComponent->GetBlockCustomDataForBlockWorldPos(BlockWorldPos, BlockTypeName, BlockCustomData))
+	{
+		return;
+	}
+
+	const FBlockDamageCustomData* DamageCustomData = BlockCustomData.GetPtr<FBlockDamageCustomData>();
+	if (DamageCustomData == nullptr || DamageCustomData->Health > 0)
+	{
+		return;
+	}
+
+	(void)DestroyBlock(BlockWorldPos, true);
 }

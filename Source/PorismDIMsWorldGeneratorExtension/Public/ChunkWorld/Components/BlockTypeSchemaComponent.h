@@ -33,7 +33,7 @@ public:
 	UBlockTypeSchemaRegistry* GetBlockTypeSchemaRegistry() const { return BlockTypeSchemaRegistry; }
 
 	/**
-	 * Returns how many runtime custom-data channels this schema needs, including the reserved materialization marker slot.
+	 * Returns how many runtime custom-data channels this schema needs, including the reserved initialization marker slot.
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld")
 	int32 GetRequiredCustomDataChannelCount() const;
@@ -120,10 +120,10 @@ public:
 	bool InitializeBlockCustomData(const FIntVector& BlockWorldPos);
 
 	/**
-	 * Returns whether the block at the supplied world position has runtime custom data materialized.
+	 * Returns whether the block at the supplied world position has runtime custom data initialized.
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld")
-	bool IsBlockCustomDataMaterialized(const FIntVector& BlockWorldPos) const;
+	bool IsBlockCustomDataInitialized(const FIntVector& BlockWorldPos) const;
 
 	/**
 	 * Reconstructs the authored custom-data struct for the block at the supplied world position.

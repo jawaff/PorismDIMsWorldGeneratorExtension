@@ -11,7 +11,7 @@ class UPorismPredictedBlockStateComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnChunkWorldDamageBlockInteractionChanged, const FChunkWorldDamageBlockInteractionResult&, Result);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnChunkWorldDamageBlockInteractionUpdated, const FChunkWorldDamageBlockInteractionResult&, Result);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnChunkWorldDamageBlockCustomDataMaterialized, const FChunkWorldDamageBlockInteractionResult&, Result);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnChunkWorldDamageBlockCustomDataInitialized, const FChunkWorldDamageBlockInteractionResult&, Result);
 
 /**
  * Shared interaction component that builds on the generic trace loop with optional health-aware block payloads and damage application helpers.
@@ -31,7 +31,7 @@ public:
 
 	/** Returns whether a damage-capable block interaction target is currently active. */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld|Damage")
-	bool HasActiveDamageBlockInteraction() const { return bHasActiveDamageBlockInteraction; }
+	bool HasActiveDamageBlockInteraction() const { return FocusedDamageState.bIsActive; }
 
 	/** Returns whether the current active block target can accept shared damage under the health schema family. */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld|Damage")
@@ -50,9 +50,9 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Block|ChunkWorld|Damage")
 	FOnChunkWorldDamageBlockInteractionUpdated OnDamageBlockInteractionUpdated;
 
-	/** Broadcast when the focused damage-capable block has runtime custom data materialized. */
+	/** Broadcast when the focused damage-capable block has runtime custom data initialized. */
 	UPROPERTY(BlueprintAssignable, Category = "Block|ChunkWorld|Damage")
-	FOnChunkWorldDamageBlockCustomDataMaterialized OnDamageBlockCustomDataMaterialized;
+	FOnChunkWorldDamageBlockCustomDataInitialized OnDamageBlockCustomDataInitialized;
 
 protected:
 	virtual void BeginPlay() override;
@@ -61,8 +61,16 @@ protected:
 	virtual bool DidBlockInteractionResultChange(bool bHadPreviousResult, const FChunkWorldBlockInteractionResult& PreviousResult, bool bHasNewResult, const FChunkWorldBlockInteractionResult& NewResult) const override;
 
 private:
-	FChunkWorldDamageBlockInteractionResult LastDamageBlockInteractionResult;
-	bool bHasActiveDamageBlockInteraction = false;
+	struct FFocusedDamageBlockState
+	{
+		bool bIsActive = false;
+		bool bHasAnnouncedInitialized = false;
+		TWeakObjectPtr<AChunkWorld> ChunkWorld;
+		FIntVector BlockWorldPos = FIntVector::ZeroValue;
+		FChunkWorldDamageBlockInteractionResult Payload;
+	};
+
+	FFocusedDamageBlockState FocusedDamageState;
 	TWeakObjectPtr<UPorismPredictedBlockStateComponent> PredictedBlockStateComponent;
 
 	UFUNCTION()
@@ -75,13 +83,15 @@ private:
 	void HandleBlockInteractionUpdated(const FChunkWorldBlockInteractionResult& Result);
 
 	UFUNCTION()
-	void HandleBlockCustomDataMaterialized(const FChunkWorldBlockInteractionResult& Result);
-
-	UFUNCTION()
-	void HandleAuthoritativeBlockCustomDataUpdated(const FIntVector& BlockWorldPos);
+	void HandleBlockCustomDataInitialized(const FChunkWorldBlockInteractionResult& Result);
 
 	void HandleTrackedBlockStateChanged(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos);
-	void RefreshDamageInteractionState(bool bBroadcastUpdate);
+	void RefreshFocusedDamageState();
+	void ResetFocusedDamageState();
+	bool IsSameFocusedBlock(const FFocusedDamageBlockState& State, AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos) const;
+	bool HasInitializedDisplayData(const FChunkWorldDamageBlockInteractionResult& Result) const;
+	bool DidDamagePayloadChange(const FChunkWorldDamageBlockInteractionResult& PreviousResult, const FChunkWorldDamageBlockInteractionResult& NewResult) const;
+	void EmitDamageStateTransition(const FFocusedDamageBlockState& PreviousState, FFocusedDamageBlockState& NewState);
 	void BindPredictedBlockStateComponent();
 	void UnbindPredictedBlockStateComponent();
 	bool TryBuildDamageBlockInteractionResult(const FChunkWorldBlockInteractionResult& BlockResult, FChunkWorldDamageBlockInteractionResult& OutResult) const;

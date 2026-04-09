@@ -1,10 +1,10 @@
 # PorismDIMsWorldGeneratorExtension Docs
 
-This plugin-local documentation is the home for the v2 Block type schema and its derived project-specific extensions.
+This plugin-local documentation is the home for the block schema, chunk-world interaction, damage, feedback, and swap systems provided by the extension plugin.
 
 ## Documentation Areas
 - `Docs/Design/`
-  - stable design and reference documentation for the shared schema, chunk-world, damage, and interaction systems
+  - stable design and reference documentation for the shared schema, chunk-world, damage, interaction, and feedback systems
 - [Design/BlockTypeSchema.md](./Design/BlockTypeSchema.md)
 - [Design/BlockTypeSchemaComponent.md](./Design/BlockTypeSchemaComponent.md)
 - [Design/ChunkWorldBlockSwap.md](./Design/ChunkWorldBlockSwap.md)
@@ -14,11 +14,8 @@ This plugin-local documentation is the home for the v2 Block type schema and its
 - `Docs/Usage/`
   - setup guides and recommended component/library combinations for common gameplay routes
 - [Usage/ChunkWorldGameplaySetup.md](./Usage/ChunkWorldGameplaySetup.md)
-- `Docs/InProgress/`
-  - active implementation notes that are not yet stable reference documentation
-- [InProgress/ChunkWorldBlockSwap.md](./InProgress/ChunkWorldBlockSwap.md)
-- [InProgress/ChunkWorldDamage.md](./InProgress/ChunkWorldDamage.md)
-- [InProgress/TraceInteractionComponentV2.md](./InProgress/TraceInteractionComponentV2.md)
+
+The plugin docs focus on stable public behavior. Project-level rewrites and migration notes should be tracked in the main repository `Docs/InProgress/` area until the behavior is settled enough to promote back into these plugin-local pages.
 
 ## Source Layout
 - `Source/PorismDIMsWorldGeneratorExtension/Public/Block/`

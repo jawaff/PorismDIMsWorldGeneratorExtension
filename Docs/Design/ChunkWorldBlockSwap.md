@@ -164,7 +164,7 @@ That gives the plugin:
 - Configure the hidden parking area on `UChunkWorldBlockSwapComponent` so parked instances stay outside meaningful world space. Projects can push that value from a subclass during startup if they want a centralized policy.
 - Use a proximity/query collision channel that matches the represented chunk-world collision bodies used for swap candidate discovery. Do not assume an overlap-only setup will work just because a trace on the same channel works.
 - Configure swapped actor collision so interaction traces do not unintentionally pass through the actor and hit the parked or underlying chunk-world block behind it.
-- Treat parking-Z policy as project-owned. In Spellblade, `ASpellbladeChunkWorld` currently derives parking from `WorldSettings->KillZ - 50000`, but the plugin intentionally stays generic.
+- Treat parking-Z policy as project-owned.
 - Let `UChunkWorldBlockSwapScannerComponent` on the chunk world drive the runtime.
 
 For starter player-facing character composition, see:

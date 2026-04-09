@@ -4,17 +4,28 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "ChunkWorld/Hit/ChunkWorldBlockHitTypes.h"
 #include "ChunkWorldBlockFeedbackComponent.generated.h"
 
 class UNiagaraSystem;
 class USoundBase;
 
+UENUM()
+enum class EChunkWorldBlockFeedbackKind : uint8
+{
+	Hit,
+	Destroy
+};
+
 /** Lightweight local playback cache entry used to suppress predicted/authoritative duplicate feedback bursts. */
 struct FRecentChunkWorldBlockFeedback
 {
+	TWeakObjectPtr<AChunkWorld> ChunkWorld;
+	FIntVector BlockWorldPos = FIntVector::ZeroValue;
 	FVector WorldLocation = FVector::ZeroVector;
 	TObjectPtr<USoundBase> Sound = nullptr;
 	TObjectPtr<UNiagaraSystem> NiagaraSystem = nullptr;
+	EChunkWorldBlockFeedbackKind Kind = EChunkWorldBlockFeedbackKind::Hit;
 	float TimeSeconds = 0.0f;
 };
 
@@ -28,15 +39,33 @@ class PORISMDIMSWORLDGENERATOREXTENSION_API UChunkWorldBlockFeedbackComponent : 
 
 public:
 	/**
-	 * Creates a replicated feedback component that multicasts authoritative block hit and destroy feedback.
+	 * Creates a replicated feedback component that owns immediate-local and authoritative block feedback delivery.
 	 */
 	UChunkWorldBlockFeedbackComponent();
 
 	/**
-	 * Multicasts one authoritative feedback event and applies a local distance filter before spawning sound and Niagara.
+	 * Plays local-only predicted hit feedback for the initiating process when the caller has a valid resolved block.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld|Feedback")
-	bool BroadcastFeedbackAtLocation(const FVector& WorldLocation, USoundBase* Sound, UNiagaraSystem* NiagaraSystem = nullptr);
+	bool RequestImmediateLocalHitFeedback(const FChunkWorldResolvedBlockHit& ResolvedHit);
+
+	/**
+	 * Plays local-only predicted destroy feedback for the initiating process when the caller has a valid resolved block.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld|Feedback")
+	bool RequestImmediateLocalDestroyFeedback(const FChunkWorldResolvedBlockHit& ResolvedHit);
+
+	/**
+	 * Broadcasts one authoritative non-lethal block hit feedback event to every process, including the server.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld|Feedback")
+	bool BroadcastAuthoritativeHitFeedback(const FChunkWorldResolvedBlockHit& ResolvedHit);
+
+	/**
+	 * Broadcasts one authoritative destroyed-block feedback event to every process, including the server.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld|Feedback")
+	bool BroadcastAuthoritativeDestroyFeedback(const FChunkWorldResolvedBlockHit& ResolvedHit);
 
 protected:
 	/** Maximum local playback distance for replicated block feedback. Set to zero to disable local distance filtering. */
@@ -53,12 +82,17 @@ protected:
 
 private:
 	UFUNCTION(NetMulticast, Unreliable)
-	void MulticastBroadcastFeedback(const FVector_NetQuantize& WorldLocation, USoundBase* Sound, UNiagaraSystem* NiagaraSystem);
+	void MulticastBroadcastFeedback(const FVector_NetQuantize& WorldLocation, const FIntVector& BlockWorldPos, EChunkWorldBlockFeedbackKind Kind, USoundBase* Sound, UNiagaraSystem* NiagaraSystem);
 
 	bool ShouldPlayFeedbackAtLocation(const FVector& WorldLocation) const;
-	bool ShouldSuppressDuplicateFeedback(const FVector& WorldLocation, USoundBase* Sound, UNiagaraSystem* NiagaraSystem) const;
-	void RememberFeedbackPlayback(const FVector& WorldLocation, USoundBase* Sound, UNiagaraSystem* NiagaraSystem) const;
-	void PlayFeedbackAtLocation(const FVector& WorldLocation, USoundBase* Sound, UNiagaraSystem* NiagaraSystem) const;
+	bool ShouldSuppressDuplicateFeedback(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos, EChunkWorldBlockFeedbackKind Kind, const FVector& WorldLocation, USoundBase* Sound, UNiagaraSystem* NiagaraSystem) const;
+	void RememberFeedbackPlayback(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos, EChunkWorldBlockFeedbackKind Kind, const FVector& WorldLocation, USoundBase* Sound, UNiagaraSystem* NiagaraSystem) const;
+	bool TryResolveHitFeedbackAssets(const FChunkWorldResolvedBlockHit& ResolvedHit, USoundBase*& OutSound) const;
+	bool TryResolveDestroyFeedbackAssets(const FChunkWorldResolvedBlockHit& ResolvedHit, USoundBase*& OutSound, UNiagaraSystem*& OutNiagaraSystem) const;
+	FVector ResolveFeedbackLocation(const FChunkWorldResolvedBlockHit& ResolvedHit) const;
+	bool CanRequestImmediateLocalFeedback(const FChunkWorldResolvedBlockHit& ResolvedHit) const;
+	bool CanBroadcastAuthoritativeFeedback(const FChunkWorldResolvedBlockHit& ResolvedHit) const;
+	bool PlayBlockFeedback(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos, EChunkWorldBlockFeedbackKind Kind, const FVector& WorldLocation, USoundBase* Sound, UNiagaraSystem* NiagaraSystem) const;
 
 	/** Local recent-playback cache used only to suppress short-lived duplicate feedback requests on this machine. */
 	mutable TArray<FRecentChunkWorldBlockFeedback> RecentFeedbackPlaybacks;

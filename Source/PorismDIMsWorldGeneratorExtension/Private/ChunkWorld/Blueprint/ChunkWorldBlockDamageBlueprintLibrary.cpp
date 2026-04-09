@@ -6,19 +6,79 @@
 #include "ChunkWorld/ChunkWorld.h"
 #include "ChunkWorldStructs/ChunkWorldEnums.h"
 #include "ChunkWorldStructs/ChunkWorldStructs.h"
-#include "ChunkWorld/Blueprint/ChunkWorldHitBlueprintLibrary.h"
+#include "ChunkWorld/Blueprint/ChunkWorldBlockHitBlueprintLibrary.h"
 #include "ChunkWorld/Components/BlockTypeSchemaComponent.h"
 #include "ChunkWorld/Components/ChunkWorldBlockFeedbackComponent.h"
 
+namespace
+{
+	bool TryResolveDamageDefinitionForResolvedBlockHit(
+		const FChunkWorldResolvedBlockHit& ResolvedHit,
+		FGameplayTag& OutBlockTypeName,
+		FBlockDamageDefinition& OutDefinition,
+		FInstancedStruct& OutDefaultCustomDataPayload,
+		FBlockDamageCustomData& OutDefaultCustomData)
+	{
+		OutBlockTypeName = FGameplayTag();
+		OutDefinition = FBlockDamageDefinition();
+		OutDefaultCustomDataPayload.Reset();
+		OutDefaultCustomData = FBlockDamageCustomData();
+
+		if (!ResolvedHit.bHasBlock || !IsValid(ResolvedHit.ChunkWorld) || !IsValid(ResolvedHit.BlockTypeSchemaComponent))
+		{
+			return false;
+		}
+
+		FInstancedStruct DefinitionStruct;
+		if (!UChunkWorldBlockHitBlueprintLibrary::TryGetBlockDefinitionForResolvedBlockHit(ResolvedHit, OutBlockTypeName, DefinitionStruct))
+		{
+			return false;
+		}
+
+		if (!UBlockTypeSchemaBlueprintLibrary::TryGetBlockDamageDefinition(DefinitionStruct, OutDefinition))
+		{
+			return false;
+		}
+
+		FInstancedStruct DefaultCustomData;
+		if (!UChunkWorldBlockHitBlueprintLibrary::TryGetBlockCustomDataForBlockTypeName(ResolvedHit.BlockTypeSchemaComponent, OutBlockTypeName, DefaultCustomData))
+		{
+			return false;
+		}
+
+		if (!UBlockTypeSchemaBlueprintLibrary::TryGetBlockDamageCustomData(DefaultCustomData, OutDefaultCustomData))
+		{
+			return false;
+		}
+
+		OutDefaultCustomDataPayload = DefaultCustomData;
+		return true;
+	}
+
+	FBlockDamageCustomData* GetMutableBlockDamageCustomData(FInstancedStruct& Payload)
+	{
+		const UScriptStruct* PayloadStruct = Payload.GetScriptStruct();
+		if (PayloadStruct == nullptr || !PayloadStruct->IsChildOf(FBlockDamageCustomData::StaticStruct()))
+		{
+			return nullptr;
+		}
+
+		void* PayloadMemory = Payload.GetMutableMemory();
+		return PayloadMemory != nullptr ? static_cast<FBlockDamageCustomData*>(PayloadMemory) : nullptr;
+	}
+}
+
 bool UChunkWorldBlockDamageBlueprintLibrary::TryResolveDamageSchemaForResolvedBlockHit(
 	const FChunkWorldResolvedBlockHit& ResolvedHit,
-	bool bAllowMaterialization,
+	bool bAllowInitialization,
 	FGameplayTag& OutBlockTypeName,
 	FBlockDamageDefinition& OutDefinition,
+	FInstancedStruct& OutCustomDataPayload,
 	FBlockDamageCustomData& OutCustomData)
 {
 	OutBlockTypeName = FGameplayTag();
 	OutDefinition = FBlockDamageDefinition();
+	OutCustomDataPayload.Reset();
 	OutCustomData = FBlockDamageCustomData();
 
 	if (!ResolvedHit.bHasBlock || !IsValid(ResolvedHit.BlockTypeSchemaComponent))
@@ -26,33 +86,29 @@ bool UChunkWorldBlockDamageBlueprintLibrary::TryResolveDamageSchemaForResolvedBl
 		return false;
 	}
 
-	if (bAllowMaterialization)
+	if (bAllowInitialization)
 	{
 		(void)ResolvedHit.BlockTypeSchemaComponent->InitializeBlockCustomData(ResolvedHit.BlockWorldPos);
 	}
 
-	if (!ResolvedHit.BlockTypeSchemaComponent->GetBlockCustomDataForBlockWorldPos(ResolvedHit.BlockWorldPos, OutBlockTypeName, OutCustomData))
+	if (!ResolvedHit.BlockTypeSchemaComponent->GetBlockCustomDataForBlockWorldPos(ResolvedHit.BlockWorldPos, OutBlockTypeName, OutCustomDataPayload))
 	{
 		// These are all fallbacks
 		FInstancedStruct DefinitionStruct;
-		if (!UChunkWorldHitBlueprintLibrary::TryGetBlockDefinitionForResolvedBlockHit(ResolvedHit, OutBlockTypeName, DefinitionStruct))
+		if (!UChunkWorldBlockHitBlueprintLibrary::TryGetBlockDefinitionForResolvedBlockHit(ResolvedHit, OutBlockTypeName, DefinitionStruct))
 		{
 			return false;
 		}
 
-		FInstancedStruct DefaultCustomData;
-		if (!UChunkWorldHitBlueprintLibrary::TryGetBlockCustomDataForBlockTypeName(ResolvedHit.BlockTypeSchemaComponent, OutBlockTypeName, DefaultCustomData))
+		if (!UChunkWorldBlockHitBlueprintLibrary::TryGetBlockCustomDataForBlockTypeName(ResolvedHit.BlockTypeSchemaComponent, OutBlockTypeName, OutCustomDataPayload))
 		{
 			return false;
 		}
+	}
 
-		const FBlockDamageCustomData* DamageCustomData = DefaultCustomData.GetPtr<FBlockDamageCustomData>();
-		if (DamageCustomData == nullptr)
-		{
-			return false;
-		}
-
-		OutCustomData = *DamageCustomData;
+	if (!UBlockTypeSchemaBlueprintLibrary::TryGetBlockDamageCustomData(OutCustomDataPayload, OutCustomData))
+	{
+		return false;
 	}
 
 	if (!OutBlockTypeName.IsValid())
@@ -61,7 +117,7 @@ bool UChunkWorldBlockDamageBlueprintLibrary::TryResolveDamageSchemaForResolvedBl
 	}
 
 	FInstancedStruct DefinitionStruct;
-	if (!UChunkWorldHitBlueprintLibrary::TryGetBlockDefinitionForResolvedBlockHit(ResolvedHit, OutBlockTypeName, DefinitionStruct))
+	if (!UChunkWorldBlockHitBlueprintLibrary::TryGetBlockDefinitionForResolvedBlockHit(ResolvedHit, OutBlockTypeName, DefinitionStruct))
 	{
 		return false;
 	}
@@ -76,24 +132,13 @@ bool UChunkWorldBlockDamageBlueprintLibrary::TryBroadcastHitFeedbackForResolvedB
 		return false;
 	}
 
-	FGameplayTag BlockTypeName;
-	FBlockDamageDefinition Definition;
-	FBlockDamageCustomData CustomData;
-	if (!TryResolveDamageSchemaForResolvedBlockHit(ResolvedHit, false, BlockTypeName, Definition, CustomData) || Definition.HitSound == nullptr)
-	{
-		return false;
-	}
-
 	UChunkWorldBlockFeedbackComponent* FeedbackComponent = nullptr;
-	if (!UChunkWorldHitBlueprintLibrary::GetBlockFeedbackComponentFromChunkWorld(ResolvedHit.ChunkWorld, FeedbackComponent))
+	if (!UChunkWorldBlockHitBlueprintLibrary::GetBlockFeedbackComponentFromChunkWorld(ResolvedHit.ChunkWorld, FeedbackComponent))
 	{
 		return false;
 	}
 
-	const FVector FeedbackLocation = ResolvedHit.RepresentativeWorldPos.IsNearlyZero()
-		? ResolvedHit.ChunkWorld->BlockWorldPosToUEWorldPos(ResolvedHit.BlockWorldPos)
-		: ResolvedHit.RepresentativeWorldPos;
-	return FeedbackComponent->BroadcastFeedbackAtLocation(FeedbackLocation, Definition.HitSound);
+	return FeedbackComponent->BroadcastAuthoritativeHitFeedback(ResolvedHit);
 }
 
 bool UChunkWorldBlockDamageBlueprintLibrary::TryApplyBlockDamageForResolvedBlockHit(const FChunkWorldResolvedBlockHit& ResolvedHit, int32 DamageAmount, FChunkWorldBlockDamageResult& OutResult)
@@ -112,10 +157,20 @@ bool UChunkWorldBlockDamageBlueprintLibrary::TryApplyBlockDamageForResolvedBlock
 
 	FGameplayTag BlockTypeName;
 	FBlockDamageDefinition Definition;
+	FInstancedStruct CustomDataPayload;
 	FBlockDamageCustomData CustomData;
-	if (!TryResolveDamageSchemaForResolvedBlockHit(ResolvedHit, true, BlockTypeName, Definition, CustomData))
+	if (!TryResolveDamageSchemaForResolvedBlockHit(ResolvedHit, false, BlockTypeName, Definition, CustomDataPayload, CustomData))
 	{
 		return false;
+	}
+
+	// Project-side fix: treat uninitialized damage custom data as authored full health and fold initialization plus
+	// damage into one schema write so one hit does not generate a separate initialization commit first.
+	const bool bHasInitializedCustomData = ResolvedHit.BlockTypeSchemaComponent != nullptr
+		&& ResolvedHit.BlockTypeSchemaComponent->IsBlockCustomDataInitialized(ResolvedHit.BlockWorldPos);
+	if (!bHasInitializedCustomData)
+	{
+		CustomData.Health = Definition.MaxHealth;
 	}
 
 	OutResult.bHasDamageSchema = true;
@@ -141,18 +196,18 @@ bool UChunkWorldBlockDamageBlueprintLibrary::TryApplyBlockDamageForResolvedBlock
 		return true;
 	}
 
-	CustomData.Health = NewHealth;
-	if (!ResolvedHit.BlockTypeSchemaComponent->SetBlockCustomDataForBlockWorldPos(ResolvedHit.BlockWorldPos, CustomData))
+	FBlockDamageCustomData* MutableDamageCustomData = GetMutableBlockDamageCustomData(CustomDataPayload);
+	if (MutableDamageCustomData == nullptr)
 	{
 		return false;
 	}
 
-	if (OutResult.bDestroyed)
+	MutableDamageCustomData->Health = NewHealth;
+	if (!ResolvedHit.BlockTypeSchemaComponent->SetBlockCustomDataForBlockWorldPos(ResolvedHit.BlockWorldPos, CustomDataPayload))
 	{
-		return true;
+		return false;
 	}
 
-	(void)TryBroadcastHitFeedbackForResolvedBlockHit(ResolvedHit);
 	return true;
 }
 
@@ -162,15 +217,13 @@ bool UChunkWorldBlockDamageBlueprintLibrary::TryGetCurrentBlockHealthStateForRes
 	bOutInvincible = false;
 	OutBlockTypeName = FGameplayTag();
 
-	FBlockDamageDefinition Definition;
-	FBlockDamageCustomData CustomData;
-	if (!TryResolveDamageSchemaForResolvedBlockHit(ResolvedHit, false, OutBlockTypeName, Definition, CustomData))
+	int32 MaxHealth = 0;
+	bool bHasRuntimeHealth = false;
+	if (!TryGetRuntimeBlockHealthStateForResolvedBlockHit(ResolvedHit, OutHealth, MaxHealth, bOutInvincible, bHasRuntimeHealth, OutBlockTypeName))
 	{
 		return false;
 	}
 
-	OutHealth = CustomData.Health;
-	bOutInvincible = Definition.bInvincible;
 	return true;
 }
 
@@ -183,25 +236,106 @@ bool UChunkWorldBlockDamageBlueprintLibrary::TryGetBlockHealthStateForBlockWorld
 	OutBlockTypeName = FGameplayTag();
 
 	FChunkWorldResolvedBlockHit ResolvedHit;
-	if (!UChunkWorldHitBlueprintLibrary::TryResolveBlockHitContextFromBlockWorldPos(ChunkWorld, BlockWorldPos, ResolvedHit) || !ResolvedHit.bHasBlock)
+	if (!UChunkWorldBlockHitBlueprintLibrary::TryResolveBlockHitContextFromBlockWorldPos(ChunkWorld, BlockWorldPos, ResolvedHit) || !ResolvedHit.bHasBlock)
 	{
 		return false;
 	}
 
+	if (!TryGetRuntimeBlockHealthStateForResolvedBlockHit(ResolvedHit, OutHealth, OutMaxHealth, bOutInvincible, bOutHasStoredHealth, OutBlockTypeName))
+	{
+		return false;
+	}
+
+	FGameplayTag RuntimeBlockTypeName;
+	FInstancedStruct RuntimeCustomDataPayload;
+	FBlockDamageCustomData RuntimeCustomData;
+	bOutHasStoredHealth = ResolvedHit.BlockTypeSchemaComponent != nullptr
+		&& ResolvedHit.BlockTypeSchemaComponent->GetBlockCustomDataForBlockWorldPos(BlockWorldPos, RuntimeBlockTypeName, RuntimeCustomDataPayload)
+		&& UBlockTypeSchemaBlueprintLibrary::TryGetBlockDamageCustomData(RuntimeCustomDataPayload, RuntimeCustomData);
+	return true;
+}
+
+bool UChunkWorldBlockDamageBlueprintLibrary::TryGetRuntimeBlockHealthStateForResolvedBlockHit(
+	const FChunkWorldResolvedBlockHit& ResolvedHit,
+	int32& OutHealth,
+	int32& OutMaxHealth,
+	bool& bOutInvincible,
+	bool& bOutHasRuntimeHealth,
+	FGameplayTag& OutBlockTypeName)
+{
+	OutHealth = 0;
+	OutMaxHealth = 0;
+	bOutInvincible = false;
+	bOutHasRuntimeHealth = false;
+	OutBlockTypeName = FGameplayTag();
+
 	FBlockDamageDefinition Definition;
-	FBlockDamageCustomData CustomData;
-	if (!TryResolveDamageSchemaForResolvedBlockHit(ResolvedHit, false, OutBlockTypeName, Definition, CustomData))
+	FInstancedStruct DefaultCustomDataPayload;
+	FBlockDamageCustomData DefaultCustomData;
+	if (!TryResolveDamageDefinitionForResolvedBlockHit(ResolvedHit, OutBlockTypeName, Definition, DefaultCustomDataPayload, DefaultCustomData))
 	{
 		return false;
 	}
 
 	OutMaxHealth = Definition.MaxHealth;
-	OutHealth = CustomData.Health;
 	bOutInvincible = Definition.bInvincible;
 
+	const UBlockTypeSchemaComponent* BlockTypeSchemaComponent = ResolvedHit.BlockTypeSchemaComponent;
+	if (!IsValid(BlockTypeSchemaComponent))
+	{
+		return false;
+	}
+
 	FGameplayTag RuntimeBlockTypeName;
+	FInstancedStruct RuntimeCustomDataPayload;
+	const bool bHasInitializedCustomData = BlockTypeSchemaComponent->GetBlockCustomDataForBlockWorldPos(
+		ResolvedHit.BlockWorldPos,
+		RuntimeBlockTypeName,
+		RuntimeCustomDataPayload);
+
 	FBlockDamageCustomData RuntimeCustomData;
-	bOutHasStoredHealth = ResolvedHit.BlockTypeSchemaComponent != nullptr
-		&& ResolvedHit.BlockTypeSchemaComponent->GetBlockCustomDataForBlockWorldPos(BlockWorldPos, RuntimeBlockTypeName, RuntimeCustomData);
+	const bool bResolvedRuntimeDamageCustomData = bHasInitializedCustomData
+		&& UBlockTypeSchemaBlueprintLibrary::TryGetBlockDamageCustomData(RuntimeCustomDataPayload, RuntimeCustomData);
+
+	bOutHasRuntimeHealth = bResolvedRuntimeDamageCustomData;
+	OutHealth = bResolvedRuntimeDamageCustomData ? RuntimeCustomData.Health : Definition.MaxHealth;
+	if (bResolvedRuntimeDamageCustomData && RuntimeBlockTypeName.IsValid())
+	{
+		OutBlockTypeName = RuntimeBlockTypeName;
+	}
+	else if (!OutBlockTypeName.IsValid())
+	{
+		OutBlockTypeName = RuntimeBlockTypeName;
+	}
 	return true;
+}
+
+bool UChunkWorldBlockDamageBlueprintLibrary::TryGetRuntimeBlockHealthStateForBlockWorldPos(
+	AChunkWorld* ChunkWorld,
+	const FIntVector& BlockWorldPos,
+	int32& OutHealth,
+	int32& OutMaxHealth,
+	bool& bOutInvincible,
+	bool& bOutHasRuntimeHealth,
+	FGameplayTag& OutBlockTypeName)
+{
+	OutHealth = 0;
+	OutMaxHealth = 0;
+	bOutInvincible = false;
+	bOutHasRuntimeHealth = false;
+	OutBlockTypeName = FGameplayTag();
+
+	FChunkWorldResolvedBlockHit ResolvedHit;
+	if (!UChunkWorldBlockHitBlueprintLibrary::TryResolveBlockHitContextFromBlockWorldPos(ChunkWorld, BlockWorldPos, ResolvedHit) || !ResolvedHit.bHasBlock)
+	{
+		return false;
+	}
+
+	return TryGetRuntimeBlockHealthStateForResolvedBlockHit(
+		ResolvedHit,
+		OutHealth,
+		OutMaxHealth,
+		bOutInvincible,
+		bOutHasRuntimeHealth,
+		OutBlockTypeName);
 }

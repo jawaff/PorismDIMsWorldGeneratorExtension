@@ -16,7 +16,7 @@ class AChunkWorldExtended;
 struct FPropertyChangedEvent;
 #endif
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnChunkWorldAuthoritativeBlockCustomDataUpdated, AChunkWorldExtended*, ChunkWorld, const FIntVector&, BlockWorldPos);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnChunkWorldBlockCustomDataChanged, AChunkWorldExtended*, ChunkWorld, const FIntVector&, BlockWorldPos, bool, bTouchedHealth);
 
 /**
  * Basic extension chunk world that hosts the reusable block type schema component used by project-specific block systems.
@@ -72,14 +72,14 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld")
 	UChunkWorldBlockSwapComponent* GetBlockSwapComponent() const;
 
-	/** Broadcast after authoritative replicated custom-data updates are applied for one block on this chunk world. */
+	/** Broadcast after one block's runtime custom-data view changes on this chunk world. */
 	UPROPERTY(BlueprintAssignable, Category = "Block|ChunkWorld")
-	FOnChunkWorldAuthoritativeBlockCustomDataUpdated OnAuthoritativeBlockCustomDataUpdated;
+	FOnChunkWorldBlockCustomDataChanged OnBlockCustomDataChanged;
 
 	/**
-	 * Processes authoritative custom data changes to trigger things like block removal.
+	 * Processes one server-committed block custom-data write after the schema component has already stored the slot values.
 	 */
-	void ProcessAuthoritativeCustomDataChanges(const FIntVector& BlockWorldPos, const TArray<int32>& PackedValues);
+	void HandleBlockCustomDataCommit(const FIntVector& BlockWorldPos, const TArray<int32>& PackedValues);
 
 	/**
 	 * Removes one block's runtime representation using the authored block-definition association.
@@ -99,11 +99,25 @@ protected:
 	virtual void PostLoad() override;
 
 private:
-	/** Applies shared post-write behavior for one authoritative custom-data update, including project-side zero-health block removal. */
-	void HandlePostAuthoritativeCustomDataUpdate(const FIntVector& BlockWorldPos, const SCustomDataChangeCall* ChangeCall = nullptr);
+	struct FDeferredBlockCustomDataChange
+	{
+		bool bTouchedHealth = false;
+	};
 
-	/** Removes a block after the shared damage-family health slot commits a zero-or-lower value on the server. */
-	void TryDestroyBlockFromCommittedHealth(const FIntVector& BlockWorldPos, const SCustomDataChangeCall* ChangeCall);
+	/** Applies server-only post-commit handling for one block after custom-data changes are committed locally. */
+	void HandleCommittedBlockCustomData(const FIntVector& BlockWorldPos, const TArray<int32>& PackedValues);
+
+	/** Queues one block custom-data change so observers refresh against the settled chunk-world state on the next tick. */
+	void QueueBlockCustomDataChanged(const FIntVector& BlockWorldPos, bool bTouchedHealth, const TCHAR* SourceLabel);
+
+	/** Flushes queued block custom-data changes after the current mutation stack has settled. */
+	void FlushDeferredBlockCustomDataChanges();
+
+	/** Notifies observers that one block's runtime custom-data view changed. */
+	void NotifyBlockCustomDataChanged(const FIntVector& BlockWorldPos, bool bTouchedHealth, const TCHAR* SourceLabel);
+
+	/** Removes a block after a committed health write leaves the shared damage-family health slot at zero or lower on the server. */
+	void TryDestroyBlockFromCommittedHealth(const FIntVector& BlockWorldPos, bool bTouchedHealth);
 
 	/** Ensures WorldGenDef and runtime config expose enough custom-data channels for the active schema layout. */
 	void EnsureSchemaCustomDataCapacity();
@@ -132,4 +146,10 @@ private:
 	/** Reusable replicated block swap host used by shared chunk-world hide/restore transitions. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Block|ChunkWorld", meta = (AllowPrivateAccess = "true", ToolTip = "Replicated block swap host used by shared chunk-world hide and restore transitions."))
 	TObjectPtr<UChunkWorldBlockSwapComponent> BlockSwapComponent = nullptr;
+
+	/** Deferred block custom-data notifications coalesced until the next tick so reads see settled runtime state. */
+	TMap<FIntVector, FDeferredBlockCustomDataChange> DeferredBlockCustomDataChanges;
+
+	/** True while one next-tick flush has already been scheduled for deferred block custom-data notifications. */
+	bool bHasDeferredBlockCustomDataFlushQueued = false;
 };

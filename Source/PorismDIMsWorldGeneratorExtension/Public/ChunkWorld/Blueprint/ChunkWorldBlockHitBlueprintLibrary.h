@@ -6,7 +6,7 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "Block/BlockTypeSchemaRegistry.h"
 #include "ChunkWorld/Hit/ChunkWorldBlockHitTypes.h"
-#include "ChunkWorldHitBlueprintLibrary.generated.h"
+#include "ChunkWorldBlockHitBlueprintLibrary.generated.h"
 
 class AChunkWorld;
 class UBlockTypeSchemaComponent;
@@ -16,7 +16,7 @@ class UChunkWorldBlockFeedbackComponent;
  * Shared helper library for resolving chunk-world block hits and schema data from gameplay hit information.
  */
 UCLASS()
-class PORISMDIMSWORLDGENERATOREXTENSION_API UChunkWorldHitBlueprintLibrary : public UBlueprintFunctionLibrary
+class PORISMDIMSWORLDGENERATOREXTENSION_API UChunkWorldBlockHitBlueprintLibrary : public UBlueprintFunctionLibrary
 {
 	GENERATED_BODY()
 

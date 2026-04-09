@@ -14,7 +14,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPorismTraceInteractionUpdated, co
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPorismActorInteractionChanged, AActor*, Actor);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnChunkWorldBlockInteractionChanged, const FChunkWorldBlockInteractionResult&, Result);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnChunkWorldBlockInteractionUpdated, const FChunkWorldBlockInteractionResult&, Result);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnChunkWorldBlockCustomDataMaterialized, const FChunkWorldBlockInteractionResult&, Result);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnChunkWorldBlockCustomDataInitialized, const FChunkWorldBlockInteractionResult&, Result);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPorismInteractionResult, const FPorismTraceInteractionResult&, Result);
 
 /**
@@ -102,9 +102,9 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Block|ChunkWorld|Interaction")
 	FOnChunkWorldBlockInteractionUpdated OnBlockInteractionUpdated;
 
-	/** Broadcast when the currently focused block has materialized custom data for the first time observed by this component. */
+	/** Broadcast when the currently focused block has initialized custom data for the first time observed by this component. */
 	UPROPERTY(BlueprintAssignable, Category = "Block|ChunkWorld|Interaction")
-	FOnChunkWorldBlockCustomDataMaterialized OnBlockCustomDataMaterialized;
+	FOnChunkWorldBlockCustomDataInitialized OnBlockCustomDataInitialized;
 
 protected:
 	virtual void BeginPlay() override;
@@ -155,7 +155,7 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Debug", meta = (ToolTip = "If true, draws a block-sized debug cube around the resolved block target. Green means success, red means lookup failure."))
 	bool bDebugDrawBlockLookup = false;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Debug", meta = (ToolTip = "Temporary diagnostic toggle. Logs which step in shared block-hit lookup failed or succeeded."))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Debug", meta = (ToolTip = "If true, logs which step in shared block-hit lookup failed or succeeded."))
 	bool bLogBlockLookupDiagnostics = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Debug", meta = (ClampMin = "1.0", UIMin = "1.0", ToolTip = "Multiplier applied to the debug cube size so it draws slightly larger than the represented block mesh."))
@@ -194,8 +194,8 @@ private:
 	bool ShouldRunTrace() const;
 	bool CanInteractWithActor(AActor* Actor, const FGameplayTag& InteractionTag) const;
 	void ExecuteActorInteraction(AActor* Actor, const FGameplayTag& InteractionTag);
-	void EvaluateBlockCustomDataMaterialization(const FChunkWorldBlockInteractionResult& BlockResult);
-	void ResetTrackedBlockCustomDataMaterialization();
+	void EvaluateBlockCustomDataInitialization(const FChunkWorldBlockInteractionResult& BlockResult);
+	void ResetTrackedBlockCustomDataInitialization();
 
 	UFUNCTION(Server, Reliable)
 	void ServerInteractActor(FGameplayTag InteractionTag, AActor* TargetActor);
@@ -203,7 +203,7 @@ private:
 	UFUNCTION(Client, Reliable)
 	void ClientConfirmActorInteraction(AActor* TargetActor, FGameplayTag InteractionTag);
 
-	FIntVector LastMaterializationTrackedBlockWorldPos = FIntVector::ZeroValue;
-	bool bHasTrackedMaterializationBlock = false;
-	bool bWasTrackedBlockCustomDataMaterialized = false;
+	FIntVector LastInitializedTrackedBlockWorldPos = FIntVector::ZeroValue;
+	bool bHasTrackedInitializedBlock = false;
+	bool bWasTrackedBlockCustomDataInitialized = false;
 };

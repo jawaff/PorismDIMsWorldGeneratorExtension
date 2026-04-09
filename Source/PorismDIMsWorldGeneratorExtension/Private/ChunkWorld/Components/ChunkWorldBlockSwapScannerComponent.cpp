@@ -3,11 +3,11 @@
 #include "ChunkWorld/Components/ChunkWorldBlockSwapScannerComponent.h"
 
 #include "ChunkWorld/Actors/ChunkWorldExtended.h"
-#include "ChunkWorld/Blueprint/ChunkWorldHitBlueprintLibrary.h"
+#include "ChunkWorld/Blueprint/ChunkWorldBlockHitBlueprintLibrary.h"
 #include "ChunkWorld/ChunkWorld.h"
 #include "ChunkWorld/Components/BlockTypeSchemaComponent.h"
 #include "ChunkWorld/Components/ChunkWorldBlockSwapComponent.h"
-#include "ChunkWorld/Components/ChunkWorldProximityComponent.h"
+#include "ChunkWorld/Actors/Components/ChunkWorldProximityComponent.h"
 #include "ChunkWorld/Subsystems/ChunkWorldSwapRegistrationSubsystem.h"
 #include "ChunkWorldStructs/ChunkWorldEnums.h"
 #include "CollisionShape.h"
@@ -339,7 +339,7 @@ void UChunkWorldBlockSwapScannerComponent::GatherSourceCandidateBlocks(AChunkWor
 		}
 
 		FChunkWorldResolvedBlockHit ResolvedHit;
-		if (!UChunkWorldHitBlueprintLibrary::TryResolveBlockHitContextFromHitResult(QueryHit, TraceDirection, ResolvedHit)
+		if (!UChunkWorldBlockHitBlueprintLibrary::TryResolveBlockHitContextFromHitResult(QueryHit, TraceDirection, ResolvedHit)
 			|| !ResolvedHit.bHasBlock
 			|| ResolvedHit.ChunkWorld != ChunkWorld)
 		{

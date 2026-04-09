@@ -9,7 +9,7 @@ It provides:
 - a shared actor interaction contract through `UPorismInteractableInterface`
 - an optional actor-side view-provider interface through `UPorismInteractionTraceViewProviderInterface`
 - start/end/update delegates for actor and block interaction state
-- a block custom-data materialization delegate for the currently focused block
+- a block custom-data initialization delegate for the currently focused block
 - debug trace drawing and block lookup diagnostics
 
 ## Main Types
@@ -37,7 +37,7 @@ It provides:
   - `OnBlockInteractionStarted`
   - `OnBlockInteractionEnded`
   - `OnBlockInteractionUpdated`
-  - `OnBlockCustomDataMaterialized`
+  - `OnBlockCustomDataInitialized`
 
 The component intentionally does not own:
 - block health
@@ -80,10 +80,10 @@ Typical block flow:
 2. The result carries `BlockTypeName` and `FChunkWorldResolvedBlockHit`.
 3. Downstream code uses `UChunkWorldHitBlueprintLibrary` or `UBlockTypeSchemaComponent` to resolve definition or custom data.
 
-If you need to react when the focused block has runtime custom data available, bind `OnBlockCustomDataMaterialized`.
+If you need to react when the focused block has runtime custom data available, bind `OnBlockCustomDataInitialized`.
 This fires when:
-- the newly focused block is already materialized
-- or the focused block becomes materialized while it remains the active interaction target
+- the newly focused block is already initialized
+- or the focused block becomes initialized while it remains the active interaction target
 
 This keeps the trace component aligned with [BlockTypeSchema.md](./BlockTypeSchema.md).
 
@@ -112,18 +112,43 @@ Keep project-specific behavior outside the component, for example:
 ## Damage Extension
 `UPorismDamageTraceInteractionComponent` extends the shared trace component with health-aware block payloads and shared damage helpers.
 
+The layering is intentional:
+- `UPorismTraceInteractionComponent` stays the generic focus detector
+- `UPorismDamageTraceInteractionComponent` interprets the currently focused block through shared health state
+- `UPorismPredictedBlockStateComponent` owns the shared read/apply/reconciliation path for block health
+
+The damage component does not replace the base trace contract. It listens to the base block lifecycle and only becomes active when the focused block can produce a health view through `UPorismPredictedBlockStateComponent`.
+
 It adds:
 - `FChunkWorldDamageBlockInteractionResult`
 - `OnDamageBlockInteractionStarted`
 - `OnDamageBlockInteractionEnded`
 - `OnDamageBlockInteractionUpdated`
-- `OnDamageBlockCustomDataMaterialized`
+- `OnDamageBlockCustomDataInitialized`
 - `ApplyDamageToCurrentBlock(...)`
 
 The damage result includes:
 - `bSupportsHealth`
 - `bUsingPredictedHealth`
 - `bHasCustomData`
+- `bHasAuthoritativeHealth`
 - `bIsDestructible`
+- `bIsInvincible`
 - `CurrentHealth`
 - `MaxHealth`
+
+### Damage Event Semantics
+- `OnDamageBlockInteractionStarted` fires when the currently focused block becomes damage-displayable.
+- `OnDamageBlockInteractionUpdated` fires when the same focused block stays active and one of the displayable damage fields changes.
+- `OnDamageBlockCustomDataInitialized` fires once per focused block when runtime custom data becomes initialized while that block remains focused.
+- `OnDamageBlockInteractionEnded` fires when the active focused damage block is lost or changes to another block.
+
+The component caches one focused damage-state record and emits transitions from that record. It does not treat every generic trace refresh as a damage update, and it ignores tracked block-state change notifications for blocks that are not currently focused.
+
+### Damage Apply Helper
+`ApplyDamageToCurrentBlock(...)` is a convenience wrapper for focused interaction flows. It builds a shared `FChunkWorldBlockDamageRequest` and forwards it into `UPorismPredictedBlockStateComponent`.
+
+That means:
+- authority-owned callers apply real damage immediately
+- client-owned callers write predicted health, optionally play immediate local feedback, and queue an aggregated authoritative flush
+- the trace interaction component itself is not the main damage system API

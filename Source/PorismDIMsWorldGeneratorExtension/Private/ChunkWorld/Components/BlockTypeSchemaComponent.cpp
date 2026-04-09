@@ -13,7 +13,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogBlockTypeSchemaComponent, Log, All);
 
 namespace
 {
-	constexpr int32 MaterializedCustomDataMarkerValue = 1;
+	constexpr int32 InitializedCustomDataMarkerValue = 1;
 }
 
 UBlockTypeSchemaComponent::UBlockTypeSchemaComponent()
@@ -60,7 +60,7 @@ int32 UBlockTypeSchemaComponent::GetRequiredCustomDataChannelCount() const
 			continue;
 		}
 
-		// Reserve one extra runtime channel for the materialization marker that lives
+		// Reserve one extra runtime channel for the initialization marker that lives
 		// alongside the authored custom-data payload but is not declared in the schema asset.
 		RequiredChannelCount = FMath::Max(RequiredChannelCount, Layout->GetValueSlotCount() + 1);
 	}
@@ -202,7 +202,7 @@ void UBlockTypeSchemaComponent::WriteBlockCustomDataSlots(const FIntVector& Bloc
 	// server, so trigger the changes to be processed by the chunk world.
 	if (AChunkWorldExtended* ExtendedChunkWorld = Cast<AChunkWorldExtended>(ChunkWorld); ExtendedChunkWorld != nullptr && ExtendedChunkWorld->HasAuthority())
 	{
-		ExtendedChunkWorld->ProcessAuthoritativeCustomDataChanges(BlockWorldPos, PackedValues);
+		ExtendedChunkWorld->HandleBlockCustomDataCommit(BlockWorldPos, PackedValues);
 	}
 }
 
@@ -258,7 +258,7 @@ bool UBlockTypeSchemaComponent::GetBlockCustomDataForBlockWorldPos(const FIntVec
 	}
 
 	const int32 MarkerSlotIndex = Layout->GetValueSlotCount();
-	if (!PackedValues.IsValidIndex(MarkerSlotIndex) || PackedValues[MarkerSlotIndex] != MaterializedCustomDataMarkerValue)
+	if (!PackedValues.IsValidIndex(MarkerSlotIndex) || PackedValues[MarkerSlotIndex] != InitializedCustomDataMarkerValue)
 	{
 		return false;
 	}
@@ -298,7 +298,7 @@ bool UBlockTypeSchemaComponent::SetBlockCustomDataForBlockWorldPos(const FIntVec
 		return false;
 	}
 
-	PackedCustomData.Add(MaterializedCustomDataMarkerValue);
+	PackedCustomData.Add(InitializedCustomDataMarkerValue);
 	WriteBlockCustomDataSlots(BlockWorldPos, PackedCustomData);
 	return true;
 }
@@ -459,12 +459,12 @@ bool UBlockTypeSchemaComponent::InitializeBlockCustomData(const FIntVector& Bloc
 		return false;
 	}
 
-	// Reserve one trailing runtime slot as a materialization marker so we can detect first-time initialization without a side cache.
-	PackedCustomData.Add(MaterializedCustomDataMarkerValue);
+	// Reserve one trailing runtime slot as an initialization marker so we can detect first-time initialization without a side cache.
+	PackedCustomData.Add(InitializedCustomDataMarkerValue);
 
-	const int32 MaterializationSlotIndex = PackedCustomData.Num() - 1;
-	const int32 StoredMarker = ChunkWorld->GetBlockValueByBlockWorldPos(BlockWorldPos, ERessourceType::CustomData, MaterializationSlotIndex);
-	if (StoredMarker == MaterializedCustomDataMarkerValue)
+	const int32 InitializationSlotIndex = PackedCustomData.Num() - 1;
+	const int32 StoredMarker = ChunkWorld->GetBlockValueByBlockWorldPos(BlockWorldPos, ERessourceType::CustomData, InitializationSlotIndex);
+	if (StoredMarker == InitializedCustomDataMarkerValue)
 	{
 		return false;
 	}
@@ -474,7 +474,7 @@ bool UBlockTypeSchemaComponent::InitializeBlockCustomData(const FIntVector& Bloc
 	return true;
 }
 
-bool UBlockTypeSchemaComponent::IsBlockCustomDataMaterialized(const FIntVector& BlockWorldPos) const
+bool UBlockTypeSchemaComponent::IsBlockCustomDataInitialized(const FIntVector& BlockWorldPos) const
 {
 	if (!bBlockDefinitionLookupReady)
 	{
@@ -502,13 +502,13 @@ bool UBlockTypeSchemaComponent::IsBlockCustomDataMaterialized(const FIntVector& 
 		return false;
 	}
 
-	if (!CanAccessCustomDataChannelCount(Layout->GetValueSlotCount() + 1, BlockWorldPos, TEXT("Cannot query block custom-data materialization")))
+	if (!CanAccessCustomDataChannelCount(Layout->GetValueSlotCount() + 1, BlockWorldPos, TEXT("Cannot query block custom-data initialization")))
 	{
 		return false;
 	}
 
-	const int32 MaterializationSlotIndex = Layout->GetValueSlotCount();
-	return ChunkWorld->GetBlockValueByBlockWorldPos(BlockWorldPos, ERessourceType::CustomData, MaterializationSlotIndex) == MaterializedCustomDataMarkerValue;
+	const int32 InitializationSlotIndex = Layout->GetValueSlotCount();
+	return ChunkWorld->GetBlockValueByBlockWorldPos(BlockWorldPos, ERessourceType::CustomData, InitializationSlotIndex) == InitializedCustomDataMarkerValue;
 }
 
 void UBlockTypeSchemaComponent::RebuildBlockDefinitionLookupMaps()

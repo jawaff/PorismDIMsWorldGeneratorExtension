@@ -5,7 +5,7 @@
 #include "Actor/Components/PorismDamageTraceInteractionComponent.h"
 #include "Actor/Components/PorismPredictedBlockStateComponent.h"
 #include "Actor/Components/PorismTraceInteractionComponent.h"
-#include "ChunkWorld/Components/ChunkWorldProximityComponent.h"
+#include "ChunkWorld/Actors/Components/ChunkWorldProximityComponent.h"
 #include "Components/CapsuleComponent.h"
 
 AChunkWorldPlayerCharacter::AChunkWorldPlayerCharacter(const FObjectInitializer& ObjectInitializer)

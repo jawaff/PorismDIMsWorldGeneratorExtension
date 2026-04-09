@@ -14,7 +14,7 @@ class UStruct;
  * The layout is derived from the struct type once, cached by the schema component, and reused
  * for both packing and unpacking so the same struct type always maps to the same slot order.
  */
-struct FBlockCustomDataLayout
+struct PORISMDIMSWORLDGENERATOREXTENSION_API FBlockCustomDataLayout
 {
 	/**
 	 * Struct type this layout was built from.
@@ -23,7 +23,7 @@ struct FBlockCustomDataLayout
 
 	/**
 	 * Number of runtime value slots required by the authored struct fields, excluding the reserved
-	 * materialization marker slot that the schema component appends at the end.
+	 * initialization marker slot that the schema component appends at the end.
 	 */
 	int32 ValueSlotCount = 0;
 

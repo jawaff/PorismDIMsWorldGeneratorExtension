@@ -1,15 +1,16 @@
 # ChunkWorldDamage
 
 ## Purpose
-`UChunkWorldBlockDamageBlueprintLibrary` and `UPorismPredictedBlockStateComponent` provide the shared chunk-world block damage route for projects using the extension plugin.
+`UChunkWorldBlockDamageBlueprintLibrary`, `UPorismPredictedBlockStateComponent`, and `UChunkWorldBlockFeedbackComponent` provide the shared chunk-world block damage route for projects using the extension plugin.
 
 They provide:
 - authoritative block damage application from `FChunkWorldResolvedBlockHit`
+- one shared damage-request interface for both authority and predicted callers
 - local-only predicted health results without mutating client chunk-world custom data
 - schema-aligned health and invincibility reads through `FBlockDamageDefinition` and `FBlockDamageCustomData`
 - a damage-aware interaction component for health-capable blocks
-- replicated nearby hit, destroy sound, and destroy Niagara feedback
-- event-driven retirement of predicted values when authoritative custom-data replication arrives
+- authoritative hit and destroy feedback with optional immediate local initiator feedback
+- event-driven retirement of predicted values and queued client aggregates when authoritative custom-data replication arrives
 
 ## Main Types
 - `UChunkWorldBlockDamageBlueprintLibrary`
@@ -41,17 +42,20 @@ Optional destroy feedback comes from `FBlockDefinitionBase`:
 If the resolved block does not use those schema families, the shared damage helpers return `false` and do nothing.
 
 ## Current Behavior
-- Applies authoritative damage through `TryApplyBlockDamageForResolvedBlockHit(...)`.
-- Calculates local-only predicted damage through `TryApplyPredictedBlockDamageForResolvedBlockHit(...)`.
-- Reads current health and invincibility through `TryGetCurrentBlockHealthStateForResolvedBlockHit(...)`.
+- Reads the current block health view through `UPorismPredictedBlockStateComponent::TryGetHealthState(...)`.
+- Applies shared damage requests through `UPorismPredictedBlockStateComponent::ApplyBlockDamageRequest(...)`.
+- Keeps a compatibility wrapper with `ApplyPredictedDamageAndQueueAuthoritativeFlush(...)` for older callers.
+- Falls back to authored max health before runtime custom data is initialized.
 - Initializes block custom data on demand for authoritative writes only.
 - Honors `bInvincible` from `FBlockCustomDataBase`.
-- Removes the block when health reaches zero.
+- Applies real block mutation only on the server.
+- Removes the block through `AChunkWorldExtended::DestroyBlock(...)` when health reaches zero or lower after an authoritative write.
 - Reports `BlockTypeName` in `FChunkWorldBlockDamageResult`.
-- Plays non-lethal hit feedback from `FBlockDamageDefinition::HitSound`.
-- Plays destroy feedback from `FBlockDefinitionBase::DestroyedSound` and `FBlockDefinitionBase::DestroyedEffect`.
-- Replicates feedback through `UChunkWorldBlockFeedbackComponent`.
+- Plays non-lethal hit feedback through the shared feedback component on authoritative non-lethal writes.
+- Plays destroy feedback through the shared feedback component on authoritative destroy paths.
+- Allows the initiating client to request immediate local hit or destroy feedback when the caller opts in.
 - Retires predictions when authoritative custom-data replication is applied for the same `ChunkWorld + BlockWorldPos`.
+- Clears queued authoritative client damage for a block when the authoritative update has caught up to that prediction.
 - Falls back to timeout cleanup for stale predictions.
 
 The shared path intentionally does not own:
@@ -63,23 +67,27 @@ The shared path intentionally does not own:
 
 ## How To Use
 1. Resolve a block hit into `FChunkWorldResolvedBlockHit` with `UChunkWorldHitBlueprintLibrary`.
-2. Apply damage with `UChunkWorldBlockDamageBlueprintLibrary`.
-3. For local UI, store predicted results in `UPorismPredictedBlockStateComponent`.
-4. Read current block health through `UPorismPredictedBlockStateComponent` when prediction is in use, or directly from the damage library when it is not.
+2. Compute final gameplay damage outside the plugin.
+3. Submit the request through `UPorismPredictedBlockStateComponent`.
+4. Read current block health through `UPorismPredictedBlockStateComponent`.
 
-If your interaction flow should only target health-capable blocks, use `UPorismDamageTraceInteractionComponent` instead of `UPorismTraceInteractionComponent`.
+If your interaction flow needs focused UI or input helpers, add `UPorismDamageTraceInteractionComponent` on the same owner.
 
 `UPorismDamageTraceInteractionComponent`:
-- only accepts block targets that support the shared damage schema family
 - exposes `FChunkWorldDamageBlockInteractionResult`
 - exposes `ApplyDamageToCurrentBlock(...)`
 - reads prediction through `UPorismPredictedBlockStateComponent` when present on the owner
+- stays inactive until the currently focused block can produce a valid health view
+- emits one-shot initialization for the currently focused block through `OnDamageBlockCustomDataInitialized`
 
 Typical authoritative flow:
 1. Resolve `FChunkWorldResolvedBlockHit`.
 2. Compute project-specific damage outside the plugin.
-3. Call `TryApplyBlockDamageForResolvedBlockHit(...)`.
-4. Inspect `FChunkWorldBlockDamageResult` for:
+3. Build `FChunkWorldBlockDamageRequest`.
+4. Call `ApplyBlockDamageRequest(...)` on an authority-owned `UPorismPredictedBlockStateComponent`.
+5. Inspect `FChunkWorldBlockDamageRequestResult` and `FChunkWorldBlockDamageResult` for:
+   - `bAccepted`
+   - `bAuthoritativeDamageApplied`
    - `bAppliedDamage`
    - `bWasInvincible`
    - `bDestroyed`
@@ -90,8 +98,28 @@ Typical authoritative flow:
 Typical predicted flow:
 1. Resolve `FChunkWorldResolvedBlockHit`.
 2. Compute project-specific damage outside the plugin.
-3. Call `TryApplyPredictedBlockDamageForResolvedBlockHit(...)`.
-4. Store the returned result in `UPorismPredictedBlockStateComponent`.
+3. Build `FChunkWorldBlockDamageRequest`.
+4. Call `ApplyBlockDamageRequest(...)` on a client-owned `UPorismPredictedBlockStateComponent`.
+5. Inspect `FChunkWorldBlockDamageRequestResult` for:
+   - `bPredictionWritten`
+   - `bQueuedAuthoritativeFlush`
+   - `bPlayedImmediateLocalFeedback`
+
+## Shared Request Model
+`UPorismPredictedBlockStateComponent` is the main reusable block-damage boundary.
+
+Use it for:
+- focused trace damage
+- melee or weapon collision damage
+- projectiles
+- spells
+- scripted world damage
+
+The request model is intentionally source-agnostic:
+- `ResolvedHit`
+- `DamageAmount`
+- optional `RequestContextTag`
+- optional `bAllowImmediateLocalFeedback`
 
 ## Feedback Replication
 `UChunkWorldBlockFeedbackComponent` is the shared replicated feedback host for chunk-world block damage.
@@ -102,6 +130,7 @@ Current behavior:
 - supports:
   - hit sound only for non-lethal damage
   - destroyed sound and destroyed Niagara for block removal
+  - optional immediate local initiator feedback for predicted requests
 
 Chunk worlds that want shared feedback should own a `UChunkWorldBlockFeedbackComponent`.
 
@@ -115,11 +144,12 @@ Use it when:
 
 Current behavior:
 - stores predicted results by `ChunkWorld + BlockWorldPos`
-- overwrites older predictions for the same block
+- steps predicted health down from the latest stored predicted result for the same block
+- aggregates queued client damage by block before the authoritative flush is sent
 - prefers predicted values over authoritative reads until reconciliation
 - never writes authoritative values into the prediction cache
 - retires predictions on:
-  - first authoritative replicated custom-data update for the same block
+  - authoritative replicated custom-data update for the same block when the reconciled health has caught up
   - timeout fallback
 
 The server should not use prediction state.
@@ -129,8 +159,9 @@ The shared reconciliation path is event-driven.
 
 Current route:
 1. authoritative custom-data replication is applied by the chunk world
-2. chunk-world code calls `UPorismPredictedBlockStateComponent::NotifyAuthoritativeBlockStateUpdated(...)`
-3. matching predictions for that `ChunkWorld + BlockWorldPos` are retired
+2. `AChunkWorldExtended` broadcasts `OnBlockCustomDataChanged`
+3. `UPorismPredictedBlockStateComponent` clears matching prediction and pending queued damage when appropriate
+4. `UPorismPredictedBlockStateComponent` broadcasts `OnTrackedBlockStateChanged`
 
 This avoids chunk scans and keeps the prediction cache bounded.
 

@@ -42,7 +42,7 @@ Starter character class:
 - use damage-oriented schema families in the registry
   - definition family derived from `FBlockDamageDefinition`
   - custom-data family derived from `FBlockDamageCustomData`
-- add `UPorismPredictedBlockStateComponent` to player-controlled characters that need to damage voxels
+- add `UPorismPredictedBlockStateComponent` to player-controlled characters that need to damage voxels or read shared health state for focused UI
 - when damage-capable blocks also use actor swap, keep the damage interaction and predicted-state components on the same character that owns the proximity component so focused block UI and swap relevance stay aligned
 
 ### Interaction Support
@@ -50,11 +50,18 @@ Only add `UPorismDamageTraceInteractionComponent` when that character also needs
 
 Do not treat the trace interaction component as the main damage interface. The main reusable damage interface is `UPorismPredictedBlockStateComponent`.
 
+Use the split like this:
+- `UPorismPredictedBlockStateComponent` for shared health reads, damage requests, prediction, and reconciliation
+- `UPorismDamageTraceInteractionComponent` for focused damage-aware UI and simple "damage the currently focused block" input flows
+- `UPorismTraceInteractionComponent` only when you need generic interaction without health semantics
+
 ### Main Utilities
-Use `UChunkWorldBlockDamageBlueprintLibrary` for damage-oriented helper functions such as:
-- authoritative block damage application
-- health and invincibility reads
-- shared hit feedback helpers
+Use `UPorismPredictedBlockStateComponent` as the primary runtime API for:
+- shared damage requests
+- shared health-state reads
+- prediction and reconciliation
+
+Use `UChunkWorldBlockDamageBlueprintLibrary` for lower-level schema and authoritative damage helpers that back the shared component route.
 
 Use `UChunkWorldHitBlueprintLibrary` alongside it when you first need to resolve a hit into a represented block.
 

@@ -10,6 +10,40 @@
 
 DECLARE_MULTICAST_DELEGATE_TwoParams(FPorismTrackedBlockStateChangedSignature, AChunkWorld* /*ChunkWorld*/, const FIntVector& /*BlockWorldPos*/);
 
+USTRUCT(BlueprintType)
+struct FPorismBlockHealthState
+{
+	GENERATED_BODY()
+
+	/** True when the current health view is coming from a live local prediction. */
+	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Prediction")
+	bool bUsingPredictedHealth = false;
+
+	/** True when runtime custom data has already been initialized for this block. */
+	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Prediction")
+	bool bHasCustomData = false;
+
+	/** True when the current health view is backed directly by initialized authoritative runtime state. */
+	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Prediction")
+	bool bHasAuthoritativeHealth = false;
+
+	/** True when the block currently ignores shared damage. */
+	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Prediction")
+	bool bIsInvincible = false;
+
+	/** Current health from either prediction, initialized runtime custom data, or authored max-health fallback before initialization. */
+	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Prediction")
+	int32 CurrentHealth = 0;
+
+	/** Maximum health from the authored damage definition. */
+	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Prediction")
+	int32 MaxHealth = 0;
+
+	/** Resolved block type for this health view. */
+	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Prediction")
+	FGameplayTag BlockTypeName;
+};
+
 USTRUCT()
 struct FQueuedPredictedBlockDamage
 {
@@ -23,6 +57,9 @@ struct FQueuedPredictedBlockDamage
 
 	UPROPERTY()
 	int32 DamageAmount = 0;
+
+	UPROPERTY()
+	FName RequestContextTag = NAME_None;
 };
 
 /**
@@ -40,13 +77,13 @@ public:
 	FPorismTrackedBlockStateChangedSignature& OnTrackedBlockStateChanged() { return TrackedBlockStateChangedEvent; }
 
 	/**
-	 * Stores one new predicted damage result for later UI/gameplay reads.
+	 * Applies one shared block-damage request through either the authoritative or client-predicted path.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld|Prediction")
-	void StorePredictedDamageResult(const FChunkWorldResolvedBlockHit& ResolvedHit, const FChunkWorldBlockDamageResult& DamageResult);
+	bool ApplyBlockDamageRequest(const FChunkWorldBlockDamageRequest& DamageRequest, FChunkWorldBlockDamageRequestResult& OutResult);
 
 	/**
-	 * Applies one local predicted block damage result, stores it in the shared prediction cache, and queues the matching authoritative server flush.
+	 * Compatibility wrapper for older callers that only provide a resolved block hit plus damage amount.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld|Prediction")
 	bool ApplyPredictedDamageAndQueueAuthoritativeFlush(const FChunkWorldResolvedBlockHit& ResolvedHit, int32 DamageAmount);
@@ -58,10 +95,17 @@ public:
 	void ClearPredictionForResolvedBlockHit(const FChunkWorldResolvedBlockHit& ResolvedHit);
 
 	/**
-	 * Returns the current health state for a resolved block, preferring a live prediction and falling back to authoritative custom data.
+	 * Returns the current block health view for a resolved block using prediction first and chunk-world damage fallback second.
+	 * When runtime custom data is not initialized yet, the returned health view falls back to the authored max-health value.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld|Prediction")
-	bool TryGetCurrentHealthState(const FChunkWorldResolvedBlockHit& ResolvedHit, int32& OutHealth, bool& bOutInvincible, bool& bOutUsingPrediction, FGameplayTag& OutBlockTypeName);
+	bool TryGetHealthState(const FChunkWorldResolvedBlockHit& ResolvedHit, FPorismBlockHealthState& OutState);
+
+	/**
+	 * Returns one stored predicted health state for a resolved block when the client has an active local prediction.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld|Prediction")
+	bool TryGetPredictedHealthState(const FChunkWorldResolvedBlockHit& ResolvedHit, int32& OutHealth, bool& bOutInvincible, FGameplayTag& OutBlockTypeName);
 
 protected:
 	virtual void BeginPlay() override;
@@ -92,13 +136,18 @@ private:
 	};
 
 	UFUNCTION()
-	void HandleObservedChunkWorldAuthoritativeBlockCustomDataUpdated(AChunkWorldExtended* ChunkWorld, const FIntVector& BlockWorldPos);
+	void HandleObservedChunkWorldBlockCustomDataChanged(AChunkWorldExtended* ChunkWorld, const FIntVector& BlockWorldPos, bool bTouchedHealth);
 
 	void PruneExpiredPredictions();
 	bool ShouldRegisterPredictionNotifications() const;
-	bool TryApplyPredictedDamageForResolvedBlockHit(const FChunkWorldResolvedBlockHit& ResolvedHit, int32 DamageAmount, float PredictionTimeSeconds, FChunkWorldBlockDamageResult& OutResult) const;
-	void QueueAuthoritativeDamage(const FChunkWorldResolvedBlockHit& ResolvedHit, int32 DamageAmount);
+	bool ValidateDamageRequest(const FChunkWorldBlockDamageRequest& DamageRequest) const;
+	bool TryBuildPredictedDamageResult(const FChunkWorldBlockDamageRequest& DamageRequest, float PredictionTimeSeconds, FChunkWorldBlockDamageResult& OutResult) const;
+	bool DidTrackedHealthStateChange(const FChunkWorldBlockDamageResult* PreviousResult, const FChunkWorldBlockDamageResult& NewResult) const;
+	bool TryApplyImmediateLocalFeedback(const FChunkWorldBlockDamageRequest& DamageRequest, const FChunkWorldBlockDamageResult& DamageResult) const;
+	void StorePredictedDamageResult(const FChunkWorldBlockDamageRequest& DamageRequest, const FChunkWorldBlockDamageResult& DamageResult);
+	void QueueAuthoritativeDamage(const FChunkWorldBlockDamageRequest& DamageRequest);
 	void FlushQueuedPredictedDamage();
+	bool ApplyAuthoritativeDamageRequest(const FChunkWorldBlockDamageRequest& DamageRequest, FChunkWorldBlockDamageRequestResult& OutResult);
 	void BroadcastTrackedBlockStateChanged(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos);
 	void BindObservedChunkWorld(AChunkWorld* ChunkWorld);
 	void BindObservedChunkWorlds();

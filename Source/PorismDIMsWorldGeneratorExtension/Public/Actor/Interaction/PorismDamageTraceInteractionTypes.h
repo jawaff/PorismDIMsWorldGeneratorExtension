@@ -22,13 +22,21 @@ struct FChunkWorldDamageBlockInteractionResult : public FChunkWorldBlockInteract
 	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")
 	bool bUsingPredictedHealth = false;
 
-	/** True when runtime custom data has already been materialized for this block. */
+	/** True when runtime custom data has already been initialized for this block. */
 	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")
 	bool bHasCustomData = false;
+
+	/** True when current health is backed by authoritative runtime state, even if full custom-data reconstruction is not yet available. */
+	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")
+	bool bHasAuthoritativeHealth = false;
 
 	/** True when the block can currently accept shared damage under the health schema family. */
 	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")
 	bool bIsDestructible = false;
+
+	/** True when the block currently ignores damage requests under the shared health schema family. */
+	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")
+	bool bIsInvincible = false;
 
 	/** Current health for the resolved block. */
 	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")

@@ -3,7 +3,7 @@
 #include "ChunkWorld/Subsystems/ChunkWorldSwapRegistrationSubsystem.h"
 
 #include "ChunkWorld/Components/ChunkWorldBlockSwapScannerComponent.h"
-#include "ChunkWorld/Components/ChunkWorldProximityComponent.h"
+#include "ChunkWorld/Actors/Components/ChunkWorldProximityComponent.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogChunkWorldSwapRegistration, Log, All);
 

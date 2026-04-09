@@ -1,6 +1,6 @@
 // Copyright 2026 Spotted Loaf Studio
 
-#include "ChunkWorld/Components/ChunkWorldProximityComponent.h"
+#include "ChunkWorld/Actors/Components/ChunkWorldProximityComponent.h"
 
 #include "ChunkWorld/Subsystems/ChunkWorldSwapRegistrationSubsystem.h"
 #include "DrawDebugHelpers.h"

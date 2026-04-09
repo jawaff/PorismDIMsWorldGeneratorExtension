@@ -109,9 +109,9 @@ struct FBlockDamageCustomData : public FBlockCustomDataBase
 	GENERATED_BODY()
 
 	/**
-	 * Current health for this materialized block instance.
+	 * Current health for this initialized block instance.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (DisplayPriority = "1", ClampMin = "0", UIMin = "0", ToolTip = "Current health for this materialized block instance."))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (DisplayPriority = "1", ClampMin = "0", UIMin = "0", ToolTip = "Current health for this initialized block instance."))
 	int32 Health = 1;
 };
 
