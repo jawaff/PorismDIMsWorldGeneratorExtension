@@ -18,6 +18,11 @@
 			"Name": "PorismDIMsWorldGeneratorExtension",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "PorismDIMsWorldGeneratorExtensionTests",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
 		}
 	],
 	"Plugins": [
