@@ -39,3 +39,4 @@ Scripts/env.local.bat
 **/__pycache__/
 *.pyc
 **/VoxelDebug/
+Docs/InProgress/
