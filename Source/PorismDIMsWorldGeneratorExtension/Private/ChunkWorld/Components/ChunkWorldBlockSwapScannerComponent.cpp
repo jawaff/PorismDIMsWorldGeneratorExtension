@@ -188,6 +188,24 @@ bool UChunkWorldBlockSwapScannerComponent::ForceRemoveSwapForDestroyedBlock(cons
 	return ForceRemoveSwap(ChunkWorld, BlockWorldPos, TEXT("DestroyedBlock"));
 }
 
+bool UChunkWorldBlockSwapScannerComponent::TryGetActiveSwapPresentationTransformForBlock(const FIntVector& BlockWorldPos, FTransform& OutSwapTransform) const
+{
+	const FActiveBlockSwap* ActiveSwap = ActiveSwaps.Find(BlockWorldPos);
+	if (ActiveSwap == nullptr)
+	{
+		return false;
+	}
+
+	if (const AActor* SpawnedActor = ActiveSwap->SpawnedActor.Get())
+	{
+		OutSwapTransform = SpawnedActor->GetActorTransform();
+		return true;
+	}
+
+	OutSwapTransform = ActiveSwap->SwapTransform;
+	return true;
+}
+
 void UChunkWorldBlockSwapScannerComponent::ScanForSwaps()
 {
 	if (!ShouldRunSwapScan())

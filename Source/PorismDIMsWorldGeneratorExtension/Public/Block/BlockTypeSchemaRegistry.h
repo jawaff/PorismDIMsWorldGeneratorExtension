@@ -81,22 +81,28 @@ struct FBlockDamageDefinition : public FBlockDefinitionBase
 	GENERATED_BODY()
 
 	/**
+	 * Optional destruction presentation actor spawned when this block reaches zero health and is removed.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (DisplayPriority = "7", ToolTip = "Optional destruction presentation actor spawned when this block reaches zero health and is removed. Implement the chunk-world destruction actor interface on that class so it can run its authored destruction behavior when triggered."))
+	TSoftClassPtr<AActor> DestructionActorClass;
+
+	/**
 	 * Maximum health for this block type before it is destroyed.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (DisplayPriority = "7", ClampMin = "0", UIMin = "0", ToolTip = "Maximum health for this block type before it is destroyed."))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (DisplayPriority = "8", ClampMin = "0", UIMin = "0", ToolTip = "Maximum health for this block type before it is destroyed."))
 	int32 MaxHealth = 1;
 
 	/**
 	 * Generic authored damage scalar applied by project-side damage calculators after they compute their local damage model.
 	 * Kept in the shared damage schema so projects can opt into a simple block-wide multiplier before introducing richer damage families.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (DisplayPriority = "8", ClampMin = "0.0", UIMin = "0.0", ToolTip = "Generic authored damage scalar applied by project-side damage calculators after they compute their local damage model."))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (DisplayPriority = "9", ClampMin = "0.0", UIMin = "0.0", ToolTip = "Generic authored damage scalar applied by project-side damage calculators after they compute their local damage model."))
 	double DamageMultiplier = 1.0;
 
 	/**
 	 * Sound to play when this block type is hit but not destroyed.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (DisplayPriority = "9", ToolTip = "Sound to play when this block type is hit but not destroyed."))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (DisplayPriority = "10", ToolTip = "Sound to play when this block type is hit but not destroyed."))
 	TObjectPtr<USoundBase> HitSound = nullptr;
 };
 

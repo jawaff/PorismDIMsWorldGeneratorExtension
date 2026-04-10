@@ -109,3 +109,5 @@ The plugin owns:
 - `ApplyPredictedDamageRequest(...)` is for locally controlled client prediction only.
 - `ApplyAuthoritativeDamageRequest(...)` is for authority only.
 - Block destruction is server-owned, even when the client predicts the block should reach zero health.
+- If you author `DestructionActorClass` on `FBlockDamageDefinition`, that actor should implement `UChunkWorldDestructionActorInterface` so the chunk world can trigger its destruction presentation when the block is removed.
+- The destruction actor is responsible for its own one-shot cleanup after it is triggered. The plugin spawns and triggers it, but your destruction actor should end its presentation and destroy itself when done.

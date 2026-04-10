@@ -9,6 +9,7 @@
 #include "ChunkWorld/Blueprint/ChunkWorldBlockHitBlueprintLibrary.h"
 #include "ChunkWorld/Components/BlockTypeSchemaComponent.h"
 #include "ChunkWorld/Components/ChunkWorldBlockFeedbackComponent.h"
+#include "Engine/AssetManager.h"
 
 namespace
 {
@@ -65,6 +66,24 @@ namespace
 
 		void* PayloadMemory = Payload.GetMutableMemory();
 		return PayloadMemory != nullptr ? static_cast<FBlockDamageCustomData*>(PayloadMemory) : nullptr;
+	}
+
+	void RequestDestructionActorPreload(const FBlockDamageDefinition& Definition)
+	{
+		if (Definition.DestructionActorClass.IsNull() || Definition.DestructionActorClass.IsValid())
+		{
+			return;
+		}
+
+		const FSoftObjectPath DestructionClassPath = Definition.DestructionActorClass.ToSoftObjectPath();
+		if (!DestructionClassPath.IsValid())
+		{
+			return;
+		}
+
+		// Best-effort preload: destruction actors are one-shot presenters, so the shared damage path only needs to
+		// start the load early. The lethal destroy path still falls back to synchronous load if this has not finished.
+		UAssetManager::GetStreamableManager().RequestAsyncLoad(DestructionClassPath, FStreamableDelegate());
 	}
 }
 
@@ -212,6 +231,7 @@ bool UChunkWorldBlockDamageBlueprintLibrary::TryApplyBlockDamageForResolvedBlock
 	OutResult.bWasInvincible = Definition.bInvincible;
 	OutResult.PreviousHealth = CustomData.Health;
 	OutResult.DamageApplied = DamageAmount;
+	RequestDestructionActorPreload(Definition);
 
 	if (Definition.bInvincible)
 	{

@@ -36,6 +36,9 @@ public:
 	/** Force-removes one active or pending swap because the underlying voxel is being authoritatively destroyed. */
 	bool ForceRemoveSwapForDestroyedBlock(const FIntVector& BlockWorldPos);
 
+	/** Resolves the current actor presentation transform for one swapped block so destruction or follow-up presentation can inherit the same placement. */
+	bool TryGetActiveSwapPresentationTransformForBlock(const FIntVector& BlockWorldPos, FTransform& OutSwapTransform) const;
+
 	/** Shared swap scan event emitted when the server swaps a block into or out of actor presentation. */
 	UPROPERTY(BlueprintAssignable, Category = "Block|ChunkWorld|Swap")
 	FOnChunkWorldBlockSwapRequest OnBlockSwapRequested;

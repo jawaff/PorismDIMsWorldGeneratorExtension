@@ -46,6 +46,8 @@ Starter character class:
   - custom-data family derived from `FBlockDamageCustomData`
 - add `UPorismPredictedBlockStateComponent` to player-controlled characters that need to damage voxels or read shared health state for focused UI
 - when damage-capable blocks also use actor swap, keep the damage interaction and predicted-state components on the same character that owns the proximity component so focused block UI and swap relevance stay aligned
+- if a block should spawn a dedicated destruction presentation on zero health, assign `DestructionActorClass` on the damage definition and implement `UChunkWorldDestructionActorInterface` on that actor class
+- destruction actors are one-shot presenters. Let that actor handle its own playback lifetime and call `Destroy()` or equivalent cleanup when the presentation is finished
 
 ### Interaction Support
 Only add `UPorismDamageTraceInteractionComponent` when that character also needs interaction support for focused damage-capable blocks.

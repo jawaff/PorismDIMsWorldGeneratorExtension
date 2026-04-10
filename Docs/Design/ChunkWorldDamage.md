@@ -17,7 +17,9 @@ They provide:
 - `UPorismDamageTraceInteractionComponent`
 - `UPorismPredictedBlockStateComponent`
 - `UChunkWorldBlockFeedbackComponent`
+- `UChunkWorldDestructionActorInterface`
 - `FChunkWorldBlockDamageResult`
+- `FChunkWorldBlockDestructionRequest`
 - `FChunkWorldResolvedBlockHit`
 - `FChunkWorldBlockHitAuthorityPayload`
 - `FBlockDamageDefinition`
@@ -28,6 +30,7 @@ The shared damage path assumes the resolved block uses the plugin damage schema 
 
 Required definition family:
 - `FBlockDamageDefinition`
+  - `DestructionActorClass`
   - `MaxHealth`
   - `HitSound`
 
@@ -40,6 +43,11 @@ Optional destroy feedback comes from `FBlockDefinitionBase`:
 - `DestroyedSound`
 - `DestroyedEffect`
 
+Optional destruction presentation comes from `FBlockDamageDefinition`:
+- `DestructionActorClass`
+
+When `DestructionActorClass` is authored, that actor class is expected to implement `UChunkWorldDestructionActorInterface`.
+
 If the resolved block does not use those schema families, the shared damage helpers return `false` and do nothing.
 
 ## Current Behavior
@@ -51,6 +59,7 @@ If the resolved block does not use those schema families, the shared damage help
 - Honors `bInvincible` from `FBlockCustomDataBase`.
 - Applies real block mutation only on the server.
 - Removes the block through `AChunkWorldExtended::DestroyBlock(...)` when health reaches zero or lower after an authoritative write.
+- Spawns and triggers `DestructionActorClass` through `UChunkWorldDestructionActorInterface` when that class is authored on the damage definition.
 - Reports `BlockTypeName` in `FChunkWorldBlockDamageResult`.
 - Plays non-lethal hit feedback through the shared feedback component on authoritative non-lethal writes.
 - Plays destroy feedback through the shared feedback component on authoritative destroy paths.
@@ -175,3 +184,8 @@ Keep project-specific behavior outside the plugin, for example:
 - damage shaping from stats, tools, spells, or weapon rules
 - project-specific UI presentation
 - project-specific actor interaction and swap behavior
+
+The plugin does own the stable destruction trigger contract:
+- author `DestructionActorClass` on the block damage definition
+- implement `TriggerBlockDestruction(...)` through `UChunkWorldDestructionActorInterface`
+- keep the destruction actor's Chaos or one-shot presentation logic inside that actor

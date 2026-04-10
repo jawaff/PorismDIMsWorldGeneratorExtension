@@ -23,7 +23,7 @@ The plugin also provides a concrete first-pass pair for damageable blocks:
 - `FBlockDamageCustomData`
 
 Use these when you want a block family to expose:
-- `MaxHealth` and `HitSound` in the definition payload
+- `DestructionActorClass`, `MaxHealth`, and `HitSound` in the definition payload
 - `Health` in the runtime custom-data payload
 
 They extend the plugin base families, so they still fit into `FBlockTypeSchema` rows and the registry validation path.

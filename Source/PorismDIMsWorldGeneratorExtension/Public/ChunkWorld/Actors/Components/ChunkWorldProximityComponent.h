@@ -34,6 +34,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld|Swap")
 	float GetSwapOutDistance() const { return SwapOutDistance; }
 
+	/** Returns the larger radius used to visualize future preload coverage around this proximity source. */
+	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld|Swap")
+	float GetSwapPreloadDistance() const { return SwapPreloadDistance; }
+
 	/** Returns the collision channel used by polling trace queries for this proximity source. */
 	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld")
 	ECollisionChannel GetProximityCollisionChannel() const { return ProximityCollisionChannel; }
@@ -68,6 +72,10 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Swap", meta = (ClampMin = "0.0", UIMin = "0.0", ToolTip = "Distance at which this proximity source considers one active swapped voxel no longer relevant and ready to restore back into the chunk world. This also defines the polling sphere-sweep radius for mesh-backed swap candidate detection and must be greater than SwapInDistance."))
 	float SwapOutDistance = 1700.0f;
 
+	/** Larger radius used to visualize future preload coverage before authored swap actors become swap-in eligible. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Swap", meta = (ClampMin = "0.0", UIMin = "0.0", ToolTip = "Larger radius used to visualize future preload coverage before authored swap actors become swap-in eligible. Set this greater than or equal to SwapOutDistance when you want preload debug visualization beyond the active query radius."))
+	float SwapPreloadDistance = 2200.0f;
+
 	/** If true, draws wireframe debug spheres at the effective scan origin so the swap-in and swap-out query radii can be visualized in runtime. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Debug", meta = (ToolTip = "If true, draws wireframe debug spheres at the effective scan origin so the swap-in and swap-out query radii can be visualized in runtime."))
 	bool bDebugDrawProximitySphere = false;
@@ -83,6 +91,10 @@ protected:
 	/** Color used for the swap-out debug sphere. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Debug", meta = (ToolTip = "Color used for the runtime swap-out debug sphere."))
 	FColor DebugSwapOutSphereColor = FColor(20, 90, 210);
+
+	/** Color used for the preload debug sphere. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Debug", meta = (ToolTip = "Color used for the runtime preload debug sphere."))
+	FColor DebugSwapPreloadSphereColor = FColor(40, 200, 140);
 
 	/** Color used for active swapped voxel block debug boxes. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Debug", meta = (ToolTip = "Color used for active swapped voxel block debug boxes."))

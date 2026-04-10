@@ -13,6 +13,7 @@ class UChunkWorldBlockFeedbackComponent;
 class UChunkWorldBlockSwapScannerComponent;
 class UChunkWorldBlockSwapComponent;
 class AChunkWorldExtended;
+struct FChunkWorldBlockDestructionRequest;
 #if WITH_EDITOR
 struct FPropertyChangedEvent;
 #endif
@@ -205,6 +206,9 @@ private:
 
 	/** Captures one previously represented block context before a removal write applies. */
 	bool TryBuildPreviousResolvedHit(const FIntVector& BlockWorldPos, FChunkWorldResolvedBlockHit& OutResolvedHit, FGameplayTag& OutBlockTypeName) const;
+
+	/** Spawns and triggers one authored destruction presentation actor when the destroyed block uses the shared damage definition family. */
+	void TrySpawnDestructionActorForDestroyedBlock(const FIntVector& BlockWorldPos, const FChunkWorldResolvedBlockHit* DestroyedFeedbackHit, const FGameplayTag& BlockTypeName);
 
 	/** Merges one observed settled replicated health decrease into the next deferred transition flush. */
 	void QueueObservedReplicatedHealthDecrease(const FIntVector& BlockWorldPos, int32 PreviousHealth, int32 CurrentHealth);

@@ -3,6 +3,8 @@
 #include "ChunkWorld/Actors/ChunkWorldExtended.h"
 
 #include "Block/BlockTypeSchemaRegistry.h"
+#include "Block/BlockTypeSchemaBlueprintLibrary.h"
+#include "ChunkWorld/Actors/ChunkWorldDestructionActorInterface.h"
 #include "ChunkWorld/Blueprint/ChunkWorldBlockHitBlueprintLibrary.h"
 #include "ChunkWorld/Components/BlockTypeSchemaComponent.h"
 #include "ChunkWorld/Blueprint/ChunkWorldBlockDamageBlueprintLibrary.h"
@@ -11,6 +13,7 @@
 #include "ChunkWorld/Components/ChunkWorldBlockSwapComponent.h"
 #include "ChunkWorldStructs/ChunkWorldRuntimeStructs.h"
 #include "ChunkWorldStructs/ChunkWorldStructs.h"
+#include "Kismet/GameplayStatics.h"
 #include "PorismDIMsWorldGeneratorExtension.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogChunkWorldExtended, Log, All);
@@ -368,11 +371,6 @@ bool AChunkWorldExtended::DestroyBlock(const FIntVector& BlockWorldPos, bool bRe
 		return false;
 	}
 
-	if (BlockSwapScannerComponent != nullptr)
-	{
-		(void)BlockSwapScannerComponent->ForceRemoveSwapForDestroyedBlock(BlockWorldPos);
-	}
-
 	FChunkWorldResolvedBlockHit DestroyedFeedbackHit;
 	const bool bHasDestroyedFeedbackHit = UChunkWorldBlockHitBlueprintLibrary::TryResolveBlockHitContextFromBlockWorldPos(this, BlockWorldPos, DestroyedFeedbackHit);
 
@@ -380,6 +378,13 @@ bool AChunkWorldExtended::DestroyBlock(const FIntVector& BlockWorldPos, bool bRe
 	FBlockDefinitionBase Definition;
 	if (BlockTypeSchemaComponent != nullptr && BlockTypeSchemaComponent->GetBlockDefinitionForBlockWorldPos(BlockWorldPos, BlockTypeName, Definition))
 	{
+		TrySpawnDestructionActorForDestroyedBlock(BlockWorldPos, bHasDestroyedFeedbackHit ? &DestroyedFeedbackHit : nullptr, BlockTypeName);
+
+		if (BlockSwapScannerComponent != nullptr)
+		{
+			(void)BlockSwapScannerComponent->ForceRemoveSwapForDestroyedBlock(BlockWorldPos);
+		}
+
 		if (!Definition.MeshAsset.IsNull())
 		{
 			FMeshData EmptyMeshData;
@@ -401,6 +406,11 @@ bool AChunkWorldExtended::DestroyBlock(const FIntVector& BlockWorldPos, bool bRe
 			SetBlockValueByBlockWorldPos(BlockWorldPos, EmptyMaterial, bRefreshChunks);
 		    return true;
 		}
+	}
+
+	if (BlockSwapScannerComponent != nullptr)
+	{
+		(void)BlockSwapScannerComponent->ForceRemoveSwapForDestroyedBlock(BlockWorldPos);
 	}
 
 	// Fallback for unexpected/runtime-only states: preserve old behavior if the authored association cannot be resolved.
@@ -429,6 +439,98 @@ bool AChunkWorldExtended::DestroyBlock(const FIntVector& BlockWorldPos, bool bRe
 	}
 	
 	return false;
+}
+
+void AChunkWorldExtended::TrySpawnDestructionActorForDestroyedBlock(
+	const FIntVector& BlockWorldPos,
+	const FChunkWorldResolvedBlockHit* DestroyedFeedbackHit,
+	const FGameplayTag& BlockTypeName)
+{
+	if (BlockTypeSchemaComponent == nullptr)
+	{
+		return;
+	}
+
+	FInstancedStruct DefinitionPayload;
+	if (BlockTypeSchemaRegistry == nullptr || !BlockTypeSchemaRegistry->TryGetBlockDefinition(BlockTypeName, DefinitionPayload))
+	{
+		return;
+	}
+
+	FBlockDamageDefinition DamageDefinition;
+	if (!UBlockTypeSchemaBlueprintLibrary::TryGetBlockDamageDefinition(DefinitionPayload, DamageDefinition)
+		|| DamageDefinition.DestructionActorClass.IsNull())
+	{
+		return;
+	}
+
+	UClass* DestructionActorClass = DamageDefinition.DestructionActorClass.Get();
+	if (DestructionActorClass == nullptr)
+	{
+		// Project-facing behavior: try one blocking load as a fallback so the first lethal destroy can still present.
+		DestructionActorClass = DamageDefinition.DestructionActorClass.LoadSynchronous();
+		if (DestructionActorClass == nullptr)
+		{
+			return;
+		}
+	}
+
+	FTransform SpawnTransform = FTransform(BlockWorldPosToUEWorldPos(BlockWorldPos));
+	bool bHasPresentationTransform = false;
+	if (BlockSwapScannerComponent != nullptr)
+	{
+		bHasPresentationTransform = BlockSwapScannerComponent->TryGetActiveSwapPresentationTransformForBlock(BlockWorldPos, SpawnTransform);
+	}
+	if (!bHasPresentationTransform && BlockSwapComponent != nullptr)
+	{
+		bHasPresentationTransform = BlockSwapComponent->TryGetSwapTransformForBlock(BlockWorldPos, SpawnTransform);
+	}
+
+	if (!bHasPresentationTransform && DestroyedFeedbackHit != nullptr)
+	{
+		SpawnTransform.SetLocation(DestroyedFeedbackHit->RepresentativeWorldPos);
+	}
+
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	if (!DestructionActorClass->ImplementsInterface(UChunkWorldDestructionActorInterface::StaticClass()))
+	{
+		UE_LOG(
+			LogChunkWorldExtended,
+			Warning,
+			TEXT("DestroyBlock skipped destruction presentation for block %s because destruction actor class '%s' does not implement UChunkWorldDestructionActorInterface."),
+			*BlockWorldPos.ToString(),
+			*GetNameSafe(DestructionActorClass));
+		return;
+	}
+
+	AActor* DestructionActor = World->SpawnActorDeferred<AActor>(
+		DestructionActorClass,
+		SpawnTransform,
+		nullptr,
+		nullptr,
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	if (DestructionActor == nullptr)
+	{
+		return;
+	}
+
+	DestructionActor->SetReplicates(true);
+	UGameplayStatics::FinishSpawningActor(DestructionActor, SpawnTransform);
+
+	FChunkWorldBlockDestructionRequest Request;
+	Request.ChunkWorld = this;
+	Request.BlockTypeName = BlockTypeName;
+	Request.BlockWorldPos = BlockWorldPos;
+	Request.SpawnTransform = SpawnTransform;
+	Request.RepresentativeWorldPos = DestroyedFeedbackHit != nullptr
+		? DestroyedFeedbackHit->RepresentativeWorldPos
+		: SpawnTransform.GetLocation();
+	IChunkWorldDestructionActorInterface::Execute_TriggerBlockDestruction(DestructionActor, Request);
 }
 
 void AChunkWorldExtended::HandleCommittedBlockCustomData(const FIntVector& BlockWorldPos, const TArray<int32>& PackedValues)

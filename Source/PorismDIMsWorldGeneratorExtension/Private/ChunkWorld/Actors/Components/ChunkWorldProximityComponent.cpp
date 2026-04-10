@@ -21,11 +21,12 @@ void UChunkWorldProximityComponent::BeginPlay()
 	UE_LOG(
 		LogChunkWorldProximity,
 		Log,
-		TEXT("ChunkWorldProximity BeginPlay Component=%s Owner=%s SwapInDistance=%.2f SwapOutDistance=%.2f Offset=%s CollisionChannel=%d DebugDraw=%d DebugActiveSwaps=%d"),
+		TEXT("ChunkWorldProximity BeginPlay Component=%s Owner=%s SwapInDistance=%.2f SwapOutDistance=%.2f SwapPreloadDistance=%.2f Offset=%s CollisionChannel=%d DebugDraw=%d DebugActiveSwaps=%d"),
 		*GetNameSafe(this),
 		*GetNameSafe(GetOwner()),
 		SwapInDistance,
 		SwapOutDistance,
+		SwapPreloadDistance,
 		*ScanOriginOffset.ToString(),
 		static_cast<int32>(ProximityCollisionChannel.GetValue()),
 		bDebugDrawProximitySphere ? 1 : 0,
@@ -36,6 +37,13 @@ void UChunkWorldProximityComponent::BeginPlay()
 		TEXT("ChunkWorldProximity on %s requires SwapInDistance %.2f to be strictly less than SwapOutDistance %.2f."),
 		*GetNameSafe(GetOwner()),
 		SwapInDistance,
+		SwapOutDistance);
+
+	ensureMsgf(
+		SwapPreloadDistance >= SwapOutDistance,
+		TEXT("ChunkWorldProximity on %s requires SwapPreloadDistance %.2f to be greater than or equal to SwapOutDistance %.2f when using preload debug visualization."),
+		*GetNameSafe(GetOwner()),
+		SwapPreloadDistance,
 		SwapOutDistance);
 
 	if (UWorld* World = GetWorld())
@@ -84,6 +92,16 @@ void UChunkWorldProximityComponent::TickComponent(float DeltaTime, enum ELevelTi
 	}
 
 	const FVector ScanOrigin = GetScanOrigin();
+	DrawDebugSphere(
+		World,
+		ScanOrigin,
+		SwapPreloadDistance,
+		FMath::Max(4, DebugProximitySphereSegments),
+		DebugSwapPreloadSphereColor,
+		false,
+		0.0f,
+		0,
+		FMath::Max(0.0f, DebugProximitySphereThickness));
 	DrawDebugSphere(
 		World,
 		ScanOrigin,
