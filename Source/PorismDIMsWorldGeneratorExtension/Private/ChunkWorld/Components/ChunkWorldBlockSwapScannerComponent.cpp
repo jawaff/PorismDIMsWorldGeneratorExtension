@@ -3,6 +3,7 @@
 #include "ChunkWorld/Components/ChunkWorldBlockSwapScannerComponent.h"
 
 #include "ChunkWorld/Actors/ChunkWorldExtended.h"
+#include "ChunkWorld/Actors/ChunkWorldPooledSwapActorInterface.h"
 #include "ChunkWorld/Blueprint/ChunkWorldBlockHitBlueprintLibrary.h"
 #include "ChunkWorld/ChunkWorld.h"
 #include "ChunkWorld/Components/BlockTypeSchemaComponent.h"
@@ -41,6 +42,15 @@ namespace
 
 		UChunkWorldBlockSwapComponent* SwapComponent = ExtendedChunkWorld->GetBlockSwapComponent();
 		return SwapComponent != nullptr && SwapComponent->TryApplySwapRequest(BlockWorldPos, BlockTypeName, bEntering);
+	}
+
+	template <typename TActorArray>
+	void RemoveInvalidActorEntries(TActorArray& Actors)
+	{
+		Actors.RemoveAllSwap([](const TWeakObjectPtr<AActor>& Actor)
+		{
+			return !Actor.IsValid();
+		});
 	}
 }
 
@@ -98,9 +108,15 @@ void UChunkWorldBlockSwapScannerComponent::EndPlay(const EEndPlayReason::Type En
 		GetWorld()->GetTimerManager().ClearTimer(SwapScanHandle);
 	}
 
-	RestoreActiveSwapsForShutdown();
+	if (PooledSwapActorRecycleHandle.IsValid())
+	{
+		GetWorld()->GetTimerManager().ClearTimer(PooledSwapActorRecycleHandle);
+	}
 
-	for (TPair<FIntVector, FPendingSwapActorLoad>& PendingLoad : PendingSwapActorLoads)
+	RestoreActiveSwapsForShutdown();
+	DestroyPooledSwapActors();
+
+	for (TPair<FSoftObjectPath, FPendingSwapActorClassLoad>& PendingLoad : PendingSwapActorClassLoads)
 	{
 		if (PendingLoad.Value.Handle.IsValid())
 		{
@@ -108,9 +124,11 @@ void UChunkWorldBlockSwapScannerComponent::EndPlay(const EEndPlayReason::Type En
 		}
 	}
 
+	PendingSwapActorClassLoads.Reset();
 	PendingSwapActorLoads.Reset();
 	ProximitySources.Reset();
 	ActiveSwaps.Reset();
+	SwapActorPools.Reset();
 	LogSwapDiagnostics(TEXT("EndPlay"));
 
 	Super::EndPlay(EndPlayReason);
@@ -477,6 +495,11 @@ void UChunkWorldBlockSwapScannerComponent::TrySwapInBlock(AChunkWorld* ChunkWorl
 		return;
 	}
 
+	if (bEnableSwapActorPreload && !Definition.SwapActorClass.IsNull())
+	{
+		RequestSwapActorClassPreload(Definition.SwapActorClass, DefaultSwapActorWarmPoolSize, &Diagnostics);
+	}
+
 	const FVector BlockLocation = ChunkWorld->BlockWorldPosToUEWorldPos(BlockWorldPos);
 	float MinDistance = TNumericLimits<float>::Max();
 	float RelevantDistance = TNumericLimits<float>::Max();
@@ -506,9 +529,7 @@ void UChunkWorldBlockSwapScannerComponent::TrySwapInBlock(AChunkWorld* ChunkWorl
 	PendingLoad.BlockTypeName = BlockTypeName;
 	PendingLoad.Definition = Definition;
 	PendingLoad.SwapTransform = SwapTransform;
-	PendingLoad.Handle = UAssetManager::GetStreamableManager().RequestAsyncLoad(
-		Definition.SwapActorClass.ToSoftObjectPath(),
-		FStreamableDelegate::CreateUObject(this, &UChunkWorldBlockSwapScannerComponent::HandlePendingSwapActorClassLoaded, BlockWorldPos));
+	RequestSwapActorClassPreload(Definition.SwapActorClass, DefaultSwapActorWarmPoolSize, &Diagnostics);
 
 	UE_LOG(
 		LogChunkWorldBlockSwapScanner,
@@ -538,7 +559,7 @@ void UChunkWorldBlockSwapScannerComponent::TrySwapOutBlock(AChunkWorld* ChunkWor
 
 	if (Active.SpawnedActor.IsValid())
 	{
-		Active.SpawnedActor->Destroy();
+		ReleaseSwapActor(Active.SpawnedActor.Get());
 	}
 
 	if (!TryApplySharedBlockSwap(ChunkWorld, BlockWorldPos, Active.BlockTypeName, false))
@@ -573,13 +594,7 @@ bool UChunkWorldBlockSwapScannerComponent::ForceRemoveSwap(AChunkWorld* ChunkWor
 		return false;
 	}
 
-	if (FPendingSwapActorLoad PendingLoad; PendingSwapActorLoads.RemoveAndCopyValue(BlockWorldPos, PendingLoad))
-	{
-		if (PendingLoad.Handle.IsValid())
-		{
-			PendingLoad.Handle->CancelHandle();
-		}
-	}
+	(void)PendingSwapActorLoads.Remove(BlockWorldPos);
 
 	FActiveBlockSwap Active;
 	if (!ActiveSwaps.RemoveAndCopyValue(BlockWorldPos, Active))
@@ -589,7 +604,7 @@ bool UChunkWorldBlockSwapScannerComponent::ForceRemoveSwap(AChunkWorld* ChunkWor
 
 	if (Active.SpawnedActor.IsValid())
 	{
-		Active.SpawnedActor->Destroy();
+		ReleaseSwapActor(Active.SpawnedActor.Get());
 	}
 
 	(void)TryApplySharedBlockSwap(ChunkWorld, BlockWorldPos, Active.BlockTypeName, false);
@@ -614,39 +629,114 @@ bool UChunkWorldBlockSwapScannerComponent::ForceRemoveSwap(AChunkWorld* ChunkWor
 	return true;
 }
 
-void UChunkWorldBlockSwapScannerComponent::HandlePendingSwapActorClassLoaded(FIntVector BlockWorldPos)
+void UChunkWorldBlockSwapScannerComponent::RequestSwapActorClassPreload(const TSoftClassPtr<AActor>& SwapActorClass, int32 RequestedWarmCount, FSwapScanDiagnostics* Diagnostics)
 {
-	FPendingSwapActorLoad PendingLoad;
-	if (!PendingSwapActorLoads.RemoveAndCopyValue(BlockWorldPos, PendingLoad))
+	if (SwapActorClass.IsNull())
+	{
+		return;
+	}
+
+	if (UClass* LoadedSwapActorClass = SwapActorClass.Get())
+	{
+		if (bEnableSwapActorPooling)
+		{
+			PrewarmSwapActorClass(LoadedSwapActorClass, RequestedWarmCount);
+		}
+		return;
+	}
+
+	FSoftObjectPath SwapActorClassPath = SwapActorClass.ToSoftObjectPath();
+	if (!SwapActorClassPath.IsValid())
+	{
+		return;
+	}
+
+	if (FPendingSwapActorClassLoad* ExistingLoad = PendingSwapActorClassLoads.Find(SwapActorClassPath))
+	{
+		ExistingLoad->RequestedWarmCount = FMath::Max(ExistingLoad->RequestedWarmCount, RequestedWarmCount);
+		return;
+	}
+
+	FPendingSwapActorClassLoad& PendingLoad = PendingSwapActorClassLoads.Add(SwapActorClassPath);
+	PendingLoad.SwapActorClass = SwapActorClass;
+	PendingLoad.RequestedWarmCount = RequestedWarmCount;
+	PendingLoad.Handle = UAssetManager::GetStreamableManager().RequestAsyncLoad(
+		SwapActorClassPath,
+		FStreamableDelegate::CreateUObject(this, &UChunkWorldBlockSwapScannerComponent::HandlePendingSwapActorClassLoaded, SwapActorClassPath));
+
+	if (Diagnostics != nullptr)
+	{
+		++Diagnostics->SwapActorClassPreloadRequests;
+	}
+}
+
+void UChunkWorldBlockSwapScannerComponent::HandlePendingSwapActorClassLoaded(FSoftObjectPath LoadedClassPath)
+{
+	FPendingSwapActorClassLoad PendingClassLoad;
+	if (!PendingSwapActorClassLoads.RemoveAndCopyValue(LoadedClassPath, PendingClassLoad))
 	{
 		return;
 	}
 
 	UWorld* World = GetWorld();
 	AChunkWorld* ChunkWorld = GetOwningChunkWorld();
-	if (World == nullptr || !IsChunkWorldUsable(World, ChunkWorld) || ActiveSwaps.Contains(BlockWorldPos))
+	if (World == nullptr || !IsChunkWorldUsable(World, ChunkWorld))
 	{
 		return;
 	}
 
-	const FVector BlockLocation = ChunkWorld->BlockWorldPosToUEWorldPos(BlockWorldPos);
-	float MinDistance = TNumericLimits<float>::Max();
-	float RelevantDistance = TNumericLimits<float>::Max();
-	if (!IsWithinAnySourceSwapDistance(BlockLocation, false, MinDistance, RelevantDistance))
+	UClass* LoadedSwapActorClass = PendingClassLoad.SwapActorClass.Get();
+	if (LoadedSwapActorClass == nullptr)
 	{
-		UE_LOG(
-			LogChunkWorldBlockSwapScanner,
-			Log,
-			TEXT("SwapScanner DropPendingSwap Scanner=%s Owner=%s Block=%s BlockType=%s Reason=NoLongerRelevant"),
-			*GetNameSafe(this),
-			*GetNameSafe(GetOwner()),
-			*BlockWorldPos.ToString(),
-			*PendingLoad.BlockTypeName.ToString());
 		return;
 	}
 
-	FSwapScanDiagnostics Diagnostics;
-	FinalizeSwapIn(ChunkWorld, BlockWorldPos, PendingLoad.SwapTransform, PendingLoad.BlockTypeName, PendingLoad.Definition, MinDistance, RelevantDistance, &Diagnostics);
+	if (bEnableSwapActorPooling)
+	{
+		PrewarmSwapActorClass(LoadedSwapActorClass, PendingClassLoad.RequestedWarmCount);
+	}
+
+	TArray<FIntVector> PendingBlocksToFinalize;
+	for (const TPair<FIntVector, FPendingSwapActorLoad>& PendingLoad : PendingSwapActorLoads)
+	{
+		if (PendingLoad.Value.Definition.SwapActorClass.ToSoftObjectPath() == LoadedClassPath)
+		{
+			PendingBlocksToFinalize.Add(PendingLoad.Key);
+		}
+	}
+
+	for (const FIntVector& BlockWorldPos : PendingBlocksToFinalize)
+	{
+		FPendingSwapActorLoad PendingBlockLoad;
+		if (!PendingSwapActorLoads.RemoveAndCopyValue(BlockWorldPos, PendingBlockLoad))
+		{
+			continue;
+		}
+
+		if (ActiveSwaps.Contains(BlockWorldPos))
+		{
+			continue;
+		}
+
+		const FVector BlockLocation = ChunkWorld->BlockWorldPosToUEWorldPos(BlockWorldPos);
+		float MinDistance = TNumericLimits<float>::Max();
+		float RelevantDistance = TNumericLimits<float>::Max();
+		if (!IsWithinAnySourceSwapDistance(BlockLocation, false, MinDistance, RelevantDistance))
+		{
+			UE_LOG(
+				LogChunkWorldBlockSwapScanner,
+				Log,
+				TEXT("SwapScanner DropPendingSwap Scanner=%s Owner=%s Block=%s BlockType=%s Reason=NoLongerRelevant"),
+				*GetNameSafe(this),
+				*GetNameSafe(GetOwner()),
+				*BlockWorldPos.ToString(),
+				*PendingBlockLoad.BlockTypeName.ToString());
+			continue;
+		}
+
+		FSwapScanDiagnostics Diagnostics;
+		FinalizeSwapIn(ChunkWorld, BlockWorldPos, PendingBlockLoad.SwapTransform, PendingBlockLoad.BlockTypeName, PendingBlockLoad.Definition, MinDistance, RelevantDistance, &Diagnostics);
+	}
 }
 
 bool UChunkWorldBlockSwapScannerComponent::FinalizeSwapIn(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos, const FTransform& SwapTransform, const FGameplayTag& BlockTypeName, const FBlockDefinitionBase& Definition, float MinDistance, float RelevantDistance, FSwapScanDiagnostics* Diagnostics)
@@ -707,20 +797,7 @@ bool UChunkWorldBlockSwapScannerComponent::FinalizeSwapIn(AChunkWorld* ChunkWorl
 			return false;
 		}
 
-		AActor* DeferredActor = GetWorld()->SpawnActorDeferred<AActor>(
-			SwapActorClass,
-			SwapTransform,
-			nullptr,
-			nullptr,
-			ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
-		if (DeferredActor != nullptr)
-		{
-			DeferredActor->SetReplicates(true);
-			DeferredActor->SetActorHiddenInGame(true);
-			DeferredActor->SetActorEnableCollision(false);
-			UGameplayStatics::FinishSpawningActor(DeferredActor, SwapTransform);
-			NewActive.SpawnedActor = DeferredActor;
-		}
+		NewActive.SpawnedActor = AcquireSwapActor(BlockWorldPos, SwapTransform, SwapActorClass, Diagnostics);
 		if (!NewActive.SpawnedActor.IsValid())
 		{
 			if (Diagnostics != nullptr)
@@ -755,7 +832,7 @@ bool UChunkWorldBlockSwapScannerComponent::FinalizeSwapIn(AChunkWorld* ChunkWorl
 				*BlockWorldPos.ToString(),
 				*BlockTypeName.ToString(),
 				*GetNameSafe(NewActive.SpawnedActor.Get()));
-			NewActive.SpawnedActor->Destroy();
+			ReleaseSwapActor(NewActive.SpawnedActor.Get(), Diagnostics);
 			(void)TryApplySharedBlockSwap(ChunkWorld, BlockWorldPos, BlockTypeName, false);
 			return false;
 		}
@@ -783,6 +860,279 @@ bool UChunkWorldBlockSwapScannerComponent::FinalizeSwapIn(AChunkWorld* ChunkWorl
 	Request.bEntering = true;
 	OnBlockSwapRequested.Broadcast(Request);
 	return true;
+}
+
+AActor* UChunkWorldBlockSwapScannerComponent::AcquireSwapActor(const FIntVector& BlockWorldPos, const FTransform& SwapTransform, UClass* SwapActorClass, FSwapScanDiagnostics* Diagnostics)
+{
+	if (SwapActorClass == nullptr)
+	{
+		return nullptr;
+	}
+
+	AActor* SwapActor = nullptr;
+	if (bEnableSwapActorPooling)
+	{
+		FSwapActorPool& Pool = SwapActorPools.FindOrAdd(SwapActorClass);
+		RemoveInvalidActorEntries(Pool.AvailableActors);
+		Pool.PendingRecycleActors.RemoveAllSwap([](const FPendingPooledSwapActorRecycle& PendingRecycle)
+		{
+			return !PendingRecycle.Actor.IsValid();
+		});
+
+		if (!Pool.AvailableActors.IsEmpty())
+		{
+			SwapActor = Pool.AvailableActors.Pop(EAllowShrinking::No).Get();
+			if (SwapActor != nullptr)
+			{
+				Pool.ActiveActors.Add(SwapActor);
+				if (Diagnostics != nullptr)
+				{
+					++Diagnostics->PooledSwapActorAcquires;
+				}
+			}
+		}
+	}
+
+	if (SwapActor == nullptr)
+	{
+		SwapActor = SpawnSwapActor(SwapActorClass, SwapTransform);
+		if (SwapActor == nullptr)
+		{
+			return nullptr;
+		}
+
+		if (bEnableSwapActorPooling)
+		{
+			SwapActorPools.FindOrAdd(SwapActorClass).ActiveActors.Add(SwapActor);
+		}
+
+		if (Diagnostics != nullptr)
+		{
+			++Diagnostics->FreshSwapActorSpawns;
+		}
+	}
+
+	PrepareSwapActorForUse(SwapActor, BlockWorldPos, SwapTransform);
+	return SwapActor;
+}
+
+void UChunkWorldBlockSwapScannerComponent::ReleaseSwapActor(AActor* SwapActor, FSwapScanDiagnostics* Diagnostics)
+{
+	if (SwapActor == nullptr)
+	{
+		return;
+	}
+
+	UClass* SwapActorClass = SwapActor->GetClass();
+	if (!bEnableSwapActorPooling || SwapActorClass == nullptr || MaxPooledSwapActorsPerClass <= 0)
+	{
+		SwapActor->Destroy();
+		return;
+	}
+
+	FSwapActorPool& Pool = SwapActorPools.FindOrAdd(SwapActorClass);
+	RemoveInvalidActorEntries(Pool.ActiveActors);
+	Pool.PendingRecycleActors.RemoveAllSwap([](const FPendingPooledSwapActorRecycle& PendingRecycle)
+	{
+		return !PendingRecycle.Actor.IsValid();
+	});
+	Pool.ActiveActors.RemoveSingleSwap(SwapActor);
+
+	const int32 RetainedActorCount = Pool.AvailableActors.Num() + Pool.PendingRecycleActors.Num();
+	if (RetainedActorCount >= MaxPooledSwapActorsPerClass)
+	{
+		SwapActor->Destroy();
+		return;
+	}
+
+	ResetSwapActorForPool(SwapActor);
+
+	FPendingPooledSwapActorRecycle& PendingRecycle = Pool.PendingRecycleActors.AddDefaulted_GetRef();
+	PendingRecycle.Actor = SwapActor;
+	PendingRecycle.ReadyTimeSeconds = GetWorld() != nullptr
+		? GetWorld()->GetTimeSeconds() + static_cast<double>(PooledSwapActorRecycleDelay)
+		: 0.0;
+
+	UpdatePooledSwapActorRecycleTimer();
+	if (Diagnostics != nullptr)
+	{
+		++Diagnostics->PooledSwapActorReleases;
+	}
+}
+
+void UChunkWorldBlockSwapScannerComponent::PrewarmSwapActorClass(UClass* SwapActorClass, int32 RequestedWarmCount)
+{
+	if (!bEnableSwapActorPooling || SwapActorClass == nullptr || RequestedWarmCount <= 0 || MaxPooledSwapActorsPerClass <= 0)
+	{
+		return;
+	}
+
+	FSwapActorPool& Pool = SwapActorPools.FindOrAdd(SwapActorClass);
+	RemoveInvalidActorEntries(Pool.AvailableActors);
+	RemoveInvalidActorEntries(Pool.ActiveActors);
+	Pool.PendingRecycleActors.RemoveAllSwap([](const FPendingPooledSwapActorRecycle& PendingRecycle)
+	{
+		return !PendingRecycle.Actor.IsValid();
+	});
+
+	const int32 TargetWarmCount = FMath::Min(RequestedWarmCount, MaxPooledSwapActorsPerClass);
+	const int32 ExistingCount = Pool.AvailableActors.Num() + Pool.ActiveActors.Num() + Pool.PendingRecycleActors.Num();
+	for (int32 PoolIndex = ExistingCount; PoolIndex < TargetWarmCount; ++PoolIndex)
+	{
+		AActor* WarmActor = SpawnSwapActor(SwapActorClass, BuildPooledSwapActorParkingTransform(SwapActorClass, PoolIndex));
+		if (WarmActor == nullptr)
+		{
+			break;
+		}
+
+		ResetSwapActorForPool(WarmActor);
+		Pool.AvailableActors.Add(WarmActor);
+	}
+}
+
+AActor* UChunkWorldBlockSwapScannerComponent::SpawnSwapActor(UClass* SwapActorClass, const FTransform& SpawnTransform) const
+{
+	UWorld* World = GetWorld();
+	if (World == nullptr || SwapActorClass == nullptr)
+	{
+		return nullptr;
+	}
+
+	AActor* DeferredActor = World->SpawnActorDeferred<AActor>(
+		SwapActorClass,
+		SpawnTransform,
+		nullptr,
+		nullptr,
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	if (DeferredActor == nullptr)
+	{
+		return nullptr;
+	}
+
+	DeferredActor->SetReplicates(true);
+	DeferredActor->SetActorHiddenInGame(true);
+	DeferredActor->SetActorEnableCollision(false);
+	UGameplayStatics::FinishSpawningActor(DeferredActor, SpawnTransform);
+	return DeferredActor;
+}
+
+void UChunkWorldBlockSwapScannerComponent::PrepareSwapActorForUse(AActor* SwapActor, const FIntVector& BlockWorldPos, const FTransform& SwapTransform) const
+{
+	if (SwapActor == nullptr)
+	{
+		return;
+	}
+
+	SwapActor->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+	SwapActor->SetActorTransform(SwapTransform, false, nullptr, ETeleportType::TeleportPhysics);
+	SwapActor->SetActorHiddenInGame(true);
+	SwapActor->SetActorEnableCollision(false);
+
+	if (SwapActor->GetClass()->ImplementsInterface(UChunkWorldPooledSwapActorInterface::StaticClass()))
+	{
+		IChunkWorldPooledSwapActorInterface::Execute_PrepareForSwapUse(SwapActor, BlockWorldPos, SwapTransform);
+	}
+}
+
+void UChunkWorldBlockSwapScannerComponent::ResetSwapActorForPool(AActor* SwapActor) const
+{
+	if (SwapActor == nullptr)
+	{
+		return;
+	}
+
+	UClass* SwapActorClass = SwapActor->GetClass();
+	const int32 SlotIndex = static_cast<int32>(GetTypeHash(SwapActor->GetFName()));
+	SwapActor->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+	SwapActor->SetActorHiddenInGame(true);
+	SwapActor->SetActorEnableCollision(false);
+	SwapActor->SetActorTransform(BuildPooledSwapActorParkingTransform(SwapActorClass, SlotIndex), false, nullptr, ETeleportType::TeleportPhysics);
+
+	if (SwapActor->GetClass()->ImplementsInterface(UChunkWorldPooledSwapActorInterface::StaticClass()))
+	{
+		IChunkWorldPooledSwapActorInterface::Execute_ResetForSwapPool(SwapActor);
+	}
+}
+
+FTransform UChunkWorldBlockSwapScannerComponent::BuildPooledSwapActorParkingTransform(UClass* SwapActorClass, int32 SlotIndex) const
+{
+	const AActor* OwnerActor = GetOwner();
+	const FVector ParkingOrigin = OwnerActor != nullptr
+		? OwnerActor->GetActorLocation() + PooledSwapActorParkingWorldOffset
+		: PooledSwapActorParkingWorldOffset;
+
+	const int32 SafeSlotIndex = FMath::Max(SlotIndex, 0);
+	const int32 ClassHash = SwapActorClass != nullptr ? static_cast<int32>(GetTypeHash(SwapActorClass->GetFName())) : 0;
+	const int32 XIndex = SafeSlotIndex % 16;
+	const int32 YIndex = (SafeSlotIndex / 16) % 16;
+	const int32 ZIndex = ClassHash & 31;
+	const FVector ParkingLocation = ParkingOrigin + FVector(
+		static_cast<float>(XIndex) * PooledSwapActorParkingCellSize,
+		static_cast<float>(YIndex) * PooledSwapActorParkingCellSize,
+		static_cast<float>(ZIndex) * PooledSwapActorParkingCellSize);
+	return FTransform(ParkingLocation);
+}
+
+void UChunkWorldBlockSwapScannerComponent::FlushPendingPooledSwapActorRecycle()
+{
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	const double CurrentTimeSeconds = World->GetTimeSeconds();
+	for (TPair<TObjectPtr<UClass>, FSwapActorPool>& PoolEntry : SwapActorPools)
+	{
+		FSwapActorPool& Pool = PoolEntry.Value;
+		RemoveInvalidActorEntries(Pool.AvailableActors);
+		Pool.PendingRecycleActors.RemoveAllSwap([&Pool, CurrentTimeSeconds](const FPendingPooledSwapActorRecycle& PendingRecycle)
+		{
+			AActor* PendingActor = PendingRecycle.Actor.Get();
+			if (PendingActor == nullptr)
+			{
+				return true;
+			}
+
+			if (PendingRecycle.ReadyTimeSeconds > CurrentTimeSeconds)
+			{
+				return false;
+			}
+
+			Pool.AvailableActors.Add(PendingActor);
+			return true;
+		});
+	}
+
+	UpdatePooledSwapActorRecycleTimer();
+}
+
+void UChunkWorldBlockSwapScannerComponent::UpdatePooledSwapActorRecycleTimer()
+{
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	bool bHasPendingRecycle = false;
+	for (const TPair<TObjectPtr<UClass>, FSwapActorPool>& PoolEntry : SwapActorPools)
+	{
+		if (!PoolEntry.Value.PendingRecycleActors.IsEmpty())
+		{
+			bHasPendingRecycle = true;
+			break;
+		}
+	}
+
+	FTimerManager& TimerManager = World->GetTimerManager();
+	if (bHasPendingRecycle)
+	{
+		TimerManager.SetTimer(PooledSwapActorRecycleHandle, this, &UChunkWorldBlockSwapScannerComponent::FlushPendingPooledSwapActorRecycle, FMath::Max(PooledSwapActorRecycleDelay, 0.01f), true);
+		return;
+	}
+
+	TimerManager.ClearTimer(PooledSwapActorRecycleHandle);
 }
 
 bool UChunkWorldBlockSwapScannerComponent::IsWithinAnySourceSwapDistance(const FVector& Location, bool bUseSwapOutDistance, float& OutMinDistance, float& OutRelevantDistance) const
@@ -834,6 +1184,37 @@ void UChunkWorldBlockSwapScannerComponent::RestoreActiveSwapsForShutdown()
 			if (bCanRestoreBlockState)
 			{
 				TryApplySharedBlockSwap(ChunkWorld, BlockWorldPos, Active->BlockTypeName, false);
+			}
+		}
+	}
+}
+
+void UChunkWorldBlockSwapScannerComponent::DestroyPooledSwapActors()
+{
+	for (TPair<TObjectPtr<UClass>, FSwapActorPool>& PoolEntry : SwapActorPools)
+	{
+		FSwapActorPool& Pool = PoolEntry.Value;
+		for (const TWeakObjectPtr<AActor>& AvailableActor : Pool.AvailableActors)
+		{
+			if (AActor* Actor = AvailableActor.Get())
+			{
+				Actor->Destroy();
+			}
+		}
+
+		for (const TWeakObjectPtr<AActor>& ActiveActor : Pool.ActiveActors)
+		{
+			if (AActor* Actor = ActiveActor.Get())
+			{
+				Actor->Destroy();
+			}
+		}
+
+		for (const FPendingPooledSwapActorRecycle& PendingRecycle : Pool.PendingRecycleActors)
+		{
+			if (AActor* Actor = PendingRecycle.Actor.Get())
+			{
+				Actor->Destroy();
 			}
 		}
 	}
@@ -898,17 +1279,35 @@ int32 UChunkWorldBlockSwapScannerComponent::GetSpawnedSwapActorCount() const
 	return SpawnedActorCount;
 }
 
+int32 UChunkWorldBlockSwapScannerComponent::GetPooledSwapActorCount() const
+{
+	int32 PooledActorCount = 0;
+	for (const TPair<TObjectPtr<UClass>, FSwapActorPool>& PoolEntry : SwapActorPools)
+	{
+		for (const TWeakObjectPtr<AActor>& AvailableActor : PoolEntry.Value.AvailableActors)
+		{
+			if (AvailableActor.IsValid())
+			{
+				++PooledActorCount;
+			}
+		}
+	}
+
+	return PooledActorCount;
+}
+
 void UChunkWorldBlockSwapScannerComponent::LogSwapDiagnostics(const TCHAR* Stage, int32 ProcessedBlocks, int32 SwapsEntered, int32 SwapsExited, const FSwapScanDiagnostics* Diagnostics) const
 {
 	UE_LOG(
 		LogChunkWorldBlockSwapScanner,
 		Log,
-		TEXT("SwapScanner Stage=%s Owner=%s Sources=%d ActiveSwaps=%d SpawnedActors=%d ProcessedBlocks=%d SwapsEntered=%d SwapsExited=%d QueryHits=%d ResolvedBlockHits=%d CandidatesInRadius=%d SchemaHits=%d SwapAuthored=%d DistanceRejected=%d AlreadyActive=%d SharedApplyFailures=%d SpawnFailures=%d Interval=%.3f Budget=%d"),
+		TEXT("SwapScanner Stage=%s Owner=%s Sources=%d ActiveSwaps=%d SpawnedActors=%d PooledActors=%d ProcessedBlocks=%d SwapsEntered=%d SwapsExited=%d QueryHits=%d ResolvedBlockHits=%d CandidatesInRadius=%d SchemaHits=%d SwapAuthored=%d DistanceRejected=%d AlreadyActive=%d SharedApplyFailures=%d SpawnFailures=%d PreloadRequests=%d FreshSpawns=%d PooledAcquires=%d PooledReleases=%d Interval=%.3f Budget=%d"),
 		Stage,
 		*GetNameSafe(GetOwner()),
 		ProximitySources.Num(),
 		ActiveSwaps.Num(),
 		GetSpawnedSwapActorCount(),
+		GetPooledSwapActorCount(),
 		ProcessedBlocks,
 		SwapsEntered,
 		SwapsExited,
@@ -921,6 +1320,10 @@ void UChunkWorldBlockSwapScannerComponent::LogSwapDiagnostics(const TCHAR* Stage
 		Diagnostics != nullptr ? Diagnostics->AlreadyActiveBlocks : INDEX_NONE,
 		Diagnostics != nullptr ? Diagnostics->SharedApplyFailures : INDEX_NONE,
 		Diagnostics != nullptr ? Diagnostics->SwapActorSpawnFailures : INDEX_NONE,
+		Diagnostics != nullptr ? Diagnostics->SwapActorClassPreloadRequests : INDEX_NONE,
+		Diagnostics != nullptr ? Diagnostics->FreshSwapActorSpawns : INDEX_NONE,
+		Diagnostics != nullptr ? Diagnostics->PooledSwapActorAcquires : INDEX_NONE,
+		Diagnostics != nullptr ? Diagnostics->PooledSwapActorReleases : INDEX_NONE,
 		SwapScanInterval,
 		MaxBlocksPerScan);
 }

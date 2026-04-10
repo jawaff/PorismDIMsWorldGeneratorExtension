@@ -25,14 +25,16 @@ That field is resolved through `UBlockTypeSchemaComponent` for a specific `Block
 Server-side orchestration component that:
 - tracks active proximity sources
 - polls for nearby schema-authored swap candidates with a sphere sweep on the configured proximity trace channel
-- spawns the configured actor when a block enters swap presentation
+- preloads nearby authored swap actor classes before they become swap-in eligible
+- acquires a pooled or freshly spawned actor when a block enters swap presentation
 - requests the shared hide/restore transition through `UChunkWorldBlockSwapComponent`
-- restores the block when the swap exits
+- restores the block when the swap exits and releases pooled actors back into delayed recycle
 - force-removes active or pending swaps when a swapped actor is destroyed or when `DestroyBlock(...)` removes the underlying voxel
 
 This component owns the scan tuning:
 - `SwapScanInterval`
 - `MaxBlocksPerScan`
+- pooling and preload tunables such as warm count, pool cap, recycle delay, and pooled parking offset
 
 These settings intentionally live on the scanner component instead of `AChunkWorldExtended` so the chunk-world host stays slim.
 
@@ -76,6 +78,19 @@ It includes:
 - `SwapActorClass`
 - `bEntering`
 
+### `UChunkWorldPooledSwapActorInterface`
+Optional project-facing pooling contract for swap actors that need explicit lifecycle hooks.
+
+It exposes:
+- `PrepareForSwapUse(...)`
+- `ResetForSwapPool()`
+
+Projects can ignore the interface for simple stateless swap actors. The scanner still applies generic hide/collision/transform handling for pooled actors even when the actor does not implement the interface.
+
+The intended design is still that project-owned swap actors should implement this interface once they carry any meaningful runtime state.
+The object pool exists specifically so actors are reused instead of destroyed and recreated on every swap, which means reused actors need an explicit reset/reinitialize contract.
+Treat the interface as the normal path for pooled gameplay actors, not as an edge-case extension hook.
+
 ## Runtime Flow
 
 ### Authoritative server flow
@@ -92,17 +107,20 @@ It includes:
    - the scanner captures the represented mesh instance transform
    - the scanner calls `UChunkWorldBlockSwapComponent::TryApplySwapRequest(BlockWorldPos, BlockTypeName, true)`
    - the swap component parks the represented ISMC instance and replicates the active swap entry
-   - the scanner spawns the authored `SwapActorClass` at the exact mesh instance transform
-   - the spawned actor is explicitly set to replicate and starts hidden with collision disabled until the replicated swap item and actor are paired on each client
+   - the scanner preloads the authored `SwapActorClass` when the block is first seen in the broad-phase candidate scan and warms a small parked pool once the class resolves
+   - the scanner acquires a pooled actor when one is available, otherwise it spawns one fresh and keeps it eligible for later reuse
+   - the acquired actor is explicitly kept hidden with collision disabled until the replicated swap item and actor are paired on each client
+   - if the actor implements `UChunkWorldPooledSwapActorInterface`, the scanner calls `PrepareForSwapUse(...)` before the swap is associated
    - the scanner records the active swap and broadcasts `OnBlockSwapRequested`
 7. On swap-out:
-   - the scanner hides and destroys the spawned actor
+   - the scanner calls `ResetForSwapPool()` when the actor implements the pooling interface
+   - the scanner hides and parks the actor, then returns it to a short recycle quarantine before it becomes available for reuse again
    - the scanner calls `UChunkWorldBlockSwapComponent::TryApplySwapRequest(BlockWorldPos, BlockTypeName, false)`
    - the swap component restores the parked ISMC instance transform and removes the replicated active swap entry
    - the scanner removes the active swap and broadcasts `OnBlockSwapRequested`
 8. On block destruction:
    - `AChunkWorldExtended::DestroyBlock(...)` asks the scanner to force-remove any active or pending swap for that `BlockWorldPos`
-   - the scanner cancels pending async actor loads, destroys the swap actor if present, removes replicated hide state, and then lets the normal block destruction continue
+   - the scanner removes pending block waits, releases the swap actor if present, removes replicated hide state, and then lets the normal block destruction continue
 
 ### Client flow
 Clients do not run the authoritative scan.
@@ -124,11 +142,12 @@ The extension plugin owns:
 - generic swap enter/exit event payload
 - replicated hide/restore execution
 - configurable parking-area policy for hidden mesh instances
+- generic pooled-actor lifecycle hooks through `UChunkWorldPooledSwapActorInterface`
 
 ### Not owned by the plugin
 The plugin does not own:
 - project-specific actor classes referenced by `SwapActorClass`
-- project-specific actor logic after spawn
+- project-specific actor logic after spawn or per-reuse reset
 - project-specific game rules for who should carry a proximity component
 
 ## Why The Feature Is Split
@@ -162,10 +181,55 @@ That gives the plugin:
 - Author `SwapActorClass` on schema rows for mesh-backed block types.
 - Configure `SwapInDistance` and `SwapOutDistance` on `UChunkWorldProximityComponent`.
 - Configure the hidden parking area on `UChunkWorldBlockSwapComponent` so parked instances stay outside meaningful world space. Projects can push that value from a subclass during startup if they want a centralized policy.
+- Configure the pooled actor parking offset and warm-count settings on `UChunkWorldBlockSwapScannerComponent` conservatively, especially if many block types can swap into different actor classes.
 - Use a proximity/query collision channel that matches the represented chunk-world collision bodies used for swap candidate discovery. Do not assume an overlap-only setup will work just because a trace on the same channel works.
 - Configure swapped actor collision so interaction traces do not unintentionally pass through the actor and hit the parked or underlying chunk-world block behind it.
+- Implement `UChunkWorldPooledSwapActorInterface` on project-owned swap actors by default when those actors participate in pooled swap presentation.
+- At minimum, use `PrepareForSwapUse(...)` to rebuild any per-block state that used to live in construction or first-spawn code, and use `ResetForSwapPool()` to clear timers, detach transient children, stop effects, and scrub state that must not leak into the next block assignment.
+- Only skip the interface when the swap actor is truly stateless and generic hide/collision/transform reset is enough.
 - Treat parking-Z policy as project-owned.
 - Let `UChunkWorldBlockSwapScannerComponent` on the chunk world drive the runtime.
+
+## Pooling Contract
+
+### Why The Interface Is Part Of The Design
+The swap runtime now intentionally reuses actors through a pool.
+
+That means the plugin no longer assumes:
+- one actor lifetime equals one block presentation lifetime
+- construction-time initialization is sufficient
+- destroying the actor is the cleanup path
+
+For any actor with meaningful state, the correct lifecycle becomes:
+1. spawned once
+2. parked in the pool
+3. acquired for one block
+4. reinitialized in `PrepareForSwapUse(...)`
+5. released from that block
+6. cleaned up in `ResetForSwapPool()`
+7. reused later for another block
+
+### What Belongs In `PrepareForSwapUse(...)`
+- assign block-specific data
+- rebuild visuals or child state derived from the represented block
+- restart actor-local systems that should only run while active
+- refresh project-specific interaction state
+
+### What Belongs In `ResetForSwapPool()`
+- clear timers and latent work
+- stop looping VFX/audio
+- detach transient children or helper actors
+- clear cached references to the previous represented block
+- reset project-owned components back to a safe parked baseline
+
+### What The Plugin Still Handles Without The Interface
+The scanner still applies generic pooled-actor handling:
+- hidden state
+- collision disable/enable
+- parking transform assignment
+- delayed recycle timing
+
+The interface exists because that generic handling is not enough for most stateful gameplay actors.
 
 For starter player-facing character composition, see:
 - `Docs/Usage/ChunkWorldGameplaySetup.md`
@@ -173,7 +237,8 @@ For starter player-facing character composition, see:
 ## Current Constraints
 - swap actor authoring is validated only for mesh-backed block types
 - the scanner currently uses one sphere sweep per proximity source per poll and resolves per-hit distances from that single broad-phase query
-- the scanner spawns the authored actor directly with `AlwaysSpawn`
+- the scanner still relies on the broad-phase candidate query for preload timing; it does not yet expose a separate larger preload radius
+- fresh fallback spawns still use `AlwaysSpawn` when the warm pool misses or pooling is disabled
 - swap presentation assumes the parking volume remains outside meaningful generated space for the active world definition
 - block-swap correctness still depends on collision/query setup that resolves the same represented block data path used by chunk-world hit helpers
 - swap-in/out diagnostics are currently log-based

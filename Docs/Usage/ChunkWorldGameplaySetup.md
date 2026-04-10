@@ -25,9 +25,11 @@ For the full swap feature design and ownership boundary, see `Docs/Design/ChunkW
 ### Swap Setup Notes
 - `UChunkWorldProximityComponent` now drives polling queries, not overlap-event tracking.
 - Configure `SwapScanInterval` on `UChunkWorldBlockSwapScannerComponent` and `SwapInDistance` / `SwapOutDistance` on `UChunkWorldProximityComponent`.
+- `UChunkWorldBlockSwapScannerComponent` now preloads and pools swap actors. Configure warm counts and pooled parking conservatively if many block types can swap into different actor classes.
 - Use a collision channel for proximity queries that resolves the same represented chunk-world block data path you expect interaction and damage systems to hit.
 - Configure swapped actor collision so player interaction traces do not pass through the actor and accidentally hit the chunk world behind it.
 - Set the hidden parking area before swapping begins. The plugin stays generic, while project code can supply a centralized policy from a chunk-world subclass.
+- Treat `UChunkWorldPooledSwapActorInterface` as the expected contract for project-owned pooled swap actors. If a swap actor keeps timers, effects, child actors, cached block data, or any other meaningful runtime state, implement `PrepareForSwapUse(...)` and `ResetForSwapPool()` so pooled reuse is safe.
 
 ## Route 1: Damage-Capable Voxels
 Use this route when blocks should have health, destructibility, predicted local state, or shared damage-oriented feedback.

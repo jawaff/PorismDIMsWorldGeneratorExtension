@@ -18,7 +18,7 @@ namespace
 	/**
 	 * Returns true when the block uses a mesh-backed representation.
 	 */
-	bool IsMeshBackedVoxel(int32 MeshIndex)
+	bool IsMeshBackedBlockHitVoxel(int32 MeshIndex)
 	{
 		return MeshIndex != EmptyMesh && MeshIndex != DefaultMesh;
 	}
@@ -26,9 +26,9 @@ namespace
 	/**
 	 * Returns true when a runtime block should be treated as represented gameplay data.
 	 */
-	bool IsRepresentedVoxel(int32 MaterialIndex, int32 MeshIndex)
+	bool IsRepresentedBlockHitVoxel(int32 MaterialIndex, int32 MeshIndex)
 	{
-		return MaterialIndex != EmptyMaterial || IsMeshBackedVoxel(MeshIndex);
+		return MaterialIndex != EmptyMaterial || IsMeshBackedBlockHitVoxel(MeshIndex);
 	}
 
 	/**
@@ -43,7 +43,7 @@ namespace
 
 		const int32 CandidateMaterialIndex = ChunkWorld->GetBlockValueByBlockWorldPos(CandidateBlockWorldPos, ERessourceType::MaterialIndex, 0);
 		const int32 CandidateMeshIndex = ChunkWorld->GetMeshDataByBlockWorldPos(CandidateBlockWorldPos).MeshId;
-		if (!IsRepresentedVoxel(CandidateMaterialIndex, CandidateMeshIndex))
+		if (!IsRepresentedBlockHitVoxel(CandidateMaterialIndex, CandidateMeshIndex))
 		{
 			return false;
 		}
@@ -74,7 +74,7 @@ namespace
 			return false;
 		}
 
-		if (!IsMeshBackedVoxel(OverlayHit.MeshIndex))
+		if (!IsMeshBackedBlockHitVoxel(OverlayHit.MeshIndex))
 		{
 			return false;
 		}
@@ -157,7 +157,7 @@ bool UChunkWorldBlockHitBlueprintLibrary::TryResolveBlockHitContextFromHitResult
 	constexpr float ProbeEpsilon = 2.0f;
 
 	const FChunkWorldHit ChunkWorldHit = ChunkWorld->GetChunkWorldHitByHitResult(Hit, true);
-	const bool bHasChunkWorldHit = ChunkWorldHit.CheckSuccess && IsRepresentedVoxel(ChunkWorldHit.MaterialIndex, ChunkWorldHit.MeshIndex);
+	const bool bHasChunkWorldHit = ChunkWorldHit.CheckSuccess && IsRepresentedBlockHitVoxel(ChunkWorldHit.MaterialIndex, ChunkWorldHit.MeshIndex);
 	if (bHitInstancedMesh && bHasChunkWorldHit)
 	{
 		OutResolvedHit.ChunkWorld = ChunkWorld;
@@ -231,7 +231,7 @@ bool UChunkWorldBlockHitBlueprintLibrary::TryResolveBlockHitContextFromHitResult
 		}
 
 		const bool bTerrainTopFaceCandidate = !bHitInstancedMesh
-			&& !IsMeshBackedVoxel(CandidateHit.MeshIndex)
+			&& !IsMeshBackedBlockHitVoxel(CandidateHit.MeshIndex)
 			&& SafeImpactNormal.Z >= 0.6f;
 		if (bTerrainTopFaceCandidate && TryPromoteOverlayVoxel(ChunkWorld, CandidateHit.BlockWorldPos, CandidateProbeLocation, SafeImpactNormal, CandidateHit))
 		{
@@ -254,7 +254,7 @@ bool UChunkWorldBlockHitBlueprintLibrary::TryResolveBlockHitContextFromHitResult
 		OutResolvedHit.MeshIndex = ChunkWorldHit.MeshIndex;
 		OutResolvedHit.ResolveSource = EChunkWorldBlockHitResolveSource::ChunkWorldHit;
 		if (!bHitInstancedMesh
-			&& !IsMeshBackedVoxel(OutResolvedHit.MeshIndex)
+			&& !IsMeshBackedBlockHitVoxel(OutResolvedHit.MeshIndex)
 			&& TryPromoteOverlayVoxel(ChunkWorld, OutResolvedHit.BlockWorldPos, OutResolvedHit.RepresentativeWorldPos, SafeImpactNormal, OutResolvedHit))
 		{
 			return true;
