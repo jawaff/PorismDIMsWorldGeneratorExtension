@@ -125,6 +125,40 @@ bool UChunkWorldBlockDamageBlueprintLibrary::TryResolveDamageSchemaForResolvedBl
 	return UBlockTypeSchemaBlueprintLibrary::TryGetBlockDamageDefinition(DefinitionStruct, OutDefinition);
 }
 
+bool UChunkWorldBlockDamageBlueprintLibrary::TryBuildAuthorityPayloadFromResolvedBlockHit(
+	const FChunkWorldResolvedBlockHit& ResolvedHit,
+	FChunkWorldBlockHitAuthorityPayload& OutPayload)
+{
+	OutPayload = FChunkWorldBlockHitAuthorityPayload();
+	if (!ResolvedHit.bHasBlock || !IsValid(ResolvedHit.ChunkWorld))
+	{
+		return false;
+	}
+
+	OutPayload.ChunkWorld = ResolvedHit.ChunkWorld;
+	OutPayload.BlockWorldPos = ResolvedHit.BlockWorldPos;
+	OutPayload.bHasBlock = true;
+	return true;
+}
+
+bool UChunkWorldBlockDamageBlueprintLibrary::TryResolveBlockHitContextFromAuthorityPayload(
+	const FChunkWorldBlockHitAuthorityPayload& Payload,
+	FChunkWorldResolvedBlockHit& OutResolvedHit)
+{
+	OutResolvedHit = FChunkWorldResolvedBlockHit();
+	if (!Payload.bHasBlock || !IsValid(Payload.ChunkWorld))
+	{
+		return false;
+	}
+
+	// Authoritative callers should rebuild a fresh resolved hit from minimal block identity instead of
+	// trusting client-side schema/component/material context directly.
+	return UChunkWorldBlockHitBlueprintLibrary::TryResolveBlockHitContextFromBlockWorldPos(
+		Payload.ChunkWorld,
+		Payload.BlockWorldPos,
+		OutResolvedHit);
+}
+
 bool UChunkWorldBlockDamageBlueprintLibrary::TryBroadcastHitFeedbackForResolvedBlockHit(const FChunkWorldResolvedBlockHit& ResolvedHit)
 {
 	if (!ResolvedHit.bHasBlock || !IsValid(ResolvedHit.ChunkWorld))
@@ -193,6 +227,10 @@ bool UChunkWorldBlockDamageBlueprintLibrary::TryApplyBlockDamageForResolvedBlock
 
 	if (!OutResult.bAppliedDamage)
 	{
+		// Project-side fix: if the authoritative runtime state already says this represented block is at
+		// zero health, report it as destroyed so the caller can clean up the voxel immediately instead of
+		// requiring one more hit to transition from a stale zero-health custom-data value.
+		OutResult.bDestroyed = ClampedHealth <= 0;
 		return true;
 	}
 

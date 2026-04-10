@@ -8,14 +8,29 @@
 #include "ChunkWorld/Blueprint/ChunkWorldBlockHitBlueprintLibrary.h"
 #include "ChunkWorld/Components/BlockTypeSchemaComponent.h"
 #include "ChunkWorld/Components/ChunkWorldBlockFeedbackComponent.h"
+#include "Debug/DebugDrawService.h"
+#include "Engine/Canvas.h"
 #include "EngineUtils.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogPorismPredictedBlockState, Log, All);
 
 namespace
 {
+	void DrawPredictedBlockStateDebugStatsLine(UCanvas* Canvas, float& InOutY, const FString& Message, const FColor& Color)
+	{
+		if (Canvas == nullptr)
+		{
+			return;
+		}
+
+		Canvas->SetDrawColor(Color);
+		Canvas->DrawText(GEngine->GetSmallFont(), Message, 48.0f, InOutY);
+		InOutY += 14.0f;
+	}
+
 	bool TryResolveDamageDefinitionForHealthView(
 		const FChunkWorldResolvedBlockHit& ResolvedHit,
 		FGameplayTag PreferredBlockTypeName,
@@ -62,6 +77,11 @@ void UPorismPredictedBlockStateComponent::BeginPlay()
 	Super::BeginPlay();
 	PruneExpiredPredictions();
 
+	if (GetWorld() != nullptr && GetWorld()->GetNetMode() != NM_DedicatedServer)
+	{
+		DebugDrawDelegateHandle = UDebugDrawService::Register(TEXT("Game"), FDebugDrawDelegate::CreateUObject(this, &UPorismPredictedBlockStateComponent::DrawDebugStats));
+	}
+
 	if (ShouldRegisterPredictionNotifications())
 	{
 		BindObservedChunkWorlds();
@@ -70,12 +90,13 @@ void UPorismPredictedBlockStateComponent::BeginPlay()
 
 void UPorismPredictedBlockStateComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	UnbindObservedChunkWorlds();
-	if (UWorld* World = GetWorld())
+	if (DebugDrawDelegateHandle.IsValid())
 	{
-		World->GetTimerManager().ClearTimer(PendingDamageFlushHandle);
+		UDebugDrawService::Unregister(DebugDrawDelegateHandle);
+		DebugDrawDelegateHandle.Reset();
 	}
 
+	UnbindObservedChunkWorlds();
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -109,6 +130,7 @@ void UPorismPredictedBlockStateComponent::PruneExpiredPredictions()
 		const bool bExpired = PredictionTimeoutSeconds > 0.0f && (Now - It.Value().PredictionTimeSeconds) >= PredictionTimeoutSeconds;
 		if (bExpired || !It.Key().ChunkWorld.IsValid())
 		{
+			PendingPredictedDamageRequestsByBlock.Remove(It.Key());
 			It.RemoveCurrent();
 		}
 	}
@@ -137,38 +159,18 @@ void UPorismPredictedBlockStateComponent::HandleObservedChunkWorldBlockCustomDat
 
 	const FPredictedBlockKey Key = MakeKey(ChunkWorld, BlockWorldPos);
 	const bool bHadPredictedState = PredictedBlockStates.Contains(Key);
-	const bool bHadPendingDamage = PendingAuthoritativeDamageByBlock.Contains(Key);
-	const FChunkWorldBlockDamageResult* PredictedResult = PredictedBlockStates.Find(Key);
 
-	int32 AuthoritativeHealth = 0;
-	int32 MaxHealth = 0;
-	bool bIsInvincible = false;
-	bool bHasRuntimeHealth = false;
-	FGameplayTag BlockTypeName;
-	const bool bResolvedAuthoritativeHealth = bTouchedHealth
-		&& UChunkWorldBlockDamageBlueprintLibrary::TryGetRuntimeBlockHealthStateForBlockWorldPos(
-			ChunkWorld,
-			BlockWorldPos,
-			AuthoritativeHealth,
-			MaxHealth,
-			bIsInvincible,
-			bHasRuntimeHealth,
-			BlockTypeName);
-
-	const bool bShouldClearPrediction = bHadPredictedState
-		&& bResolvedAuthoritativeHealth
-		&& bHasRuntimeHealth
-		&& (PredictedResult == nullptr || AuthoritativeHealth <= PredictedResult->NewHealth);
-	const bool bShouldClearPendingDamage = bHadPendingDamage && (!bHadPredictedState || bShouldClearPrediction);
+	// Any replicated health-related update for the same block invalidates the local prediction.
+	// Authoritative block state may legitimately raise or lower health, may batch multiple local hits,
+	// or may include unrelated server-side damage/healing sources. Without an explicit authoritative
+	// revision or ack token, the client cannot safely map one replicated update to a subset of queued
+	// local predictions, so the entire local prediction state for that block must be discarded.
+	const bool bShouldClearPrediction = bHadPredictedState && bTouchedHealth;
 
 	if (bShouldClearPrediction)
 	{
 		PredictedBlockStates.Remove(Key);
-	}
-
-	if (bShouldClearPendingDamage)
-	{
-		PendingAuthoritativeDamageByBlock.Remove(Key);
+		PendingPredictedDamageRequestsByBlock.Remove(Key);
 	}
 
 	BroadcastTrackedBlockStateChanged(ChunkWorld, BlockWorldPos);
@@ -248,9 +250,13 @@ bool UPorismPredictedBlockStateComponent::TryBuildPredictedDamageResult(
 	}
 
 	const int32 ClampedHealth = FMath::Max(0, CurrentHealth);
-	OutResult.NewHealth = FMath::Max(0, ClampedHealth - DamageRequest.DamageAmount);
+	const int32 PredictedHealthAfterDamage = FMath::Max(0, ClampedHealth - DamageRequest.DamageAmount);
+
+	// Local prediction may preview zero health for UI/state purposes, but destruction remains server-owned
+	// until the authoritative destroy path replicates back to the client.
+	OutResult.NewHealth = PredictedHealthAfterDamage;
 	OutResult.bAppliedDamage = OutResult.NewHealth != ClampedHealth;
-	OutResult.bDestroyed = OutResult.NewHealth <= 0 && ClampedHealth > 0;
+	OutResult.bDestroyed = false;
 	return true;
 }
 
@@ -273,7 +279,7 @@ bool UPorismPredictedBlockStateComponent::TryApplyImmediateLocalFeedback(
 	const FChunkWorldBlockDamageRequest& DamageRequest,
 	const FChunkWorldBlockDamageResult& DamageResult) const
 {
-	if (!DamageRequest.bAllowImmediateLocalFeedback || !DamageResult.bAppliedDamage)
+	if (!DamageResult.bAppliedDamage)
 	{
 		return false;
 	}
@@ -305,6 +311,7 @@ void UPorismPredictedBlockStateComponent::StorePredictedDamageResult(
 	PruneExpiredPredictions();
 
 	const FPredictedBlockKey Key = MakeKey(DamageRequest.ResolvedHit);
+	PendingPredictedDamageRequestsByBlock.FindOrAdd(Key).Add(DamageRequest);
 	const FChunkWorldBlockDamageResult* PreviousResult = PredictedBlockStates.Find(Key);
 	if (!DidTrackedHealthStateChange(PreviousResult, DamageResult))
 	{
@@ -315,21 +322,32 @@ void UPorismPredictedBlockStateComponent::StorePredictedDamageResult(
 	BroadcastTrackedBlockStateChanged(DamageRequest.ResolvedHit.ChunkWorld, DamageRequest.ResolvedHit.BlockWorldPos);
 }
 
-bool UPorismPredictedBlockStateComponent::ApplyBlockDamageRequest(
+bool UPorismPredictedBlockStateComponent::ApplyPredictedDamageRequest(
 	const FChunkWorldBlockDamageRequest& DamageRequest,
 	FChunkWorldBlockDamageRequestResult& OutResult)
 {
+	const auto FinishRequest = [this, &DamageRequest, &OutResult](const bool bCallSucceeded)
+	{
+		UpdateLastDamageRequestDebugState(TEXT("PredictedDamageRequest"), DamageRequest, OutResult, bCallSucceeded);
+		return bCallSucceeded;
+	};
+
 	OutResult = FChunkWorldBlockDamageRequestResult();
 	if (!ValidateDamageRequest(DamageRequest))
 	{
-		return false;
+		return FinishRequest(false);
 	}
 
 	OutResult.bAccepted = true;
 
 	if (GetOwner() != nullptr && GetOwner()->HasAuthority())
 	{
-		return ApplyAuthoritativeDamageRequest(DamageRequest, OutResult);
+		UE_LOG(
+			LogPorismPredictedBlockState,
+			Warning,
+			TEXT("Predicted block damage request ignored on '%s' because prediction requests must not run on authority."),
+			*GetNameSafe(this));
+		return FinishRequest(false);
 	}
 
 	const UWorld* World = GetWorld();
@@ -340,7 +358,7 @@ bool UPorismPredictedBlockStateComponent::ApplyBlockDamageRequest(
 			Warning,
 			TEXT("Client block damage request ignored on '%s' because no world was available."),
 			*GetNameSafe(this));
-		return false;
+		return FinishRequest(false);
 	}
 
 	PruneExpiredPredictions();
@@ -348,34 +366,19 @@ bool UPorismPredictedBlockStateComponent::ApplyBlockDamageRequest(
 	FChunkWorldBlockDamageResult PredictedResult;
 	if (!TryBuildPredictedDamageResult(DamageRequest, World->GetTimeSeconds(), PredictedResult))
 	{
-		return false;
+		return FinishRequest(false);
 	}
 
 	OutResult.DamageResult = PredictedResult;
 	if (!PredictedResult.bAppliedDamage)
 	{
-		return true;
+		return FinishRequest(true);
 	}
 
 	StorePredictedDamageResult(DamageRequest, PredictedResult);
 	OutResult.bPredictionWritten = true;
 	OutResult.bPlayedImmediateLocalFeedback = TryApplyImmediateLocalFeedback(DamageRequest, PredictedResult);
-	QueueAuthoritativeDamage(DamageRequest);
-	OutResult.bQueuedAuthoritativeFlush = true;
-	return true;
-}
-
-bool UPorismPredictedBlockStateComponent::ApplyPredictedDamageAndQueueAuthoritativeFlush(
-	const FChunkWorldResolvedBlockHit& ResolvedHit,
-	const int32 DamageAmount)
-{
-	FChunkWorldBlockDamageRequest DamageRequest;
-	DamageRequest.ResolvedHit = ResolvedHit;
-	DamageRequest.DamageAmount = DamageAmount;
-	DamageRequest.bAllowImmediateLocalFeedback = true;
-
-	FChunkWorldBlockDamageRequestResult RequestResult;
-	return ApplyBlockDamageRequest(DamageRequest, RequestResult);
+	return FinishRequest(true);
 }
 
 bool UPorismPredictedBlockStateComponent::TryGetHealthState(
@@ -439,6 +442,7 @@ bool UPorismPredictedBlockStateComponent::TryGetHealthState(
 void UPorismPredictedBlockStateComponent::ClearPredictionForResolvedBlockHit(const FChunkWorldResolvedBlockHit& ResolvedHit)
 {
 	const bool bRemovedPrediction = PredictedBlockStates.Remove(MakeKey(ResolvedHit)) > 0;
+	PendingPredictedDamageRequestsByBlock.Remove(MakeKey(ResolvedHit));
 	if (bRemovedPrediction)
 	{
 		BroadcastTrackedBlockStateChanged(ResolvedHit.ChunkWorld, ResolvedHit.BlockWorldPos);
@@ -464,101 +468,46 @@ bool UPorismPredictedBlockStateComponent::TryGetPredictedHealthState(
 	return false;
 }
 
-void UPorismPredictedBlockStateComponent::QueueAuthoritativeDamage(const FChunkWorldBlockDamageRequest& DamageRequest)
-{
-	if (!ValidateDamageRequest(DamageRequest))
-	{
-		return;
-	}
-
-	const FPredictedBlockKey Key = MakeKey(DamageRequest.ResolvedHit);
-	FQueuedPredictedBlockDamage& PendingDamage = PendingAuthoritativeDamageByBlock.FindOrAdd(Key);
-	PendingDamage.ChunkWorld = DamageRequest.ResolvedHit.ChunkWorld;
-	PendingDamage.BlockWorldPos = DamageRequest.ResolvedHit.BlockWorldPos;
-	PendingDamage.DamageAmount += DamageRequest.DamageAmount;
-	if (PendingDamage.RequestContextTag.IsNone())
-	{
-		PendingDamage.RequestContextTag = DamageRequest.RequestContextTag;
-	}
-
-	UWorld* World = GetWorld();
-	if (World == nullptr || World->GetTimerManager().IsTimerActive(PendingDamageFlushHandle))
-	{
-		return;
-	}
-
-	World->GetTimerManager().SetTimer(
-		PendingDamageFlushHandle,
-		this,
-		&UPorismPredictedBlockStateComponent::FlushQueuedPredictedDamage,
-		FMath::Max(0.0f, PendingDamageFlushDelaySeconds),
-		false);
-}
-
-void UPorismPredictedBlockStateComponent::FlushQueuedPredictedDamage()
-{
-	if (UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().ClearTimer(PendingDamageFlushHandle);
-	}
-
-	if (PendingAuthoritativeDamageByBlock.IsEmpty())
-	{
-		return;
-	}
-
-	TArray<FQueuedPredictedBlockDamage> QueuedDamageEntries;
-	QueuedDamageEntries.Reserve(PendingAuthoritativeDamageByBlock.Num());
-	for (const TPair<FPredictedBlockKey, FQueuedPredictedBlockDamage>& PendingEntry : PendingAuthoritativeDamageByBlock)
-	{
-		if (PendingEntry.Value.DamageAmount > 0 && IsValid(PendingEntry.Value.ChunkWorld))
-		{
-			QueuedDamageEntries.Add(PendingEntry.Value);
-		}
-	}
-
-	PendingAuthoritativeDamageByBlock.Reset();
-	if (QueuedDamageEntries.IsEmpty())
-	{
-		return;
-	}
-
-	if (GetOwner() != nullptr && GetOwner()->HasAuthority())
-	{
-		ServerFlushQueuedPredictedDamage_Implementation(QueuedDamageEntries);
-		return;
-	}
-
-	ServerFlushQueuedPredictedDamage(QueuedDamageEntries);
-}
-
 bool UPorismPredictedBlockStateComponent::ApplyAuthoritativeDamageRequest(
 	const FChunkWorldBlockDamageRequest& DamageRequest,
 	FChunkWorldBlockDamageRequestResult& OutResult)
 {
+	const auto FinishRequest = [this, &DamageRequest, &OutResult](const bool bCallSucceeded)
+	{
+		UpdateLastDamageRequestDebugState(TEXT("AuthoritativeDamageRequest"), DamageRequest, OutResult, bCallSucceeded);
+		return bCallSucceeded;
+	};
+
+	OutResult = FChunkWorldBlockDamageRequestResult();
+	if (!ValidateDamageRequest(DamageRequest))
+	{
+		return FinishRequest(false);
+	}
+
+	OutResult.bAccepted = true;
 	if (GetOwner() == nullptr || !GetOwner()->HasAuthority())
 	{
 		UE_LOG(
 			LogPorismPredictedBlockState,
 			Warning,
-			TEXT("Authoritative block damage path ignored on '%s' because the owner does not have authority."),
+			TEXT("Authoritative block damage request ignored on '%s' because authoritative requests must only run on authority."),
 			*GetNameSafe(this));
-		return false;
+		return FinishRequest(false);
 	}
 
 	FChunkWorldBlockDamageResult DamageResult;
 	if (!UChunkWorldBlockDamageBlueprintLibrary::TryApplyBlockDamageForResolvedBlockHit(DamageRequest.ResolvedHit, DamageRequest.DamageAmount, DamageResult))
 	{
-		return false;
+		return FinishRequest(false);
 	}
 
 	OutResult.DamageResult = DamageResult;
-	if (!DamageResult.bAppliedDamage)
+	if (!DamageResult.bAppliedDamage && !DamageResult.bDestroyed)
 	{
-		return true;
+		return FinishRequest(true);
 	}
 
-	OutResult.bAuthoritativeDamageApplied = true;
+	OutResult.bAuthoritativeDamageApplied = DamageResult.bAppliedDamage;
 	if (DamageResult.bDestroyed)
 	{
 		if (AChunkWorldExtended* ChunkWorld = Cast<AChunkWorldExtended>(DamageRequest.ResolvedHit.ChunkWorld))
@@ -576,7 +525,7 @@ bool UPorismPredictedBlockStateComponent::ApplyAuthoritativeDamageRequest(
 		}
 	}
 
-	return true;
+	return FinishRequest(true);
 }
 
 void UPorismPredictedBlockStateComponent::BroadcastTrackedBlockStateChanged(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos)
@@ -641,27 +590,208 @@ void UPorismPredictedBlockStateComponent::HandleActorSpawned(AActor* SpawnedActo
 	BindObservedChunkWorld(Cast<AChunkWorldExtended>(SpawnedActor));
 }
 
-void UPorismPredictedBlockStateComponent::ServerFlushQueuedPredictedDamage_Implementation(const TArray<FQueuedPredictedBlockDamage>& QueuedDamageEntries)
+void UPorismPredictedBlockStateComponent::UpdateLastDamageRequestDebugState(
+	const TCHAR* PathName,
+	const FChunkWorldBlockDamageRequest& DamageRequest,
+	const FChunkWorldBlockDamageRequestResult& RequestResult,
+	const bool bCallSucceeded)
 {
-	for (const FQueuedPredictedBlockDamage& PendingDamage : QueuedDamageEntries)
+	FLastDamageRequestDebugState& DebugState = FCString::Strcmp(PathName, TEXT("PredictedDamageRequest")) == 0
+		? LastPredictedDamageRequestDebugState
+		: LastAuthoritativeDamageRequestDebugState;
+
+	DebugState.bHasRecord = true;
+	DebugState.bCallSucceeded = bCallSucceeded;
+	DebugState.WorldTimeSeconds = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+	DebugState.PathName = PathName;
+	DebugState.Request = DamageRequest;
+	DebugState.Result = RequestResult;
+}
+
+bool UPorismPredictedBlockStateComponent::ShouldDrawDebugStatsForPlayer(const APlayerController* DebugOwner) const
+{
+	if (!bShowDebugStats || DebugOwner == nullptr || GetOwner() == nullptr)
 	{
-		if (PendingDamage.DamageAmount <= 0 || !IsValid(PendingDamage.ChunkWorld))
-		{
-			continue;
-		}
-
-		FChunkWorldResolvedBlockHit ResolvedHit;
-		if (!UChunkWorldBlockHitBlueprintLibrary::TryResolveBlockHitContextFromBlockWorldPos(PendingDamage.ChunkWorld, PendingDamage.BlockWorldPos, ResolvedHit))
-		{
-			continue;
-		}
-
-		FChunkWorldBlockDamageRequest DamageRequest;
-		DamageRequest.ResolvedHit = ResolvedHit;
-		DamageRequest.DamageAmount = PendingDamage.DamageAmount;
-		DamageRequest.RequestContextTag = PendingDamage.RequestContextTag;
-
-		FChunkWorldBlockDamageRequestResult RequestResult;
-		(void)ApplyAuthoritativeDamageRequest(DamageRequest, RequestResult);
+		return false;
 	}
+
+	const APawn* ControlledPawn = DebugOwner->GetPawn();
+	return ControlledPawn != nullptr && (ControlledPawn == GetOwner() || ControlledPawn == GetOwner()->GetOwner());
+}
+
+void UPorismPredictedBlockStateComponent::MaybeLogDebugStats(const FString& Snapshot)
+{
+	const UWorld* World = GetWorld();
+	if (World == nullptr || !bShowDebugStats)
+	{
+		return;
+	}
+
+	const float Now = World->GetTimeSeconds();
+	constexpr float MinLogIntervalSeconds = 1.0f;
+	if (Snapshot == LastDebugStatsLogSnapshot && (Now - LastDebugStatsLogTimeSeconds) < MinLogIntervalSeconds)
+	{
+		return;
+	}
+
+	LastDebugStatsLogSnapshot = Snapshot;
+	LastDebugStatsLogTimeSeconds = Now;
+	UE_LOG(LogPorismPredictedBlockState, Log, TEXT("%s"), *Snapshot);
+}
+
+void UPorismPredictedBlockStateComponent::DrawDebugStats(UCanvas* Canvas, APlayerController* DebugOwner)
+{
+	if (!ShouldDrawDebugStatsForPlayer(DebugOwner) || Canvas == nullptr)
+	{
+		return;
+	}
+
+	PruneExpiredPredictions();
+
+	FString Snapshot = FString::Printf(
+		TEXT("Porism Predicted Block State [%s] Owner=%s PredictedEntries=%d"),
+		*GetNameSafe(this),
+		*GetNameSafe(GetOwner()),
+		PredictedBlockStates.Num());
+
+	float Y = 48.0f;
+	DrawPredictedBlockStateDebugStatsLine(Canvas, Y, FString::Printf(TEXT("Porism Predicted Block State [%s]"), *GetNameSafe(this)), FColor::Cyan);
+	int32 PendingPredictionCount = 0;
+	for (const TPair<FPredictedBlockKey, TArray<FChunkWorldBlockDamageRequest>>& PendingEntry : PendingPredictedDamageRequestsByBlock)
+	{
+		PendingPredictionCount += PendingEntry.Value.Num();
+	}
+	DrawPredictedBlockStateDebugStatsLine(Canvas, Y, FString::Printf(TEXT("Owner=%s PredictedEntries=%d PendingPredictions=%d Timeout=%.2f"), *GetNameSafe(GetOwner()), PredictedBlockStates.Num(), PendingPredictionCount, PredictionTimeoutSeconds), FColor::White);
+	Snapshot += FString::Printf(TEXT(" PendingPredictions=%d Timeout=%.2f"), PendingPredictionCount, PredictionTimeoutSeconds);
+
+	const FLastDamageRequestDebugState* LatestDebugState = nullptr;
+	if (LastPredictedDamageRequestDebugState.bHasRecord && LastAuthoritativeDamageRequestDebugState.bHasRecord)
+	{
+		LatestDebugState = LastPredictedDamageRequestDebugState.WorldTimeSeconds >= LastAuthoritativeDamageRequestDebugState.WorldTimeSeconds
+			? &LastPredictedDamageRequestDebugState
+			: &LastAuthoritativeDamageRequestDebugState;
+	}
+	else if (LastPredictedDamageRequestDebugState.bHasRecord)
+	{
+		LatestDebugState = &LastPredictedDamageRequestDebugState;
+	}
+	else if (LastAuthoritativeDamageRequestDebugState.bHasRecord)
+	{
+		LatestDebugState = &LastAuthoritativeDamageRequestDebugState;
+	}
+
+	if (LatestDebugState != nullptr)
+	{
+		const FChunkWorldResolvedBlockHit& LastResolvedHit = LatestDebugState->Request.ResolvedHit;
+		int32 PredictedHealth = 0;
+		bool bPredictedInvincible = false;
+		FGameplayTag PredictedBlockTypeName;
+		const bool bHasPredictedState = TryGetPredictedHealthState(LastResolvedHit, PredictedHealth, bPredictedInvincible, PredictedBlockTypeName);
+		const int32 PendingPredictionsForBlock = PendingPredictedDamageRequestsByBlock.FindRef(MakeKey(LastResolvedHit)).Num();
+
+		int32 AuthoritativeHealth = 0;
+		int32 AuthoritativeMaxHealth = 0;
+		bool bAuthoritativeInvincible = false;
+		bool bHasRuntimeHealth = false;
+		FGameplayTag AuthoritativeBlockTypeName;
+		const bool bHasAuthoritativeState = IsValid(LastResolvedHit.ChunkWorld)
+			&& UChunkWorldBlockDamageBlueprintLibrary::TryGetRuntimeBlockHealthStateForBlockWorldPos(
+				LastResolvedHit.ChunkWorld,
+				LastResolvedHit.BlockWorldPos,
+				AuthoritativeHealth,
+				AuthoritativeMaxHealth,
+				bAuthoritativeInvincible,
+				bHasRuntimeHealth,
+				AuthoritativeBlockTypeName);
+
+		FChunkWorldResolvedBlockHit CurrentResolvedHit;
+		const bool bBlockStillResolves = IsValid(LastResolvedHit.ChunkWorld)
+			&& UChunkWorldBlockHitBlueprintLibrary::TryResolveBlockHitContextFromBlockWorldPos(LastResolvedHit.ChunkWorld, LastResolvedHit.BlockWorldPos, CurrentResolvedHit);
+
+		const FString LiveStateSource = bHasPredictedState
+			? TEXT("Predicted")
+			: (bHasAuthoritativeState
+				? (bHasRuntimeHealth ? TEXT("Authoritative") : TEXT("AuthoritativeFallback"))
+				: (bBlockStillResolves ? TEXT("Unavailable") : TEXT("DestroyedOrRemoved")));
+		Snapshot += FString::Printf(
+			TEXT(" LastDamagedBlock=%s LiveSource=%s PredictedValid=%d AuthoritativeValid=%d HasRuntimeHealth=%d PendingForBlock=%d"),
+			*LastResolvedHit.BlockWorldPos.ToString(),
+			*LiveStateSource,
+			bHasPredictedState,
+			bHasAuthoritativeState,
+			bHasRuntimeHealth,
+			PendingPredictionsForBlock);
+
+		DrawPredictedBlockStateDebugStatsLine(
+			Canvas,
+			Y,
+			FString::Printf(
+				TEXT("LastDamagedBlock=%s LiveSource=%s PredictedValid=%d AuthoritativeValid=%d HasRuntimeHealth=%d"),
+				*LastResolvedHit.BlockWorldPos.ToString(),
+				*LiveStateSource,
+				bHasPredictedState,
+				bHasAuthoritativeState,
+				bHasRuntimeHealth),
+			FColor::Yellow);
+		DrawPredictedBlockStateDebugStatsLine(
+			Canvas,
+			Y,
+			FString::Printf(
+				TEXT("  pending=%d live predicted=%s live authoritative=%s"),
+				PendingPredictionsForBlock,
+				bHasPredictedState
+					? *FString::Printf(TEXT("%d inv=%d type=%s"), PredictedHealth, bPredictedInvincible, *PredictedBlockTypeName.ToString())
+					: TEXT("none"),
+				bHasAuthoritativeState
+					? *FString::Printf(TEXT("%d/%d inv=%d type=%s"), AuthoritativeHealth, AuthoritativeMaxHealth, bAuthoritativeInvincible, *AuthoritativeBlockTypeName.ToString())
+					: TEXT("none")),
+			FColor::White);
+	}
+
+	const auto DrawRequestState = [Canvas, &Y](const FLastDamageRequestDebugState& DebugState, const TCHAR* Label)
+	{
+		if (!DebugState.bHasRecord)
+		{
+			DrawPredictedBlockStateDebugStatsLine(Canvas, Y, FString::Printf(TEXT("%s: none"), Label), FColor::Silver);
+			return;
+		}
+
+		const FColor HeaderColor = DebugState.bCallSucceeded ? FColor::Green : FColor::Red;
+		DrawPredictedBlockStateDebugStatsLine(
+			Canvas,
+			Y,
+			FString::Printf(TEXT("%s t=%.2f success=%d accepted=%d context=%s"), Label, DebugState.WorldTimeSeconds, DebugState.bCallSucceeded, DebugState.Result.bAccepted, *DebugState.Request.RequestContextTag.ToString()),
+			HeaderColor);
+		DrawPredictedBlockStateDebugStatsLine(
+			Canvas,
+			Y,
+			FString::Printf(
+				TEXT("  block=%s damage=%d predicted=%d authoritative=%d feedback=%d"),
+				*DebugState.Request.ResolvedHit.BlockWorldPos.ToString(),
+				DebugState.Request.DamageAmount,
+				DebugState.Result.bPredictionWritten,
+				DebugState.Result.bAuthoritativeDamageApplied,
+				DebugState.Result.bPlayedImmediateLocalFeedback),
+			FColor::White);
+		DrawPredictedBlockStateDebugStatsLine(
+			Canvas,
+			Y,
+			FString::Printf(
+				TEXT("  applied=%d destroyed=%d schema=%d health=%d->%d type=%s"),
+				DebugState.Result.DamageResult.bAppliedDamage,
+				DebugState.Result.DamageResult.bDestroyed,
+				DebugState.Result.DamageResult.bHasDamageSchema,
+				DebugState.Result.DamageResult.PreviousHealth,
+				DebugState.Result.DamageResult.NewHealth,
+				*DebugState.Result.DamageResult.BlockTypeName.ToString()),
+			FColor::White);
+	};
+
+	DrawRequestState(LastPredictedDamageRequestDebugState, TEXT("Predicted"));
+	DrawRequestState(LastAuthoritativeDamageRequestDebugState, TEXT("Authoritative"));
+	Snapshot += FString::Printf(
+		TEXT(" PredictedRequest=%d AuthoritativeRequest=%d"),
+		LastPredictedDamageRequestDebugState.bHasRecord,
+		LastAuthoritativeDamageRequestDebugState.bHasRecord);
+	MaybeLogDebugStats(Snapshot);
 }

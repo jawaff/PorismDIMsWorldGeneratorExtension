@@ -4,7 +4,26 @@
 
 #include "Actor/Components/PorismPredictedBlockStateComponent.h"
 #include "ChunkWorld/Components/BlockTypeSchemaComponent.h"
+#include "Debug/DebugDrawService.h"
+#include "Engine/Canvas.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
 DEFINE_LOG_CATEGORY_STATIC(LogPorismDamageTraceInteraction, Log, All);
+
+namespace
+{
+	void DrawDamageTraceInteractionDebugStatsLine(UCanvas* Canvas, float& InOutY, const FString& Message, const FColor& Color)
+	{
+		if (Canvas == nullptr)
+		{
+			return;
+		}
+
+		Canvas->SetDrawColor(Color);
+		Canvas->DrawText(GEngine->GetSmallFont(), Message, 48.0f, InOutY);
+		InOutY += 14.0f;
+	}
+}
 
 UPorismDamageTraceInteractionComponent::UPorismDamageTraceInteractionComponent()
 {
@@ -15,49 +34,14 @@ FChunkWorldDamageBlockInteractionResult UPorismDamageTraceInteractionComponent::
 	return FocusedDamageState.Payload;
 }
 
-bool UPorismDamageTraceInteractionComponent::CanApplyDamageToCurrentBlock() const
-{
-	return FocusedDamageState.bIsActive
-		&& FocusedDamageState.Payload.bSupportsHealth
-		&& FocusedDamageState.Payload.bIsDestructible;
-}
-
-bool UPorismDamageTraceInteractionComponent::ApplyDamageToCurrentBlock(const int32 DamageAmount)
-{
-	if (DamageAmount <= 0 || !CanApplyDamageToCurrentBlock())
-	{
-		return false;
-	}
-
-	if (GetOwner() == nullptr)
-	{
-		return false;
-	}
-
-	if (UPorismPredictedBlockStateComponent* PredictionComponent = GetPredictedBlockStateComponent())
-	{
-		FChunkWorldBlockDamageRequest DamageRequest;
-		DamageRequest.ResolvedHit = FocusedDamageState.Payload.ResolvedBlockHit;
-		DamageRequest.DamageAmount = DamageAmount;
-		DamageRequest.RequestContextTag = TEXT("TraceInteraction");
-		DamageRequest.bAllowImmediateLocalFeedback = true;
-
-		FChunkWorldBlockDamageRequestResult RequestResult;
-		return PredictionComponent->ApplyBlockDamageRequest(DamageRequest, RequestResult);
-	}
-
-	UE_LOG(
-		LogPorismDamageTraceInteraction,
-		Error,
-		TEXT("Damage trace interaction '%s' attempted to apply block damage without a UPorismPredictedBlockStateComponent on owner '%s'."),
-		*GetNameSafe(this),
-		*GetNameSafe(GetOwner()));
-	return false;
-}
-
 void UPorismDamageTraceInteractionComponent::BeginPlay()
 {
 	Super::BeginPlay();
+
+	if (GetWorld() != nullptr && GetWorld()->GetNetMode() != NM_DedicatedServer)
+	{
+		DebugDrawDelegateHandle = UDebugDrawService::Register(TEXT("Game"), FDebugDrawDelegate::CreateUObject(this, &UPorismDamageTraceInteractionComponent::DrawDebugStats));
+	}
 
 	OnBlockInteractionStarted.AddDynamic(this, &UPorismDamageTraceInteractionComponent::HandleBlockInteractionStarted);
 	OnBlockInteractionEnded.AddDynamic(this, &UPorismDamageTraceInteractionComponent::HandleBlockInteractionEnded);
@@ -69,6 +53,12 @@ void UPorismDamageTraceInteractionComponent::BeginPlay()
 
 void UPorismDamageTraceInteractionComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (DebugDrawDelegateHandle.IsValid())
+	{
+		UDebugDrawService::Unregister(DebugDrawDelegateHandle);
+		DebugDrawDelegateHandle.Reset();
+	}
+
 	OnBlockInteractionStarted.RemoveAll(this);
 	OnBlockInteractionEnded.RemoveAll(this);
 	OnBlockInteractionUpdated.RemoveAll(this);
@@ -255,6 +245,128 @@ void UPorismDamageTraceInteractionComponent::UnbindPredictedBlockStateComponent(
 	}
 
 	PredictedBlockStateComponent.Reset();
+}
+
+bool UPorismDamageTraceInteractionComponent::ShouldDrawDebugStatsForPlayer(const APlayerController* DebugOwner) const
+{
+	if (!bShowDebugStats || DebugOwner == nullptr || GetOwner() == nullptr)
+	{
+		return false;
+	}
+
+	const APawn* ControlledPawn = DebugOwner->GetPawn();
+	return ControlledPawn != nullptr && (ControlledPawn == GetOwner() || ControlledPawn == GetOwner()->GetOwner());
+}
+
+void UPorismDamageTraceInteractionComponent::MaybeLogDebugStats(const FString& Snapshot)
+{
+	const UWorld* World = GetWorld();
+	if (World == nullptr || !bShowDebugStats)
+	{
+		return;
+	}
+
+	const float Now = World->GetTimeSeconds();
+	constexpr float MinLogIntervalSeconds = 1.0f;
+	if (Snapshot == LastDebugStatsLogSnapshot && (Now - LastDebugStatsLogTimeSeconds) < MinLogIntervalSeconds)
+	{
+		return;
+	}
+
+	LastDebugStatsLogSnapshot = Snapshot;
+	LastDebugStatsLogTimeSeconds = Now;
+	UE_LOG(LogPorismDamageTraceInteraction, Log, TEXT("%s"), *Snapshot);
+}
+
+void UPorismDamageTraceInteractionComponent::DrawDebugStats(UCanvas* Canvas, APlayerController* DebugOwner)
+{
+	if (!ShouldDrawDebugStatsForPlayer(DebugOwner) || Canvas == nullptr)
+	{
+		return;
+	}
+
+	const FPorismTraceInteractionResult& TraceResult = GetLastTraceResult();
+	const FChunkWorldBlockInteractionResult BlockResult = GetLastBlockInteractionResult();
+	const FChunkWorldDamageBlockInteractionResult DamageResult = GetLastDamageBlockInteractionResult();
+	FString Snapshot = FString::Printf(
+		TEXT("Porism Damage Trace Interaction [%s] Owner=%s TargetType=%d HasTarget=%d HasBlock=%d HasDamageBlock=%d BoundPrediction=%d"),
+		*GetNameSafe(this),
+		*GetNameSafe(GetOwner()),
+		static_cast<int32>(TraceResult.TargetType),
+		HasValidInteractionTarget(),
+		HasActiveBlockInteraction(),
+		HasActiveDamageBlockInteraction(),
+		GetPredictedBlockStateComponent() != nullptr);
+
+	float Y = 164.0f;
+	DrawDamageTraceInteractionDebugStatsLine(Canvas, Y, FString::Printf(TEXT("Porism Damage Trace Interaction [%s]"), *GetNameSafe(this)), FColor::Cyan);
+	DrawDamageTraceInteractionDebugStatsLine(
+		Canvas,
+		Y,
+		FString::Printf(
+			TEXT("Owner=%s TargetType=%d HasTarget=%d HasBlock=%d HasDamageBlock=%d BoundPrediction=%d"),
+			*GetNameSafe(GetOwner()),
+			static_cast<int32>(TraceResult.TargetType),
+			HasValidInteractionTarget(),
+				HasActiveBlockInteraction(),
+				HasActiveDamageBlockInteraction(),
+			GetPredictedBlockStateComponent() != nullptr),
+		FColor::White);
+
+	if (!HasActiveDamageBlockInteraction())
+	{
+		DrawDamageTraceInteractionDebugStatsLine(Canvas, Y, TEXT("No active damage-capable block interaction."), FColor::Silver);
+		Snapshot += TEXT(" NoActiveDamageBlockInteraction");
+		MaybeLogDebugStats(Snapshot);
+		return;
+	}
+
+	DrawDamageTraceInteractionDebugStatsLine(
+		Canvas,
+		Y,
+		FString::Printf(
+			TEXT("Block=%s Type=%s ResolveSource=%d"),
+			*DamageResult.ResolvedBlockHit.BlockWorldPos.ToString(),
+			*DamageResult.BlockTypeName.ToString(),
+			static_cast<int32>(DamageResult.ResolvedBlockHit.ResolveSource)),
+		FColor::White);
+	DrawDamageTraceInteractionDebugStatsLine(
+		Canvas,
+		Y,
+		FString::Printf(
+			TEXT("Health=%d/%d UsingPredictedHealth=%d HasAuthoritativeHealth=%d HasCustomData=%d Destructible=%d Invincible=%d"),
+			DamageResult.CurrentHealth,
+			DamageResult.MaxHealth,
+			DamageResult.bUsingPredictedHealth,
+			DamageResult.bHasAuthoritativeHealth,
+			DamageResult.bHasCustomData,
+			DamageResult.bIsDestructible,
+			DamageResult.bIsInvincible),
+		FColor::White);
+	DrawDamageTraceInteractionDebugStatsLine(
+		Canvas,
+		Y,
+		FString::Printf(
+			TEXT("HitActor=%s HitComponent=%s ImpactPoint=%s"),
+				*GetNameSafe(BlockResult.Hit.GetActor()),
+				*GetNameSafe(BlockResult.Hit.GetComponent()),
+				*BlockResult.Hit.ImpactPoint.ToString()),
+		FColor::White);
+	Snapshot += FString::Printf(
+		TEXT(" Block=%s Type=%s ResolveSource=%d Health=%d/%d UsingPredictedHealth=%d HasAuthoritativeHealth=%d HasCustomData=%d Destructible=%d Invincible=%d HitActor=%s HitComponent=%s"),
+		*DamageResult.ResolvedBlockHit.BlockWorldPos.ToString(),
+		*DamageResult.BlockTypeName.ToString(),
+		static_cast<int32>(DamageResult.ResolvedBlockHit.ResolveSource),
+		DamageResult.CurrentHealth,
+		DamageResult.MaxHealth,
+		DamageResult.bUsingPredictedHealth,
+		DamageResult.bHasAuthoritativeHealth,
+		DamageResult.bHasCustomData,
+		DamageResult.bIsDestructible,
+		DamageResult.bIsInvincible,
+		*GetNameSafe(BlockResult.Hit.GetActor()),
+		*GetNameSafe(BlockResult.Hit.GetComponent()));
+	MaybeLogDebugStats(Snapshot);
 }
 
 bool UPorismDamageTraceInteractionComponent::TryBuildDamageBlockInteractionResult(

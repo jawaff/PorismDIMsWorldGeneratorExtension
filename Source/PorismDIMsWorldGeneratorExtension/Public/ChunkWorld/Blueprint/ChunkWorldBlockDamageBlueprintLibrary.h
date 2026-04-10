@@ -21,6 +21,18 @@ class PORISMDIMSWORLDGENERATOREXTENSION_API UChunkWorldBlockDamageBlueprintLibra
 
 public:
 	/**
+	 * Builds a transport-safe payload from one resolved block hit so the receiver can re-resolve the block authoritatively.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld|Damage")
+	static bool TryBuildAuthorityPayloadFromResolvedBlockHit(const FChunkWorldResolvedBlockHit& ResolvedHit, FChunkWorldBlockHitAuthorityPayload& OutPayload);
+
+	/**
+	 * Re-resolves a transport-safe payload into a fresh runtime block context, typically on the server before authoritative damage calculation.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld|Damage")
+	static bool TryResolveBlockHitContextFromAuthorityPayload(const FChunkWorldBlockHitAuthorityPayload& Payload, FChunkWorldResolvedBlockHit& OutResolvedHit);
+
+	/**
 	 * Broadcasts non-lethal hit feedback for one resolved block using the shared feedback component.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld|Damage")

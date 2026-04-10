@@ -44,24 +44,6 @@ struct FPorismBlockHealthState
 	FGameplayTag BlockTypeName;
 };
 
-USTRUCT()
-struct FQueuedPredictedBlockDamage
-{
-	GENERATED_BODY()
-
-	UPROPERTY()
-	TObjectPtr<AChunkWorld> ChunkWorld = nullptr;
-
-	UPROPERTY()
-	FIntVector BlockWorldPos = FIntVector::ZeroValue;
-
-	UPROPERTY()
-	int32 DamageAmount = 0;
-
-	UPROPERTY()
-	FName RequestContextTag = NAME_None;
-};
-
 /**
  * Local-only prediction cache for block health state keyed by resolved chunk world block hits.
  */
@@ -77,16 +59,16 @@ public:
 	FPorismTrackedBlockStateChangedSignature& OnTrackedBlockStateChanged() { return TrackedBlockStateChangedEvent; }
 
 	/**
-	 * Applies one shared block-damage request through either the authoritative or client-predicted path.
+	 * Applies one local-only predicted damage request and updates tracked prediction state.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld|Prediction")
-	bool ApplyBlockDamageRequest(const FChunkWorldBlockDamageRequest& DamageRequest, FChunkWorldBlockDamageRequestResult& OutResult);
+	bool ApplyPredictedDamageRequest(const FChunkWorldBlockDamageRequest& DamageRequest, FChunkWorldBlockDamageRequestResult& OutResult);
 
 	/**
-	 * Compatibility wrapper for older callers that only provide a resolved block hit plus damage amount.
+	 * Applies one authoritative server-side damage request through the shared block damage library.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld|Prediction")
-	bool ApplyPredictedDamageAndQueueAuthoritativeFlush(const FChunkWorldResolvedBlockHit& ResolvedHit, int32 DamageAmount);
+	bool ApplyAuthoritativeDamageRequest(const FChunkWorldBlockDamageRequest& DamageRequest, FChunkWorldBlockDamageRequestResult& OutResult);
 
 	/**
 	 * Clears a stored prediction because authoritative state for the same block has arrived.
@@ -114,11 +96,22 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Prediction", meta = (ClampMin = "0.01", UIMin = "0.01", ToolTip = "How long one predicted block state stays alive without an authoritative update."))
 	float PredictionTimeoutSeconds = 10.0f;
 
-	/** Delay used to accumulate repeated local block damage requests before sending one authoritative flush to the server. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Prediction", meta = (ClampMin = "0.0", UIMin = "0.0", ToolTip = "Delay used to accumulate repeated local block damage requests before sending one authoritative flush to the server."))
-	float PendingDamageFlushDelaySeconds = 0.05f;
+	/** If true, draws a persistent on-screen stats block for local prediction and authoritative damage activity. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Debug", meta = (ToolTip = "If true, draws a persistent on-screen stats block for local prediction and authoritative damage activity."))
+	bool bShowDebugStats = false;
 
 private:
+	/** Lightweight debug snapshot for the most recent predicted or authoritative damage request. */
+	struct FLastDamageRequestDebugState
+	{
+		bool bHasRecord = false;
+		bool bCallSucceeded = false;
+		float WorldTimeSeconds = 0.0f;
+		FString PathName;
+		FChunkWorldBlockDamageRequest Request;
+		FChunkWorldBlockDamageRequestResult Result;
+	};
+
 	struct FPredictedBlockKey
 	{
 		TWeakObjectPtr<AChunkWorld> ChunkWorld;
@@ -145,24 +138,26 @@ private:
 	bool DidTrackedHealthStateChange(const FChunkWorldBlockDamageResult* PreviousResult, const FChunkWorldBlockDamageResult& NewResult) const;
 	bool TryApplyImmediateLocalFeedback(const FChunkWorldBlockDamageRequest& DamageRequest, const FChunkWorldBlockDamageResult& DamageResult) const;
 	void StorePredictedDamageResult(const FChunkWorldBlockDamageRequest& DamageRequest, const FChunkWorldBlockDamageResult& DamageResult);
-	void QueueAuthoritativeDamage(const FChunkWorldBlockDamageRequest& DamageRequest);
-	void FlushQueuedPredictedDamage();
-	bool ApplyAuthoritativeDamageRequest(const FChunkWorldBlockDamageRequest& DamageRequest, FChunkWorldBlockDamageRequestResult& OutResult);
 	void BroadcastTrackedBlockStateChanged(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos);
 	void BindObservedChunkWorld(AChunkWorld* ChunkWorld);
 	void BindObservedChunkWorlds();
 	void UnbindObservedChunkWorlds();
 	void HandleActorSpawned(AActor* SpawnedActor);
+	void UpdateLastDamageRequestDebugState(const TCHAR* PathName, const FChunkWorldBlockDamageRequest& DamageRequest, const FChunkWorldBlockDamageRequestResult& RequestResult, bool bCallSucceeded);
+	void DrawDebugStats(class UCanvas* Canvas, class APlayerController* DebugOwner);
+	bool ShouldDrawDebugStatsForPlayer(const class APlayerController* DebugOwner) const;
+	void MaybeLogDebugStats(const FString& Snapshot);
 	static FPredictedBlockKey MakeKey(const FChunkWorldResolvedBlockHit& ResolvedHit);
 	static FPredictedBlockKey MakeKey(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos);
 
-	UFUNCTION(Server, Reliable)
-	void ServerFlushQueuedPredictedDamage(const TArray<FQueuedPredictedBlockDamage>& QueuedDamageEntries);
-
 	TMap<FPredictedBlockKey, FChunkWorldBlockDamageResult> PredictedBlockStates;
-	TMap<FPredictedBlockKey, FQueuedPredictedBlockDamage> PendingAuthoritativeDamageByBlock;
-	FTimerHandle PendingDamageFlushHandle;
+	TMap<FPredictedBlockKey, TArray<FChunkWorldBlockDamageRequest>> PendingPredictedDamageRequestsByBlock;
 	FPorismTrackedBlockStateChangedSignature TrackedBlockStateChangedEvent;
 	TArray<TWeakObjectPtr<class AChunkWorldExtended>> ObservedChunkWorlds;
 	FDelegateHandle ActorSpawnedHandle;
+	FDelegateHandle DebugDrawDelegateHandle;
+	FLastDamageRequestDebugState LastPredictedDamageRequestDebugState;
+	FLastDamageRequestDebugState LastAuthoritativeDamageRequestDebugState;
+	float LastDebugStatsLogTimeSeconds = -1000.0f;
+	FString LastDebugStatsLogSnapshot;
 };

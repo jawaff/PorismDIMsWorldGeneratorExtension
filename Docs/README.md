@@ -14,6 +14,7 @@ This plugin-local documentation is the home for the block schema, chunk-world in
 - `Docs/Usage/`
   - setup guides and recommended component/library combinations for common gameplay routes
 - [Usage/ChunkWorldGameplaySetup.md](./Usage/ChunkWorldGameplaySetup.md)
+- [Usage/ServerAuthoritativeBlockDamage.md](./Usage/ServerAuthoritativeBlockDamage.md)
 
 The plugin docs focus on stable public behavior. Project-level rewrites and migration notes should be tracked in the main repository `Docs/InProgress/` area until the behavior is settled enough to promote back into these plugin-local pages.
 

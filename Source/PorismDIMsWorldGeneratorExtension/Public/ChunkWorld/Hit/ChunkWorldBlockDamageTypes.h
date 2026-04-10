@@ -98,9 +98,6 @@ struct FChunkWorldBlockDamageRequest
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Block|ChunkWorld|Damage")
 	FName RequestContextTag = NAME_None;
 
-	/** If true, the local initiating process may play immediate non-authoritative feedback for this request. */
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Block|ChunkWorld|Damage")
-	bool bAllowImmediateLocalFeedback = false;
 };
 
 /**
@@ -122,10 +119,6 @@ struct FChunkWorldBlockDamageRequestResult
 	/** True when authoritative damage was applied immediately on this process. */
 	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")
 	bool bAuthoritativeDamageApplied = false;
-
-	/** True when a client-side aggregate flush was queued for later server submission. */
-	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")
-	bool bQueuedAuthoritativeFlush = false;
 
 	/** True when immediate local feedback played for the initiating process. */
 	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")

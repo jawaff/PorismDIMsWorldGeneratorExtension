@@ -37,11 +37,13 @@ bool FPorismExtensionPredictedBlockStateInvalidInputTest::RunTest(const FString&
 	FChunkWorldBlockDamageRequest InvalidRequest;
 	FChunkWorldBlockDamageRequestResult RequestResult;
 	AddExpectedError(TEXT("damage amount was 0"), EAutomationExpectedErrorFlags::Contains, 1);
-	TestFalse(TEXT("Invalid block damage requests are rejected"), PredictionComponent->ApplyBlockDamageRequest(InvalidRequest, RequestResult));
+	TestFalse(TEXT("Invalid predicted block damage requests are rejected"), PredictionComponent->ApplyPredictedDamageRequest(InvalidRequest, RequestResult));
 
 	FChunkWorldResolvedBlockHit ResolvedHit;
+	FChunkWorldBlockDamageRequest InvalidAuthoritativeRequest;
+	InvalidAuthoritativeRequest.DamageAmount = 4;
 	AddExpectedError(TEXT("resolved hit was invalid"), EAutomationExpectedErrorFlags::Contains, 1);
-	TestFalse(TEXT("Compatibility wrapper rejects invalid resolved hits"), PredictionComponent->ApplyPredictedDamageAndQueueAuthoritativeFlush(ResolvedHit, 4));
+	TestFalse(TEXT("Invalid authoritative block damage requests are rejected"), PredictionComponent->ApplyAuthoritativeDamageRequest(InvalidAuthoritativeRequest, RequestResult));
 
 	int32 Health = 0;
 	bool bIsInvincible = false;
@@ -77,7 +79,7 @@ bool FPorismExtensionPredictedBlockStateInvalidInputNoBroadcastTest::RunTest(con
 	FChunkWorldBlockDamageRequest InvalidRequest;
 	FChunkWorldBlockDamageRequestResult RequestResult;
 	AddExpectedError(TEXT("damage amount was 0"), EAutomationExpectedErrorFlags::Contains, 1);
-	TestFalse(TEXT("Invalid requests are rejected"), PredictionComponent->ApplyBlockDamageRequest(InvalidRequest, RequestResult));
+	TestFalse(TEXT("Invalid predicted requests are rejected"), PredictionComponent->ApplyPredictedDamageRequest(InvalidRequest, RequestResult));
 	TestEqual(TEXT("Rejected requests do not broadcast tracked block state changes"), BroadcastCount, 0);
 
 	return true;
@@ -129,8 +131,7 @@ bool FPorismExtensionDamageTraceInteractionDefaultStateTest::RunTest(const FStri
 	TestNotNull(TEXT("Damage trace interaction component is created"), DamageTraceComponent);
 
 	TestFalse(TEXT("Fresh damage trace components start without an active damage block interaction"), DamageTraceComponent->HasActiveDamageBlockInteraction());
-	TestFalse(TEXT("Fresh damage trace components cannot apply damage"), DamageTraceComponent->CanApplyDamageToCurrentBlock());
-	TestFalse(TEXT("Damage application fails cleanly without a focused damageable block"), DamageTraceComponent->ApplyDamageToCurrentBlock(3));
+	TestEqual(TEXT("Fresh damage trace components expose an empty damage payload"), DamageTraceComponent->GetLastDamageBlockInteractionResult().CurrentHealth, 0);
 
 	return true;
 }

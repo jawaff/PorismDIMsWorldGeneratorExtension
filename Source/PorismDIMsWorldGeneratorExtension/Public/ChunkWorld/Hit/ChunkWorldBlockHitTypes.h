@@ -76,3 +76,30 @@ struct FChunkWorldResolvedBlockHit
 	UPROPERTY(BlueprintReadOnly, Category = "ChunkWorld")
 	EChunkWorldBlockHitResolveSource ResolveSource = EChunkWorldBlockHitResolveSource::None;
 };
+
+/**
+ * Minimal block identity payload that is safe to send to the server for authoritative re-resolution.
+ */
+USTRUCT(BlueprintType)
+struct FChunkWorldBlockHitAuthorityPayload
+{
+	GENERATED_BODY()
+
+	/**
+	 * Chunk world that owns the target block.
+	 */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "ChunkWorld")
+	TObjectPtr<AChunkWorld> ChunkWorld = nullptr;
+
+	/**
+	 * Represented block world position that should be re-resolved by the receiver.
+	 */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Block|ChunkWorld")
+	FIntVector BlockWorldPos = FIntVector::ZeroValue;
+
+	/**
+	 * True when the source side had a valid represented block to serialize.
+	 */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Block|ChunkWorld")
+	bool bHasBlock = false;
+};

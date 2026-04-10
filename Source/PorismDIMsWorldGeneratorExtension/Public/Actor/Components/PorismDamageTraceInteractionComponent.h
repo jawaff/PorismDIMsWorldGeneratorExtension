@@ -14,7 +14,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnChunkWorldDamageBlockInteractionU
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnChunkWorldDamageBlockCustomDataInitialized, const FChunkWorldDamageBlockInteractionResult&, Result);
 
 /**
- * Shared interaction component that builds on the generic trace loop with optional health-aware block payloads and damage application helpers.
+ * Shared interaction component that builds on the generic trace loop with optional health-aware block payloads.
  */
 UCLASS(ClassGroup = (Porism), BlueprintType, meta = (BlueprintSpawnableComponent, DisplayName = "Porism Damage Trace Interaction Component"))
 class PORISMDIMSWORLDGENERATOREXTENSION_API UPorismDamageTraceInteractionComponent : public UPorismTraceInteractionComponent
@@ -32,14 +32,6 @@ public:
 	/** Returns whether a damage-capable block interaction target is currently active. */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld|Damage")
 	bool HasActiveDamageBlockInteraction() const { return FocusedDamageState.bIsActive; }
-
-	/** Returns whether the current active block target can accept shared damage under the health schema family. */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld|Damage")
-	bool CanApplyDamageToCurrentBlock() const;
-
-	/** Applies damage to the current active block target when it supports the shared health schema family. */
-	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld|Damage")
-	bool ApplyDamageToCurrentBlock(int32 DamageAmount);
 
 	UPROPERTY(BlueprintAssignable, Category = "Block|ChunkWorld|Damage")
 	FOnChunkWorldDamageBlockInteractionChanged OnDamageBlockInteractionStarted;
@@ -59,6 +51,10 @@ protected:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual bool ShouldAcceptBlockInteractionResult(const FChunkWorldBlockInteractionResult& BlockResult) const override;
 	virtual bool DidBlockInteractionResultChange(bool bHadPreviousResult, const FChunkWorldBlockInteractionResult& PreviousResult, bool bHasNewResult, const FChunkWorldBlockInteractionResult& NewResult) const override;
+
+	/** If true, draws a persistent on-screen stats block for the current damage trace target and payload state. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Debug", meta = (ToolTip = "If true, draws a persistent on-screen stats block for the current damage trace target and payload state."))
+	bool bShowDebugStats = false;
 
 private:
 	struct FFocusedDamageBlockState
@@ -94,6 +90,13 @@ private:
 	void EmitDamageStateTransition(const FFocusedDamageBlockState& PreviousState, FFocusedDamageBlockState& NewState);
 	void BindPredictedBlockStateComponent();
 	void UnbindPredictedBlockStateComponent();
+	void DrawDebugStats(class UCanvas* Canvas, class APlayerController* DebugOwner);
+	bool ShouldDrawDebugStatsForPlayer(const class APlayerController* DebugOwner) const;
+	void MaybeLogDebugStats(const FString& Snapshot);
 	bool TryBuildDamageBlockInteractionResult(const FChunkWorldBlockInteractionResult& BlockResult, FChunkWorldDamageBlockInteractionResult& OutResult) const;
 	UPorismPredictedBlockStateComponent* GetPredictedBlockStateComponent() const;
+
+	FDelegateHandle DebugDrawDelegateHandle;
+	float LastDebugStatsLogTimeSeconds = -1000.0f;
+	FString LastDebugStatsLogSnapshot;
 };
