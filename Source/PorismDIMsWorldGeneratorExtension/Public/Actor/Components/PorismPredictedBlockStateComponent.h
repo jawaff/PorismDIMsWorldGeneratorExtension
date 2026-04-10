@@ -94,7 +94,7 @@ protected:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Prediction", meta = (ClampMin = "0.01", UIMin = "0.01", ToolTip = "How long one predicted block state stays alive without an authoritative update."))
-	float PredictionTimeoutSeconds = 10.0f;
+	float PredictionTimeoutSeconds = 2.0f;
 
 	/** If true, draws a persistent on-screen stats block for local prediction and authoritative damage activity. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Debug", meta = (ToolTip = "If true, draws a persistent on-screen stats block for local prediction and authoritative damage activity."))
@@ -132,6 +132,8 @@ private:
 	void HandleObservedChunkWorldBlockCustomDataChanged(AChunkWorldExtended* ChunkWorld, const FIntVector& BlockWorldPos, bool bTouchedHealth);
 
 	void PruneExpiredPredictions();
+	void SchedulePredictionPrune();
+	void HandlePredictionPruneTimer();
 	bool ShouldRegisterPredictionNotifications() const;
 	bool ValidateDamageRequest(const FChunkWorldBlockDamageRequest& DamageRequest) const;
 	bool TryBuildPredictedDamageResult(const FChunkWorldBlockDamageRequest& DamageRequest, float PredictionTimeSeconds, FChunkWorldBlockDamageResult& OutResult) const;
@@ -156,6 +158,7 @@ private:
 	TArray<TWeakObjectPtr<class AChunkWorldExtended>> ObservedChunkWorlds;
 	FDelegateHandle ActorSpawnedHandle;
 	FDelegateHandle DebugDrawDelegateHandle;
+	FTimerHandle PredictionPruneTimerHandle;
 	FLastDamageRequestDebugState LastPredictedDamageRequestDebugState;
 	FLastDamageRequestDebugState LastAuthoritativeDamageRequestDebugState;
 	float LastDebugStatsLogTimeSeconds = -1000.0f;

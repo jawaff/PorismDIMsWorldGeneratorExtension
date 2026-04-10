@@ -22,6 +22,16 @@ namespace
 		bool bTouchedHealth = false;
 	};
 
+	bool IsMeshBackedVoxel(const int32 MeshIndex)
+	{
+		return MeshIndex != EmptyMesh && MeshIndex != DefaultMesh;
+	}
+
+	bool IsRepresentedVoxel(const int32 MaterialIndex, const int32 MeshIndex)
+	{
+		return MaterialIndex != EmptyMaterial || IsMeshBackedVoxel(MeshIndex);
+	}
+
 	void EnsureCustomFeatureDefaultCapacity(TArray<int32>& CustomFeatureDefaultData, int32 RequiredChannelCount)
 	{
 		if (RequiredChannelCount > 0 && CustomFeatureDefaultData.Num() < RequiredChannelCount)
@@ -152,12 +162,12 @@ void AChunkWorldExtended::SyncBlockTypeSchemaRegistry()
 
 void AChunkWorldExtended::WriteCustomDataValuesAndUpdate(const TArray<SCustomDataChangeCall>& NetCustomDataChangeCalls)
 {
-	Super::WriteCustomDataValuesAndUpdate(NetCustomDataChangeCalls);
-
 	const int32 HealthCustomDataIndex = BlockTypeSchemaComponent != nullptr
 		? BlockTypeSchemaComponent->GetBlockDamageHealthCustomDataIndex()
 		: INDEX_NONE;
 	TMap<FIntVector, FObservedBlockCustomDataChange> ObservedBlockChanges;
+	TMap<FIntVector, int32> PreApplyHealthByBlock;
+	const bool bShouldObserveSettledReplication = !HasAuthority();
 
 	for (const SCustomDataChangeCall& ChangeCall : NetCustomDataChangeCalls)
 	{
@@ -178,13 +188,149 @@ void AChunkWorldExtended::WriteCustomDataValuesAndUpdate(const TArray<SCustomDat
 
 		FObservedBlockCustomDataChange& ObservedBlockChange = ObservedBlockChanges.FindOrAdd(BlockWorldPos);
 		ObservedBlockChange.bTouchedHealth |= HealthCustomDataIndex != INDEX_NONE && ChangeCall.customDataIndex == HealthCustomDataIndex;
+		if (bShouldObserveSettledReplication
+			&& ObservedBlockChange.bTouchedHealth
+			&& !PreApplyHealthByBlock.Contains(BlockWorldPos))
+		{
+			int32 PreviousHealth = 0;
+			if (TryGetObservedRuntimeHealth(BlockWorldPos, PreviousHealth))
+			{
+				PreApplyHealthByBlock.Add(BlockWorldPos, PreviousHealth);
+			}
+		}
 	}
+
+	Super::WriteCustomDataValuesAndUpdate(NetCustomDataChangeCalls);
 
 	// Coalesce slot-level replicated writes into one block notification so
 	// prediction/UI refresh runs against the settled block view for that apply batch.
 	for (const TPair<FIntVector, FObservedBlockCustomDataChange>& ObservedBlockChange : ObservedBlockChanges)
 	{
+		if (bShouldObserveSettledReplication && ObservedBlockChange.Value.bTouchedHealth)
+		{
+			if (const int32* PreviousHealth = PreApplyHealthByBlock.Find(ObservedBlockChange.Key))
+			{
+				int32 CurrentHealth = 0;
+				if (TryGetObservedRuntimeHealth(ObservedBlockChange.Key, CurrentHealth) && CurrentHealth < *PreviousHealth)
+				{
+					QueueObservedReplicatedHealthDecrease(ObservedBlockChange.Key, *PreviousHealth, CurrentHealth);
+				}
+			}
+		}
+
 		QueueBlockCustomDataChanged(ObservedBlockChange.Key, ObservedBlockChange.Value.bTouchedHealth, TEXT("ReplicatedApplyBatch"));
+	}
+}
+
+void AChunkWorldExtended::WriteBlockValuesAndUpdate(const TArray<SBlockChangeCall>& NetBlockChangeCalls, const bool bRefreshChunks)
+{
+	TMap<FIntVector, FChunkWorldResolvedBlockHit> PreviousResolvedHitByBlock;
+	TMap<FIntVector, FGameplayTag> PreviousBlockTypeByBlock;
+	if (!HasAuthority())
+	{
+		for (const SBlockChangeCall& ChangeCall : NetBlockChangeCalls)
+		{
+			if (ChangeCall.chunkDataIndex < 0
+				|| ChangeCall.chunkDataIndex >= static_cast<int32>(WorldChunks.size()))
+			{
+				continue;
+			}
+
+			const CChunkData* ChunkData = WorldChunks[ChangeCall.chunkDataIndex];
+			if (ChunkData == nullptr)
+			{
+				continue;
+			}
+
+			const FIntVector BlockWorldPos = ChunkGridPosToBlockWorldPos(ChangeCall.chunkPose, ChunkData)
+				+ BlockChunkIndexToBlockChunkPos(ChangeCall.blockChunkIndex, ChunkData);
+			if (PreviousResolvedHitByBlock.Contains(BlockWorldPos) || !IsRepresentedBlockAt(BlockWorldPos))
+			{
+				continue;
+			}
+
+			FChunkWorldResolvedBlockHit PreviousResolvedHit;
+			FGameplayTag PreviousBlockTypeName;
+			if (TryBuildPreviousResolvedHit(BlockWorldPos, PreviousResolvedHit, PreviousBlockTypeName))
+			{
+				PreviousResolvedHitByBlock.Add(BlockWorldPos, PreviousResolvedHit);
+				PreviousBlockTypeByBlock.Add(BlockWorldPos, PreviousBlockTypeName);
+			}
+		}
+	}
+
+	Super::WriteBlockValuesAndUpdate(NetBlockChangeCalls, bRefreshChunks);
+
+	if (HasAuthority())
+	{
+		return;
+	}
+
+	for (const TPair<FIntVector, FChunkWorldResolvedBlockHit>& PreviousResolvedEntry : PreviousResolvedHitByBlock)
+	{
+		if (!IsRepresentedBlockAt(PreviousResolvedEntry.Key))
+		{
+			QueueObservedReplicatedRepresentationRemoved(
+				PreviousResolvedEntry.Key,
+				&PreviousResolvedEntry.Value,
+				PreviousBlockTypeByBlock.FindRef(PreviousResolvedEntry.Key));
+		}
+	}
+}
+
+void AChunkWorldExtended::WriteMeshDataAndUpdate(const TArray<SMeshChangeCall>& NetMeshChangeCalls, const bool bRefreshChunks)
+{
+	TMap<FIntVector, FChunkWorldResolvedBlockHit> PreviousResolvedHitByBlock;
+	TMap<FIntVector, FGameplayTag> PreviousBlockTypeByBlock;
+	if (!HasAuthority())
+	{
+		for (const SMeshChangeCall& ChangeCall : NetMeshChangeCalls)
+		{
+			if (ChangeCall.chunkDataIndex < 0
+				|| ChangeCall.chunkDataIndex >= static_cast<int32>(WorldChunks.size()))
+			{
+				continue;
+			}
+
+			const CChunkData* ChunkData = WorldChunks[ChangeCall.chunkDataIndex];
+			if (ChunkData == nullptr)
+			{
+				continue;
+			}
+
+			const FIntVector BlockWorldPos = ChunkGridPosToBlockWorldPos(ChangeCall.chunkPose, ChunkData)
+				+ BlockChunkIndexToBlockChunkPos(ChangeCall.blockChunkIndex, ChunkData);
+			if (PreviousResolvedHitByBlock.Contains(BlockWorldPos) || !IsRepresentedBlockAt(BlockWorldPos))
+			{
+				continue;
+			}
+
+			FChunkWorldResolvedBlockHit PreviousResolvedHit;
+			FGameplayTag PreviousBlockTypeName;
+			if (TryBuildPreviousResolvedHit(BlockWorldPos, PreviousResolvedHit, PreviousBlockTypeName))
+			{
+				PreviousResolvedHitByBlock.Add(BlockWorldPos, PreviousResolvedHit);
+				PreviousBlockTypeByBlock.Add(BlockWorldPos, PreviousBlockTypeName);
+			}
+		}
+	}
+
+	Super::WriteMeshDataAndUpdate(NetMeshChangeCalls, bRefreshChunks);
+
+	if (HasAuthority())
+	{
+		return;
+	}
+
+	for (const TPair<FIntVector, FChunkWorldResolvedBlockHit>& PreviousResolvedEntry : PreviousResolvedHitByBlock)
+	{
+		if (!IsRepresentedBlockAt(PreviousResolvedEntry.Key))
+		{
+			QueueObservedReplicatedRepresentationRemoved(
+				PreviousResolvedEntry.Key,
+				&PreviousResolvedEntry.Value,
+				PreviousBlockTypeByBlock.FindRef(PreviousResolvedEntry.Key));
+		}
 	}
 }
 
@@ -325,8 +471,50 @@ void AChunkWorldExtended::FlushDeferredBlockCustomDataChanges()
 
 	for (const TPair<FIntVector, FDeferredBlockCustomDataChange>& PendingChange : PendingChanges)
 	{
+		if (!HasAuthority())
+		{
+			FChunkWorldSettledBlockTransition Transition;
+			if (BuildSettledBlockTransition(PendingChange.Key, PendingChange.Value, Transition))
+			{
+				OnSettledBlockTransition.Broadcast(this, Transition);
+			}
+		}
+
 		NotifyBlockCustomDataChanged(PendingChange.Key, PendingChange.Value.bTouchedHealth, TEXT("DeferredBlockUpdate"));
 	}
+}
+
+bool AChunkWorldExtended::BuildSettledBlockTransition(
+	const FIntVector& BlockWorldPos,
+	const FDeferredBlockCustomDataChange& DeferredChange,
+	FChunkWorldSettledBlockTransition& OutTransition) const
+{
+	OutTransition = FChunkWorldSettledBlockTransition();
+	if (!DeferredChange.bObservedReplicatedHealthDecrease && !DeferredChange.bObservedReplicatedRepresentationRemoved)
+	{
+		return false;
+	}
+
+	OutTransition.BlockWorldPos = BlockWorldPos;
+	OutTransition.bTouchedHealth = DeferredChange.bTouchedHealth;
+	OutTransition.bObservedHealthDecrease = DeferredChange.bObservedReplicatedHealthDecrease;
+	OutTransition.bObservedRepresentationRemoved = DeferredChange.bObservedReplicatedRepresentationRemoved;
+	OutTransition.bHasPreviousHealth = DeferredChange.bHasPreviousHealth;
+	OutTransition.PreviousHealth = DeferredChange.PreviousHealth;
+	OutTransition.bHasCurrentHealth = DeferredChange.bHasCurrentHealth;
+	OutTransition.CurrentHealth = DeferredChange.CurrentHealth;
+	OutTransition.PreviousResolvedHit = DeferredChange.PreviousResolvedHit;
+	OutTransition.PreviousBlockTypeName = DeferredChange.PreviousBlockTypeName;
+	OutTransition.bIsRepresentedAfterTransition = IsRepresentedBlockAt(BlockWorldPos);
+	if (OutTransition.bIsRepresentedAfterTransition)
+	{
+		(void)UChunkWorldBlockHitBlueprintLibrary::TryResolveBlockHitContextFromBlockWorldPos(
+			const_cast<AChunkWorldExtended*>(this),
+			BlockWorldPos,
+			OutTransition.CurrentResolvedHit);
+	}
+
+	return true;
 }
 
 void AChunkWorldExtended::NotifyBlockCustomDataChanged(
@@ -335,6 +523,82 @@ void AChunkWorldExtended::NotifyBlockCustomDataChanged(
 	const TCHAR* /*SourceLabel*/)
 {
 	OnBlockCustomDataChanged.Broadcast(this, BlockWorldPos, bTouchedHealth);
+}
+
+bool AChunkWorldExtended::IsRepresentedBlockAt(const FIntVector& BlockWorldPos) const
+{
+	AChunkWorldExtended* MutableThis = const_cast<AChunkWorldExtended*>(this);
+	const int32 MaterialIndex = MutableThis->GetBlockValueByBlockWorldPos(BlockWorldPos, ERessourceType::MaterialIndex, 0);
+	const int32 MeshIndex = MutableThis->GetMeshDataByBlockWorldPos(BlockWorldPos).MeshId;
+	return IsRepresentedVoxel(MaterialIndex, MeshIndex);
+}
+
+bool AChunkWorldExtended::TryGetObservedRuntimeHealth(const FIntVector& BlockWorldPos, int32& OutHealth) const
+{
+	int32 MaxHealth = 0;
+	bool bInvincible = false;
+	bool bHasRuntimeHealth = false;
+	FGameplayTag BlockTypeName;
+	return UChunkWorldBlockDamageBlueprintLibrary::TryGetRuntimeBlockHealthStateForBlockWorldPos(
+		const_cast<AChunkWorldExtended*>(this),
+		BlockWorldPos,
+		OutHealth,
+		MaxHealth,
+		bInvincible,
+		bHasRuntimeHealth,
+		BlockTypeName);
+}
+
+bool AChunkWorldExtended::TryBuildPreviousResolvedHit(
+	const FIntVector& BlockWorldPos,
+	FChunkWorldResolvedBlockHit& OutResolvedHit,
+	FGameplayTag& OutBlockTypeName) const
+{
+	OutResolvedHit = FChunkWorldResolvedBlockHit();
+	OutBlockTypeName = FGameplayTag();
+	if (!UChunkWorldBlockHitBlueprintLibrary::TryResolveBlockHitContextFromBlockWorldPos(
+		const_cast<AChunkWorldExtended*>(this),
+		BlockWorldPos,
+		OutResolvedHit))
+	{
+		return false;
+	}
+
+	FInstancedStruct DefinitionStruct;
+	return UChunkWorldBlockHitBlueprintLibrary::TryGetBlockDefinitionForResolvedBlockHit(
+		OutResolvedHit,
+		OutBlockTypeName,
+		DefinitionStruct);
+}
+
+void AChunkWorldExtended::QueueObservedReplicatedHealthDecrease(
+	const FIntVector& BlockWorldPos,
+	const int32 PreviousHealth,
+	const int32 CurrentHealth)
+{
+	FDeferredBlockCustomDataChange& DeferredChange = DeferredBlockCustomDataChanges.FindOrAdd(BlockWorldPos);
+	DeferredChange.bObservedReplicatedHealthDecrease = true;
+	DeferredChange.bHasPreviousHealth = true;
+	DeferredChange.PreviousHealth = PreviousHealth;
+	DeferredChange.bHasCurrentHealth = true;
+	DeferredChange.CurrentHealth = CurrentHealth;
+	QueueBlockCustomDataChanged(BlockWorldPos, true, TEXT("ReplicatedHealthDecrease"));
+}
+
+void AChunkWorldExtended::QueueObservedReplicatedRepresentationRemoved(
+	const FIntVector& BlockWorldPos,
+	const FChunkWorldResolvedBlockHit* PreviousResolvedHit,
+	const FGameplayTag& PreviousBlockTypeName)
+{
+	FDeferredBlockCustomDataChange& DeferredChange = DeferredBlockCustomDataChanges.FindOrAdd(BlockWorldPos);
+	DeferredChange.bObservedReplicatedRepresentationRemoved = true;
+	if (PreviousResolvedHit != nullptr && PreviousResolvedHit->bHasBlock && !DeferredChange.PreviousResolvedHit.bHasBlock)
+	{
+		DeferredChange.PreviousResolvedHit = *PreviousResolvedHit;
+		DeferredChange.PreviousBlockTypeName = PreviousBlockTypeName;
+	}
+
+	QueueBlockCustomDataChanged(BlockWorldPos, false, TEXT("ReplicatedRepresentationRemoved"));
 }
 
 void AChunkWorldExtended::TryDestroyBlockFromCommittedHealth(const FIntVector& BlockWorldPos, const bool bTouchedHealth)

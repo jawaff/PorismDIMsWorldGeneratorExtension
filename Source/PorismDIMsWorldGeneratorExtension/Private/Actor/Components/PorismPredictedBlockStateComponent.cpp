@@ -14,6 +14,7 @@
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
+#include "TimerManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogPorismPredictedBlockState, Log, All);
 
@@ -76,6 +77,7 @@ void UPorismPredictedBlockStateComponent::BeginPlay()
 {
 	Super::BeginPlay();
 	PruneExpiredPredictions();
+	SchedulePredictionPrune();
 
 	if (GetWorld() != nullptr && GetWorld()->GetNetMode() != NM_DedicatedServer)
 	{
@@ -90,6 +92,11 @@ void UPorismPredictedBlockStateComponent::BeginPlay()
 
 void UPorismPredictedBlockStateComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(PredictionPruneTimerHandle);
+	}
+
 	if (DebugDrawDelegateHandle.IsValid())
 	{
 		UDebugDrawService::Unregister(DebugDrawDelegateHandle);
@@ -125,15 +132,73 @@ void UPorismPredictedBlockStateComponent::PruneExpiredPredictions()
 	}
 
 	const float Now = World->GetTimeSeconds();
+	TArray<FPredictedBlockKey, TInlineAllocator<4>> ExpiredKeys;
 	for (auto It = PredictedBlockStates.CreateIterator(); It; ++It)
 	{
 		const bool bExpired = PredictionTimeoutSeconds > 0.0f && (Now - It.Value().PredictionTimeSeconds) >= PredictionTimeoutSeconds;
 		if (bExpired || !It.Key().ChunkWorld.IsValid())
 		{
+			if (It.Key().ChunkWorld.IsValid())
+			{
+				ExpiredKeys.Add(It.Key());
+			}
 			PendingPredictedDamageRequestsByBlock.Remove(It.Key());
 			It.RemoveCurrent();
 		}
 	}
+
+	for (const FPredictedBlockKey& ExpiredKey : ExpiredKeys)
+	{
+		BroadcastTrackedBlockStateChanged(ExpiredKey.ChunkWorld.Get(), ExpiredKey.BlockWorldPos);
+	}
+
+	SchedulePredictionPrune();
+}
+
+void UPorismPredictedBlockStateComponent::SchedulePredictionPrune()
+{
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	World->GetTimerManager().ClearTimer(PredictionPruneTimerHandle);
+	if (PredictionTimeoutSeconds <= 0.0f || PredictedBlockStates.IsEmpty())
+	{
+		return;
+	}
+
+	float EarliestExpirySeconds = TNumericLimits<float>::Max();
+	for (const TPair<FPredictedBlockKey, FChunkWorldBlockDamageResult>& PredictedEntry : PredictedBlockStates)
+	{
+		if (!PredictedEntry.Key.ChunkWorld.IsValid())
+		{
+			continue;
+		}
+
+		EarliestExpirySeconds = FMath::Min(
+			EarliestExpirySeconds,
+			PredictedEntry.Value.PredictionTimeSeconds + PredictionTimeoutSeconds);
+	}
+
+	if (!FMath::IsFinite(EarliestExpirySeconds))
+	{
+		return;
+	}
+
+	const float DelaySeconds = FMath::Max(0.01f, EarliestExpirySeconds - World->GetTimeSeconds());
+	World->GetTimerManager().SetTimer(
+		PredictionPruneTimerHandle,
+		this,
+		&UPorismPredictedBlockStateComponent::HandlePredictionPruneTimer,
+		DelaySeconds,
+		false);
+}
+
+void UPorismPredictedBlockStateComponent::HandlePredictionPruneTimer()
+{
+	PruneExpiredPredictions();
 }
 
 bool UPorismPredictedBlockStateComponent::ShouldRegisterPredictionNotifications() const
@@ -171,6 +236,7 @@ void UPorismPredictedBlockStateComponent::HandleObservedChunkWorldBlockCustomDat
 	{
 		PredictedBlockStates.Remove(Key);
 		PendingPredictedDamageRequestsByBlock.Remove(Key);
+		SchedulePredictionPrune();
 	}
 
 	BroadcastTrackedBlockStateChanged(ChunkWorld, BlockWorldPos);
@@ -279,7 +345,7 @@ bool UPorismPredictedBlockStateComponent::TryApplyImmediateLocalFeedback(
 	const FChunkWorldBlockDamageRequest& DamageRequest,
 	const FChunkWorldBlockDamageResult& DamageResult) const
 {
-	if (!DamageResult.bAppliedDamage)
+	if (!DamageResult.bAppliedDamage || DamageResult.NewHealth <= 0)
 	{
 		return false;
 	}
@@ -289,11 +355,6 @@ bool UPorismPredictedBlockStateComponent::TryApplyImmediateLocalFeedback(
 		|| FeedbackComponent == nullptr)
 	{
 		return false;
-	}
-
-	if (DamageResult.bDestroyed)
-	{
-		return FeedbackComponent->RequestImmediateLocalDestroyFeedback(DamageRequest.ResolvedHit);
 	}
 
 	return FeedbackComponent->RequestImmediateLocalHitFeedback(DamageRequest.ResolvedHit);
@@ -319,6 +380,7 @@ void UPorismPredictedBlockStateComponent::StorePredictedDamageResult(
 	}
 
 	PredictedBlockStates.Add(Key, DamageResult);
+	SchedulePredictionPrune();
 	BroadcastTrackedBlockStateChanged(DamageRequest.ResolvedHit.ChunkWorld, DamageRequest.ResolvedHit.BlockWorldPos);
 }
 
@@ -443,6 +505,7 @@ void UPorismPredictedBlockStateComponent::ClearPredictionForResolvedBlockHit(con
 {
 	const bool bRemovedPrediction = PredictedBlockStates.Remove(MakeKey(ResolvedHit)) > 0;
 	PendingPredictedDamageRequestsByBlock.Remove(MakeKey(ResolvedHit));
+	SchedulePredictionPrune();
 	if (bRemovedPrediction)
 	{
 		BroadcastTrackedBlockStateChanged(ResolvedHit.ChunkWorld, ResolvedHit.BlockWorldPos);

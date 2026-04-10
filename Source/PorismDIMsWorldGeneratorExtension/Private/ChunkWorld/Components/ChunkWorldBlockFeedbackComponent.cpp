@@ -4,6 +4,7 @@
 
 #include "Block/BlockTypeSchemaBlueprintLibrary.h"
 #include "Camera/PlayerCameraManager.h"
+#include "ChunkWorld/Actors/ChunkWorldExtended.h"
 #include "ChunkWorld/Blueprint/ChunkWorldBlockHitBlueprintLibrary.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
@@ -19,6 +20,26 @@ UChunkWorldBlockFeedbackComponent::UChunkWorldBlockFeedbackComponent()
 	SetIsReplicatedByDefault(true);
 }
 
+void UChunkWorldBlockFeedbackComponent::BeginPlay()
+{
+	Super::BeginPlay();
+
+	if (AChunkWorldExtended* ChunkWorld = Cast<AChunkWorldExtended>(GetOwner()))
+	{
+		ChunkWorld->OnSettledBlockTransition.AddDynamic(this, &UChunkWorldBlockFeedbackComponent::HandleSettledBlockTransition);
+	}
+}
+
+void UChunkWorldBlockFeedbackComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (AChunkWorldExtended* ChunkWorld = Cast<AChunkWorldExtended>(GetOwner()))
+	{
+		ChunkWorld->OnSettledBlockTransition.RemoveDynamic(this, &UChunkWorldBlockFeedbackComponent::HandleSettledBlockTransition);
+	}
+
+	Super::EndPlay(EndPlayReason);
+}
+
 bool UChunkWorldBlockFeedbackComponent::RequestImmediateLocalHitFeedback(const FChunkWorldResolvedBlockHit& ResolvedHit)
 {
 	if (!CanRequestImmediateLocalFeedback(ResolvedHit))
@@ -32,13 +53,19 @@ bool UChunkWorldBlockFeedbackComponent::RequestImmediateLocalHitFeedback(const F
 		return false;
 	}
 
-	return PlayBlockFeedback(
+	const bool bPlayedFeedback = PlayBlockFeedback(
 		ResolvedHit.ChunkWorld,
 		ResolvedHit.BlockWorldPos,
 		EChunkWorldBlockFeedbackKind::Hit,
 		ResolveFeedbackLocation(ResolvedHit),
 		Sound,
 		nullptr);
+	if (bPlayedFeedback)
+	{
+		RememberPredictedHitFeedbackToken(ResolvedHit.ChunkWorld, ResolvedHit.BlockWorldPos);
+	}
+
+	return bPlayedFeedback;
 }
 
 bool UChunkWorldBlockFeedbackComponent::RequestImmediateLocalDestroyFeedback(const FChunkWorldResolvedBlockHit& ResolvedHit)
@@ -85,7 +112,6 @@ bool UChunkWorldBlockFeedbackComponent::BroadcastAuthoritativeHitFeedback(const 
 		FeedbackLocation,
 		Sound,
 		nullptr);
-	MulticastBroadcastFeedback(FeedbackLocation, ResolvedHit.BlockWorldPos, EChunkWorldBlockFeedbackKind::Hit, Sound, nullptr);
 	return bPlayedLocally || Sound != nullptr;
 }
 
@@ -111,24 +137,139 @@ bool UChunkWorldBlockFeedbackComponent::BroadcastAuthoritativeDestroyFeedback(co
 		FeedbackLocation,
 		Sound,
 		NiagaraSystem);
-	MulticastBroadcastFeedback(FeedbackLocation, ResolvedHit.BlockWorldPos, EChunkWorldBlockFeedbackKind::Destroy, Sound, NiagaraSystem);
 	return bPlayedLocally || Sound != nullptr || NiagaraSystem != nullptr;
 }
 
-void UChunkWorldBlockFeedbackComponent::MulticastBroadcastFeedback_Implementation(
-	const FVector_NetQuantize& WorldLocation,
-	const FIntVector& BlockWorldPos,
-	const EChunkWorldBlockFeedbackKind Kind,
-	USoundBase* Sound,
-	UNiagaraSystem* NiagaraSystem)
+void UChunkWorldBlockFeedbackComponent::HandleSettledBlockTransition(
+	AChunkWorldExtended* ChunkWorld,
+	const FChunkWorldSettledBlockTransition& Transition)
 {
+	if (ChunkWorld == nullptr || ChunkWorld != GetOwner())
+	{
+		return;
+	}
+
 	if (GetOwner() != nullptr && GetOwner()->HasAuthority())
 	{
 		return;
 	}
 
-	AChunkWorld* ChunkWorld = Cast<AChunkWorld>(GetOwner());
-	(void)PlayBlockFeedback(ChunkWorld, BlockWorldPos, Kind, WorldLocation, Sound, NiagaraSystem);
+	if (Transition.bObservedRepresentationRemoved)
+	{
+		ClearPredictedHitFeedbackToken(ChunkWorld, Transition.BlockWorldPos);
+
+		USoundBase* Sound = nullptr;
+		UNiagaraSystem* NiagaraSystem = nullptr;
+		if (!TryResolveDestroyFeedbackAssetsForBlockType(
+			Transition.PreviousResolvedHit.BlockTypeSchemaComponent.Get(),
+			Transition.PreviousBlockTypeName,
+			Sound,
+			NiagaraSystem))
+		{
+			return;
+		}
+
+		const FVector WorldLocation = !Transition.PreviousResolvedHit.RepresentativeWorldPos.IsNearlyZero()
+			? Transition.PreviousResolvedHit.RepresentativeWorldPos
+			: ChunkWorld->BlockWorldPosToUEWorldPos(Transition.BlockWorldPos);
+		(void)PlayBlockFeedback(
+			ChunkWorld,
+			Transition.BlockWorldPos,
+			EChunkWorldBlockFeedbackKind::Destroy,
+			WorldLocation,
+			Sound,
+			NiagaraSystem);
+		return;
+	}
+
+	if (Transition.bObservedHealthDecrease && Transition.CurrentResolvedHit.bHasBlock)
+	{
+		if (ShouldSuppressSettledHitFromPredictedToken(ChunkWorld, Transition.BlockWorldPos))
+		{
+			return;
+		}
+
+		USoundBase* Sound = nullptr;
+		if (!TryResolveHitFeedbackAssets(Transition.CurrentResolvedHit, Sound))
+		{
+			return;
+		}
+
+		(void)PlayBlockFeedback(
+			ChunkWorld,
+			Transition.BlockWorldPos,
+			EChunkWorldBlockFeedbackKind::Hit,
+			ResolveFeedbackLocation(Transition.CurrentResolvedHit),
+			Sound,
+			nullptr);
+	}
+}
+
+bool UChunkWorldBlockFeedbackComponent::ShouldSuppressSettledHitFromPredictedToken(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos) const
+{
+	PruneExpiredPredictedHitFeedbackTokens();
+
+	for (int32 Index = PredictedHitFeedbackTokens.Num() - 1; Index >= 0; --Index)
+	{
+		const FPredictedChunkWorldHitFeedbackToken& Token = PredictedHitFeedbackTokens[Index];
+		if (Token.ChunkWorld == ChunkWorld && Token.BlockWorldPos == BlockWorldPos)
+		{
+			PredictedHitFeedbackTokens.RemoveAtSwap(Index);
+			return true;
+		}
+	}
+
+	return false;
+}
+
+void UChunkWorldBlockFeedbackComponent::RememberPredictedHitFeedbackToken(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos) const
+{
+	const UWorld* World = GetWorld();
+	if (World == nullptr || PredictedHitSuppressionWindowSeconds <= 0.0f)
+	{
+		return;
+	}
+
+	PruneExpiredPredictedHitFeedbackTokens();
+	ClearPredictedHitFeedbackToken(ChunkWorld, BlockWorldPos);
+
+	FPredictedChunkWorldHitFeedbackToken& Token = PredictedHitFeedbackTokens.AddDefaulted_GetRef();
+	Token.ChunkWorld = ChunkWorld;
+	Token.BlockWorldPos = BlockWorldPos;
+	Token.TimeSeconds = World->GetTimeSeconds();
+}
+
+void UChunkWorldBlockFeedbackComponent::ClearPredictedHitFeedbackToken(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos) const
+{
+	for (int32 Index = PredictedHitFeedbackTokens.Num() - 1; Index >= 0; --Index)
+	{
+		const FPredictedChunkWorldHitFeedbackToken& Token = PredictedHitFeedbackTokens[Index];
+		if (Token.ChunkWorld == ChunkWorld && Token.BlockWorldPos == BlockWorldPos)
+		{
+			PredictedHitFeedbackTokens.RemoveAtSwap(Index);
+		}
+	}
+}
+
+void UChunkWorldBlockFeedbackComponent::PruneExpiredPredictedHitFeedbackTokens() const
+{
+	const UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	const float CurrentTimeSeconds = World->GetTimeSeconds();
+	for (int32 Index = PredictedHitFeedbackTokens.Num() - 1; Index >= 0; --Index)
+	{
+		const FPredictedChunkWorldHitFeedbackToken& Token = PredictedHitFeedbackTokens[Index];
+		if (!Token.ChunkWorld.IsValid()
+			|| PredictedHitSuppressionWindowSeconds <= 0.0f
+			|| (CurrentTimeSeconds - Token.TimeSeconds) > PredictedHitSuppressionWindowSeconds)
+		{
+			PredictedHitFeedbackTokens.RemoveAtSwap(Index);
+		}
+	}
 }
 
 bool UChunkWorldBlockFeedbackComponent::ShouldPlayFeedbackAtLocation(const FVector& WorldLocation) const
@@ -259,6 +400,32 @@ bool UChunkWorldBlockFeedbackComponent::TryResolveDestroyFeedbackAssets(const FC
 	FGameplayTag BlockTypeName;
 	FInstancedStruct DefinitionStruct;
 	if (!UChunkWorldBlockHitBlueprintLibrary::TryGetBlockDefinitionForResolvedBlockHit(ResolvedHit, BlockTypeName, DefinitionStruct))
+	{
+		return false;
+	}
+
+	FBlockDefinitionBase BlockDefinition;
+	if (!UBlockTypeSchemaBlueprintLibrary::TryGetBlockDefinitionBase(DefinitionStruct, BlockDefinition))
+	{
+		return false;
+	}
+
+	OutSound = BlockDefinition.DestroyedSound;
+	OutNiagaraSystem = BlockDefinition.DestroyedEffect;
+	return OutSound != nullptr || OutNiagaraSystem != nullptr;
+}
+
+bool UChunkWorldBlockFeedbackComponent::TryResolveDestroyFeedbackAssetsForBlockType(
+	UBlockTypeSchemaComponent* SchemaComponent,
+	const FGameplayTag BlockTypeName,
+	USoundBase*& OutSound,
+	UNiagaraSystem*& OutNiagaraSystem) const
+{
+	OutSound = nullptr;
+	OutNiagaraSystem = nullptr;
+
+	FInstancedStruct DefinitionStruct;
+	if (!UChunkWorldBlockHitBlueprintLibrary::TryGetBlockDefinitionForBlockTypeName(SchemaComponent, BlockTypeName, DefinitionStruct))
 	{
 		return false;
 	}

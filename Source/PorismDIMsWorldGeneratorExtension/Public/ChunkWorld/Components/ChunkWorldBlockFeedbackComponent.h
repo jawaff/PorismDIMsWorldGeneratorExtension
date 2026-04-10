@@ -9,6 +9,8 @@
 
 class UNiagaraSystem;
 class USoundBase;
+class AChunkWorldExtended;
+class UBlockTypeSchemaComponent;
 
 UENUM()
 enum class EChunkWorldBlockFeedbackKind : uint8
@@ -29,8 +31,16 @@ struct FRecentChunkWorldBlockFeedback
 	float TimeSeconds = 0.0f;
 };
 
+/** Owner-local semantic suppression token used to hide the later settled authoritative hit after a predicted local hit already played. */
+struct FPredictedChunkWorldHitFeedbackToken
+{
+	TWeakObjectPtr<AChunkWorld> ChunkWorld;
+	FIntVector BlockWorldPos = FIntVector::ZeroValue;
+	float TimeSeconds = 0.0f;
+};
+
 /**
- * Replicates chunk-world block feedback so nearby clients and listen-server players hear and see authoritative block hit events.
+ * Plays predicted local feedback immediately and subscribes to settled chunk-world transition events for authoritative client playback.
  */
 UCLASS(ClassGroup = (Block), BlueprintType, meta = (BlueprintSpawnableComponent, DisplayName = "ChunkWorld Block Feedback Component"))
 class PORISMDIMSWORLDGENERATOREXTENSION_API UChunkWorldBlockFeedbackComponent : public UActorComponent
@@ -56,18 +66,24 @@ public:
 	bool RequestImmediateLocalDestroyFeedback(const FChunkWorldResolvedBlockHit& ResolvedHit);
 
 	/**
-	 * Broadcasts one authoritative non-lethal block hit feedback event to every process, including the server.
+	 * Plays one authoritative non-lethal block hit immediately on the authority process.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld|Feedback")
 	bool BroadcastAuthoritativeHitFeedback(const FChunkWorldResolvedBlockHit& ResolvedHit);
 
 	/**
-	 * Broadcasts one authoritative destroyed-block feedback event to every process, including the server.
+	 * Plays one authoritative destroyed-block feedback immediately on the authority process.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld|Feedback")
 	bool BroadcastAuthoritativeDestroyFeedback(const FChunkWorldResolvedBlockHit& ResolvedHit);
 
 protected:
+	/** Binds this component to reusable settled block-transition events emitted by the owning chunk world. */
+	virtual void BeginPlay() override;
+
+	/** Removes the settled block-transition event binding before the component shuts down. */
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
 	/** Maximum local playback distance for replicated block feedback. Set to zero to disable local distance filtering. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Feedback", meta = (ClampMin = "0.0", UIMin = "0.0", ToolTip = "Maximum local playback distance for replicated block feedback. Set to zero to disable local distance filtering."))
 	float FeedbackCullDistance = 5000.0f;
@@ -80,15 +96,24 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Feedback", meta = (ClampMin = "0.0", UIMin = "0.0", ToolTip = "Distance tolerance used to match repeated block feedback requests for the same local event."))
 	float FeedbackDeduplicationDistance = 32.0f;
 
-private:
-	UFUNCTION(NetMulticast, Unreliable)
-	void MulticastBroadcastFeedback(const FVector_NetQuantize& WorldLocation, const FIntVector& BlockWorldPos, EChunkWorldBlockFeedbackKind Kind, USoundBase* Sound, UNiagaraSystem* NiagaraSystem);
+	/** Owner-local suppression window used to hide the later settled authoritative hit after an immediate predicted hit already played for the same block. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Feedback", meta = (ClampMin = "0.0", UIMin = "0.0", ToolTip = "Owner-local suppression window used to hide the later settled authoritative hit after an immediate predicted hit already played for the same block."))
+	float PredictedHitSuppressionWindowSeconds = 3.0f;
 
+private:
+	UFUNCTION()
+	void HandleSettledBlockTransition(AChunkWorldExtended* ChunkWorld, const FChunkWorldSettledBlockTransition& Transition);
+
+	bool ShouldSuppressSettledHitFromPredictedToken(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos) const;
+	void RememberPredictedHitFeedbackToken(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos) const;
+	void ClearPredictedHitFeedbackToken(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos) const;
+	void PruneExpiredPredictedHitFeedbackTokens() const;
 	bool ShouldPlayFeedbackAtLocation(const FVector& WorldLocation) const;
 	bool ShouldSuppressDuplicateFeedback(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos, EChunkWorldBlockFeedbackKind Kind, const FVector& WorldLocation, USoundBase* Sound, UNiagaraSystem* NiagaraSystem) const;
 	void RememberFeedbackPlayback(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos, EChunkWorldBlockFeedbackKind Kind, const FVector& WorldLocation, USoundBase* Sound, UNiagaraSystem* NiagaraSystem) const;
 	bool TryResolveHitFeedbackAssets(const FChunkWorldResolvedBlockHit& ResolvedHit, USoundBase*& OutSound) const;
 	bool TryResolveDestroyFeedbackAssets(const FChunkWorldResolvedBlockHit& ResolvedHit, USoundBase*& OutSound, UNiagaraSystem*& OutNiagaraSystem) const;
+	bool TryResolveDestroyFeedbackAssetsForBlockType(UBlockTypeSchemaComponent* SchemaComponent, FGameplayTag BlockTypeName, USoundBase*& OutSound, UNiagaraSystem*& OutNiagaraSystem) const;
 	FVector ResolveFeedbackLocation(const FChunkWorldResolvedBlockHit& ResolvedHit) const;
 	bool CanRequestImmediateLocalFeedback(const FChunkWorldResolvedBlockHit& ResolvedHit) const;
 	bool CanBroadcastAuthoritativeFeedback(const FChunkWorldResolvedBlockHit& ResolvedHit) const;
@@ -96,4 +121,7 @@ private:
 
 	/** Local recent-playback cache used only to suppress short-lived duplicate feedback requests on this machine. */
 	mutable TArray<FRecentChunkWorldBlockFeedback> RecentFeedbackPlaybacks;
+
+	/** Owner-local predicted hit tokens used to semantically suppress one later settled authoritative hit for the same block. */
+	mutable TArray<FPredictedChunkWorldHitFeedbackToken> PredictedHitFeedbackTokens;
 };
