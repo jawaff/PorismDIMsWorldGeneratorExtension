@@ -1,0 +1,55 @@
+// Copyright 2026 Spotted Loaf Studio
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
+#include "ChunkWorld/Actors/ChunkWorldDestructionActorInterface.h"
+
+#include "ChunkWorldTimedCleanupDestructionActor.generated.h"
+
+class USceneComponent;
+
+/**
+ * Minimal reusable destruction actor that only accepts one destruction trigger and destroys itself after a configurable duration.
+ * Use this as a generic base when a block needs transient actor presentation without Chaos or project-specific behavior.
+ */
+UCLASS(BlueprintType)
+class PORISMDIMSWORLDGENERATOREXTENSION_API AChunkWorldTimedCleanupDestructionActor
+	: public AActor
+	, public IChunkWorldDestructionActorInterface
+{
+	GENERATED_BODY()
+
+public:
+	/** Creates a lightweight destruction actor with a shared scene root and timed self-cleanup behavior. */
+	AChunkWorldTimedCleanupDestructionActor();
+
+	/** Starts the timed cleanup lifecycle for one block-destruction presentation request. */
+	virtual void TriggerBlockDestruction_Implementation(const FChunkWorldBlockDestructionRequest& Request) override;
+
+	/** Returns the most recent destruction request accepted by this actor. */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld|Destruction")
+	const FChunkWorldBlockDestructionRequest& GetLastDestructionRequest() const { return LastDestructionRequest; }
+
+protected:
+	/** Allows subclasses or Blueprints to react after the request is accepted and the actor transform is updated. */
+	UFUNCTION(BlueprintImplementableEvent, Category = "Block|ChunkWorld|Destruction")
+	void ReceiveDestructionTriggered(const FChunkWorldBlockDestructionRequest& Request);
+
+	/** Shared root used by subclasses that want to attach temporary presentation components. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Block|ChunkWorld|Destruction", meta = (AllowPrivateAccess = "true", ToolTip = "Scene root used by the generic timed cleanup destruction actor so subclasses can attach transient presentation components."))
+	TObjectPtr<USceneComponent> DestructionRoot = nullptr;
+
+	/** Lifetime used after the destruction trigger before this transient actor destroys itself. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Destruction", meta = (ClampMin = "0.0", UIMin = "0.0", ToolTip = "Lifetime used after the destruction trigger before this transient destruction actor destroys itself."))
+	float CleanupDelaySeconds = 10.0f;
+
+	/** Most recent accepted destruction request. */
+	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Destruction")
+	FChunkWorldBlockDestructionRequest LastDestructionRequest;
+
+	/** True once the actor has already accepted its one destruction request. */
+	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Destruction")
+	bool bHasTriggeredDestruction = false;
+};

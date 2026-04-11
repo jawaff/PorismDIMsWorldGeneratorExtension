@@ -320,6 +320,13 @@ void AChunkWorldExtended::WriteMeshDataAndUpdate(const TArray<SMeshChangeCall>& 
 
 	Super::WriteMeshDataAndUpdate(NetMeshChangeCalls, bRefreshChunks);
 
+	if (BlockSwapComponent != nullptr)
+	{
+		// Porism chunk visuals rebuild asynchronously after the mesh write, so queue retry-based
+		// swap presentation refresh instead of relying on a one-shot immediate re-park.
+		BlockSwapComponent->QueueActiveSwapPresentationRefresh();
+	}
+
 	if (HasAuthority())
 	{
 		return;

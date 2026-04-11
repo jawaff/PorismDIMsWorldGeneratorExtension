@@ -45,6 +45,12 @@ public:
 	/** Resolves the represented mesh instance transform currently used for swap actor spawning. */
 	bool TryGetSwapTransformForBlock(const FIntVector& BlockWorldPos, FTransform& OutSwapTransform) const;
 
+	/** Reapplies parking for any active swaps whose represented mesh reappeared after a later chunk mesh update. */
+	void RefreshActiveSwapPresentationStates();
+
+	/** Queues deferred refresh retries so async chunk rebuilds cannot recreate visible meshes for active swaps. */
+	void QueueActiveSwapPresentationRefresh();
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -74,12 +80,14 @@ private:
 	bool ApplySwapPresentationState(const FReplicatedChunkWorldSwapItem& SwapItem, bool bEntering);
 	bool ParkRepresentedInstance(const FReplicatedChunkWorldSwapItem& SwapItem);
 	bool RestoreRepresentedInstance(const FReplicatedChunkWorldSwapItem& SwapItem);
+	bool HasRepresentedMeshAt(const FIntVector& BlockWorldPos) const;
 	bool ResolveRepresentedInstance(const FIntVector& BlockWorldPos, FResolvedSwapInstance& OutResolvedInstance) const;
 	FTransform BuildParkingTransform(const FIntVector& BlockWorldPos, const FTransform& OriginalTransform) const;
 	FVector BuildParkingLocation(const FIntVector& BlockWorldPos) const;
 	void ReconcileSwapActorPresentation(const FReplicatedChunkWorldSwapItem& SwapItem);
 	void ReconcilePendingSwapActors();
 	void UpdatePendingSwapActorReconcileTimer();
+	void ProcessQueuedActiveSwapPresentationRefresh();
 	void HandleReplicatedSwapAdded(const FReplicatedChunkWorldSwapItem& SwapItem);
 	void HandleReplicatedSwapRemoved(const FReplicatedChunkWorldSwapItem& SwapItem);
 	void HandleReplicatedSwapChanged(const FReplicatedChunkWorldSwapItem& SwapItem);
@@ -98,6 +106,12 @@ private:
 
 	/** Timer used to retry actor visibility reconciliation when actor references resolve after the swap item itself. */
 	FTimerHandle PendingSwapActorReconcileHandle;
+
+	/** Timer used to retry parking across async Porism chunk mesh rebuilds after a mesh write lands. */
+	FTimerHandle PendingActiveSwapPresentationRefreshHandle;
+
+	/** Remaining deferred refresh attempts for active swap parking after the next mesh write or swap replication event. */
+	int32 RemainingActiveSwapPresentationRefreshAttempts = 0;
 
 	/** World-space offset from the owning chunk world used as the hidden parking anchor for swapped voxel instances. */
 	UPROPERTY(EditAnywhere, Category = "Block|ChunkWorld|Swap", meta = (ToolTip = "World-space offset from the owning chunk world used as the hidden parking anchor for swapped voxel instances. Keep this far outside meaningful generated chunk space, especially for infinite-Z worlds."))

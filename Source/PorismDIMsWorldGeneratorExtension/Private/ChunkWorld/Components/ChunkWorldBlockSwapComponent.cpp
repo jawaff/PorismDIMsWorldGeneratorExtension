@@ -33,6 +33,7 @@ void UChunkWorldBlockSwapComponent::EndPlay(const EEndPlayReason::Type EndPlayRe
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(PendingSwapActorReconcileHandle);
+		World->GetTimerManager().ClearTimer(PendingActiveSwapPresentationRefreshHandle);
 	}
 
 	PendingSwapActorReconcileBlocks.Reset();
@@ -143,6 +144,43 @@ bool UChunkWorldBlockSwapComponent::TryGetSwapTransformForBlock(const FIntVector
 	}
 
 	return false;
+}
+
+void UChunkWorldBlockSwapComponent::RefreshActiveSwapPresentationStates()
+{
+	for (const FReplicatedChunkWorldSwapItem& SwapItem : ReplicatedActiveSwaps.Items)
+	{
+		FResolvedSwapInstance ResolvedInstance;
+		if (!ResolveRepresentedInstance(SwapItem.BlockWorldPos, ResolvedInstance))
+		{
+			continue;
+		}
+
+		// Chunk mesh updates can recreate the represented instance at the live block location while the swap is
+		// still active. Drop the stale cache and park the newly rebuilt instance so actor and voxel presentation
+		// do not coexist.
+		LocalPresentationStates.Remove(SwapItem.BlockWorldPos);
+		(void)ParkRepresentedInstance(SwapItem);
+		ReconcileSwapActorPresentation(SwapItem);
+	}
+}
+
+void UChunkWorldBlockSwapComponent::QueueActiveSwapPresentationRefresh()
+{
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	RemainingActiveSwapPresentationRefreshAttempts = FMath::Max(RemainingActiveSwapPresentationRefreshAttempts, 12);
+	World->GetTimerManager().SetTimer(
+		PendingActiveSwapPresentationRefreshHandle,
+		this,
+		&UChunkWorldBlockSwapComponent::ProcessQueuedActiveSwapPresentationRefresh,
+		0.05f,
+		true,
+		0.0f);
 }
 
 bool UChunkWorldBlockSwapComponent::CanApplySwapRequest(const FIntVector& BlockWorldPos, bool bEntering) const
@@ -288,6 +326,17 @@ bool UChunkWorldBlockSwapComponent::RestoreRepresentedInstance(const FReplicated
 		return false;
 	}
 
+	if (!HasRepresentedMeshAt(SwapItem.BlockWorldPos))
+	{
+		UE_LOG(
+			LogChunkWorldBlockSwapComponent,
+			Log,
+			TEXT("BlockSwapComponent SkipRestore Owner=%s Block=%s Reason=BlockNoLongerMeshBacked"),
+			*GetNameSafe(GetOwner()),
+			*SwapItem.BlockWorldPos.ToString());
+		return false;
+	}
+
 	UInstancedStaticMeshComponent* MeshComponent = PresentationState.Component.Get();
 	if (MeshComponent == nullptr)
 	{
@@ -321,6 +370,18 @@ bool UChunkWorldBlockSwapComponent::RestoreRepresentedInstance(const FReplicated
 		PresentationState.MeshId,
 		PresentationState.InstanceIndex);
 	return true;
+}
+
+bool UChunkWorldBlockSwapComponent::HasRepresentedMeshAt(const FIntVector& BlockWorldPos) const
+{
+	AChunkWorldExtended* ChunkWorld = GetChunkWorldOwner();
+	if (ChunkWorld == nullptr)
+	{
+		return false;
+	}
+
+	const FMeshData MeshData = ChunkWorld->GetMeshDataByBlockWorldPos(BlockWorldPos);
+	return MeshData.MeshId != EmptyMesh && MeshData.MeshId != DefaultMesh;
 }
 
 bool UChunkWorldBlockSwapComponent::ResolveRepresentedInstance(const FIntVector& BlockWorldPos, FResolvedSwapInstance& OutResolvedInstance) const
@@ -408,6 +469,7 @@ void UChunkWorldBlockSwapComponent::HandleReplicatedSwapAdded(const FReplicatedC
 {
 	(void)ApplySwapPresentationState(SwapItem, true);
 	ReconcileSwapActorPresentation(SwapItem);
+	QueueActiveSwapPresentationRefresh();
 }
 
 void UChunkWorldBlockSwapComponent::HandleReplicatedSwapRemoved(const FReplicatedChunkWorldSwapItem& SwapItem)
@@ -421,12 +483,22 @@ void UChunkWorldBlockSwapComponent::HandleReplicatedSwapRemoved(const FReplicate
 	PendingSwapActorReconcileBlocks.Remove(SwapItem.BlockWorldPos);
 	UpdatePendingSwapActorReconcileTimer();
 	(void)ApplySwapPresentationState(SwapItem, false);
+
+	if (ReplicatedActiveSwaps.Items.IsEmpty())
+	{
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().ClearTimer(PendingActiveSwapPresentationRefreshHandle);
+		}
+		RemainingActiveSwapPresentationRefreshAttempts = 0;
+	}
 }
 
 void UChunkWorldBlockSwapComponent::HandleReplicatedSwapChanged(const FReplicatedChunkWorldSwapItem& SwapItem)
 {
 	(void)ApplySwapPresentationState(SwapItem, true);
 	ReconcileSwapActorPresentation(SwapItem);
+	QueueActiveSwapPresentationRefresh();
 }
 
 void UChunkWorldBlockSwapComponent::ReconcileSwapActorPresentation(const FReplicatedChunkWorldSwapItem& SwapItem)
@@ -491,6 +563,30 @@ void UChunkWorldBlockSwapComponent::UpdatePendingSwapActorReconcileTimer()
 	}
 
 	TimerManager.ClearTimer(PendingSwapActorReconcileHandle);
+}
+
+void UChunkWorldBlockSwapComponent::ProcessQueuedActiveSwapPresentationRefresh()
+{
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	RefreshActiveSwapPresentationStates();
+
+	if (ReplicatedActiveSwaps.Items.IsEmpty())
+	{
+		RemainingActiveSwapPresentationRefreshAttempts = 0;
+		World->GetTimerManager().ClearTimer(PendingActiveSwapPresentationRefreshHandle);
+		return;
+	}
+
+	--RemainingActiveSwapPresentationRefreshAttempts;
+	if (RemainingActiveSwapPresentationRefreshAttempts <= 0)
+	{
+		World->GetTimerManager().ClearTimer(PendingActiveSwapPresentationRefreshHandle);
+	}
 }
 
 AChunkWorldExtended* UChunkWorldBlockSwapComponent::GetChunkWorldOwner() const

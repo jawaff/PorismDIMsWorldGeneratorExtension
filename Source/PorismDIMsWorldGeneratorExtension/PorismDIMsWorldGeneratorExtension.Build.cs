@@ -13,10 +13,13 @@ public class PorismDIMsWorldGeneratorExtension : ModuleRules
 
 		PublicDependencyModuleNames.AddRange(new string[]
 		{
+			"Chaos",
 			"Core",
 			"CoreUObject",
 			"Engine",
+			"FieldSystemEngine",
 			"GameplayTags",
+			"GeometryCollectionEngine",
 			"Niagara",
 			"PorismDIMsWorldGenerator"
 		});
@@ -24,6 +27,7 @@ public class PorismDIMsWorldGeneratorExtension : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
 			"NetCore",
+			"PhysicsCore",
 			"PorismDIMsWorldGenerator"
 		});
 	}
