@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "ChunkWorld/Actors/ChunkWorldExtended.h"
 #include "ChunkWorld/Hit/ChunkWorldBlockDamageTypes.h"
 #include "ChunkWorld/Hit/ChunkWorldBlockHitTypes.h"
 #include "PorismPredictedBlockStateComponent.generated.h"
@@ -129,7 +130,7 @@ private:
 	};
 
 	UFUNCTION()
-	void HandleObservedChunkWorldBlockCustomDataChanged(AChunkWorldExtended* ChunkWorld, const FIntVector& BlockWorldPos, bool bTouchedHealth);
+	void HandleObservedChunkWorldSettledTransition(AChunkWorldExtended* ChunkWorld, const FChunkWorldSettledBlockTransition& Transition);
 
 	void PruneExpiredPredictions();
 	void SchedulePredictionPrune();

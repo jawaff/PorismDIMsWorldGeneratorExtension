@@ -212,17 +212,16 @@ bool UPorismPredictedBlockStateComponent::ShouldRegisterPredictionNotifications(
 	return World->GetNetMode() != NM_DedicatedServer;
 }
 
-void UPorismPredictedBlockStateComponent::HandleObservedChunkWorldBlockCustomDataChanged(
+void UPorismPredictedBlockStateComponent::HandleObservedChunkWorldSettledTransition(
 	AChunkWorldExtended* ChunkWorld,
-	const FIntVector& BlockWorldPos,
-	const bool bTouchedHealth)
+	const FChunkWorldSettledBlockTransition& Transition)
 {
 	if (ChunkWorld == nullptr)
 	{
 		return;
 	}
 
-	const FPredictedBlockKey Key = MakeKey(ChunkWorld, BlockWorldPos);
+	const FPredictedBlockKey Key = MakeKey(ChunkWorld, Transition.BlockWorldPos);
 	const bool bHadPredictedState = PredictedBlockStates.Contains(Key);
 
 	// Any replicated health-related update for the same block invalidates the local prediction.
@@ -230,7 +229,7 @@ void UPorismPredictedBlockStateComponent::HandleObservedChunkWorldBlockCustomDat
 	// or may include unrelated server-side damage/healing sources. Without an explicit authoritative
 	// revision or ack token, the client cannot safely map one replicated update to a subset of queued
 	// local predictions, so the entire local prediction state for that block must be discarded.
-	const bool bShouldClearPrediction = bHadPredictedState && bTouchedHealth;
+	const bool bShouldClearPrediction = bHadPredictedState && Transition.bTouchedHealth;
 
 	if (bShouldClearPrediction)
 	{
@@ -239,7 +238,7 @@ void UPorismPredictedBlockStateComponent::HandleObservedChunkWorldBlockCustomDat
 		SchedulePredictionPrune();
 	}
 
-	BroadcastTrackedBlockStateChanged(ChunkWorld, BlockWorldPos);
+	BroadcastTrackedBlockStateChanged(ChunkWorld, Transition.BlockWorldPos);
 }
 
 bool UPorismPredictedBlockStateComponent::ValidateDamageRequest(const FChunkWorldBlockDamageRequest& DamageRequest) const
@@ -609,7 +608,7 @@ void UPorismPredictedBlockStateComponent::BindObservedChunkWorld(AChunkWorld* Ch
 		return;
 	}
 
-	ChunkWorldExtended->OnBlockCustomDataChanged.AddDynamic(this, &UPorismPredictedBlockStateComponent::HandleObservedChunkWorldBlockCustomDataChanged);
+	ChunkWorldExtended->OnSettledBlockTransition.AddDynamic(this, &UPorismPredictedBlockStateComponent::HandleObservedChunkWorldSettledTransition);
 	ObservedChunkWorlds.Add(ChunkWorldExtended);
 }
 
@@ -641,7 +640,7 @@ void UPorismPredictedBlockStateComponent::UnbindObservedChunkWorlds()
 	{
 		if (AChunkWorldExtended* ChunkWorldInstance = ChunkWorld.Get())
 		{
-			ChunkWorldInstance->OnBlockCustomDataChanged.RemoveDynamic(this, &UPorismPredictedBlockStateComponent::HandleObservedChunkWorldBlockCustomDataChanged);
+			ChunkWorldInstance->OnSettledBlockTransition.RemoveDynamic(this, &UPorismPredictedBlockStateComponent::HandleObservedChunkWorldSettledTransition);
 		}
 	}
 

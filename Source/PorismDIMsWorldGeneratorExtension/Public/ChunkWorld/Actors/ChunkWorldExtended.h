@@ -23,6 +23,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnChunkWorldBlockCustomDataChang
 
 /**
  * Settled local view of one replicated block transition after the current replication batch has already been applied.
+ * This is the shared client-side observation contract for both block-feedback playback and prediction reconciliation.
  */
 USTRUCT(BlueprintType)
 struct FChunkWorldSettledBlockTransition
@@ -36,6 +37,10 @@ struct FChunkWorldSettledBlockTransition
 	/** True when the current batch touched the shared health custom-data channel for this block. */
 	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld")
 	bool bTouchedHealth = false;
+
+	/** True when the settled local health view changed across this batch, whether by damage or healing. */
+	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld")
+	bool bObservedHealthChange = false;
 
 	/** True when the settled local health view decreased across this batch. */
 	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld")
@@ -134,8 +139,8 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld")
 	UChunkWorldBlockSwapComponent* GetBlockSwapComponent() const;
 
-	/** Broadcast after one block's runtime custom-data view changes on this chunk world. */
-	UPROPERTY(BlueprintAssignable, Category = "Block|ChunkWorld")
+	/** Legacy narrower custom-data event kept only as a compatibility surface. New listeners should use `OnSettledBlockTransition` instead. */
+	UPROPERTY(BlueprintAssignable, Category = "Block|ChunkWorld", meta = (DeprecatedProperty, DeprecationMessage = "Use OnSettledBlockTransition instead so listeners observe the full settled replicated block transition payload."))
 	FOnChunkWorldBlockCustomDataChanged OnBlockCustomDataChanged;
 
 	/** Broadcast after one locally settled replicated block transition is observed on this chunk world. */
@@ -174,6 +179,7 @@ private:
 	struct FDeferredBlockCustomDataChange
 	{
 		bool bTouchedHealth = false;
+		bool bObservedReplicatedHealthChange = false;
 		bool bObservedReplicatedHealthDecrease = false;
 		bool bObservedReplicatedRepresentationRemoved = false;
 		bool bHasPreviousHealth = false;
@@ -211,8 +217,8 @@ private:
 	/** Spawns and triggers one authored destruction presentation actor when the destroyed block uses the shared damage definition family. */
 	void TrySpawnDestructionActorForDestroyedBlock(const FIntVector& BlockWorldPos, const FChunkWorldResolvedBlockHit* DestroyedFeedbackHit, const FGameplayTag& BlockTypeName);
 
-	/** Merges one observed settled replicated health decrease into the next deferred transition flush. */
-	void QueueObservedReplicatedHealthDecrease(const FIntVector& BlockWorldPos, int32 PreviousHealth, int32 CurrentHealth);
+	/** Merges one observed settled replicated health transition into the next deferred transition flush. */
+	void QueueObservedReplicatedHealthTransition(const FIntVector& BlockWorldPos, int32 PreviousHealth, int32 CurrentHealth);
 
 	/** Merges one observed settled replicated representation removal into the next deferred transition flush. */
 	void QueueObservedReplicatedRepresentationRemoved(const FIntVector& BlockWorldPos, const FChunkWorldResolvedBlockHit* PreviousResolvedHit, const FGameplayTag& PreviousBlockTypeName);

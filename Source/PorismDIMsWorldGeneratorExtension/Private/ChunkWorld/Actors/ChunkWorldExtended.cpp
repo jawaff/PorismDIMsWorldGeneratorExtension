@@ -214,9 +214,9 @@ void AChunkWorldExtended::WriteCustomDataValuesAndUpdate(const TArray<SCustomDat
 			if (const int32* PreviousHealth = PreApplyHealthByBlock.Find(ObservedBlockChange.Key))
 			{
 				int32 CurrentHealth = 0;
-				if (TryGetObservedRuntimeHealth(ObservedBlockChange.Key, CurrentHealth) && CurrentHealth < *PreviousHealth)
+				if (TryGetObservedRuntimeHealth(ObservedBlockChange.Key, CurrentHealth) && CurrentHealth != *PreviousHealth)
 				{
-					QueueObservedReplicatedHealthDecrease(ObservedBlockChange.Key, *PreviousHealth, CurrentHealth);
+					QueueObservedReplicatedHealthTransition(ObservedBlockChange.Key, *PreviousHealth, CurrentHealth);
 				}
 			}
 		}
@@ -580,13 +580,10 @@ void AChunkWorldExtended::FlushDeferredBlockCustomDataChanges()
 
 	for (const TPair<FIntVector, FDeferredBlockCustomDataChange>& PendingChange : PendingChanges)
 	{
-		if (!HasAuthority())
+		FChunkWorldSettledBlockTransition Transition;
+		if (BuildSettledBlockTransition(PendingChange.Key, PendingChange.Value, Transition))
 		{
-			FChunkWorldSettledBlockTransition Transition;
-			if (BuildSettledBlockTransition(PendingChange.Key, PendingChange.Value, Transition))
-			{
-				OnSettledBlockTransition.Broadcast(this, Transition);
-			}
+			OnSettledBlockTransition.Broadcast(this, Transition);
 		}
 
 		NotifyBlockCustomDataChanged(PendingChange.Key, PendingChange.Value.bTouchedHealth, TEXT("DeferredBlockUpdate"));
@@ -599,13 +596,16 @@ bool AChunkWorldExtended::BuildSettledBlockTransition(
 	FChunkWorldSettledBlockTransition& OutTransition) const
 {
 	OutTransition = FChunkWorldSettledBlockTransition();
-	if (!DeferredChange.bObservedReplicatedHealthDecrease && !DeferredChange.bObservedReplicatedRepresentationRemoved)
+	if (!DeferredChange.bTouchedHealth
+		&& !DeferredChange.bObservedReplicatedHealthDecrease
+		&& !DeferredChange.bObservedReplicatedRepresentationRemoved)
 	{
 		return false;
 	}
 
 	OutTransition.BlockWorldPos = BlockWorldPos;
 	OutTransition.bTouchedHealth = DeferredChange.bTouchedHealth;
+	OutTransition.bObservedHealthChange = DeferredChange.bObservedReplicatedHealthChange;
 	OutTransition.bObservedHealthDecrease = DeferredChange.bObservedReplicatedHealthDecrease;
 	OutTransition.bObservedRepresentationRemoved = DeferredChange.bObservedReplicatedRepresentationRemoved;
 	OutTransition.bHasPreviousHealth = DeferredChange.bHasPreviousHealth;
@@ -680,18 +680,19 @@ bool AChunkWorldExtended::TryBuildPreviousResolvedHit(
 		DefinitionStruct);
 }
 
-void AChunkWorldExtended::QueueObservedReplicatedHealthDecrease(
+void AChunkWorldExtended::QueueObservedReplicatedHealthTransition(
 	const FIntVector& BlockWorldPos,
 	const int32 PreviousHealth,
 	const int32 CurrentHealth)
 {
 	FDeferredBlockCustomDataChange& DeferredChange = DeferredBlockCustomDataChanges.FindOrAdd(BlockWorldPos);
-	DeferredChange.bObservedReplicatedHealthDecrease = true;
+	DeferredChange.bObservedReplicatedHealthChange = true;
+	DeferredChange.bObservedReplicatedHealthDecrease |= CurrentHealth < PreviousHealth;
 	DeferredChange.bHasPreviousHealth = true;
 	DeferredChange.PreviousHealth = PreviousHealth;
 	DeferredChange.bHasCurrentHealth = true;
 	DeferredChange.CurrentHealth = CurrentHealth;
-	QueueBlockCustomDataChanged(BlockWorldPos, true, TEXT("ReplicatedHealthDecrease"));
+	QueueBlockCustomDataChanged(BlockWorldPos, true, TEXT("ReplicatedHealthTransition"));
 }
 
 void AChunkWorldExtended::QueueObservedReplicatedRepresentationRemoved(
