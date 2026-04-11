@@ -333,6 +333,13 @@ void UPorismTraceInteractionComponent::PerformTrace()
 	{
 		LastBlockInteractionResult = NewBlockResult;
 	}
+	else
+	{
+		// Clear stale block payloads as soon as the live trace stops resolving a block.
+		// Consumers should not be able to observe a previously focused block through
+		// GetLastBlockInteractionResult() once bHasActiveBlockInteraction becomes false.
+		LastBlockInteractionResult = FChunkWorldBlockInteractionResult();
+	}
 	bHasActiveBlockInteraction = bHasNewBlockResult;
 
 	if (bChanged || bBlockChanged)

@@ -157,20 +157,6 @@ bool UChunkWorldBlockHitBlueprintLibrary::TryResolveBlockHitContextFromHitResult
 	constexpr float ProbeEpsilon = 2.0f;
 
 	const FChunkWorldHit ChunkWorldHit = ChunkWorld->GetChunkWorldHitByHitResult(Hit, true);
-	const bool bHasChunkWorldHit = ChunkWorldHit.CheckSuccess && IsRepresentedBlockHitVoxel(ChunkWorldHit.MaterialIndex, ChunkWorldHit.MeshIndex);
-	if (bHitInstancedMesh && bHasChunkWorldHit)
-	{
-		OutResolvedHit.ChunkWorld = ChunkWorld;
-		OutResolvedHit.BlockTypeSchemaComponent = SchemaComponent;
-		OutResolvedHit.bHasBlock = true;
-		OutResolvedHit.BlockWorldPos = ChunkWorldHit.BlockWorldPos;
-		OutResolvedHit.RepresentativeWorldPos = ChunkWorld->BlockWorldPosToUEWorldPos(ChunkWorldHit.BlockWorldPos);
-		OutResolvedHit.MaterialIndex = ChunkWorldHit.MaterialIndex;
-		OutResolvedHit.MeshIndex = ChunkWorldHit.MeshIndex;
-		OutResolvedHit.ResolveSource = EChunkWorldBlockHitResolveSource::ChunkWorldHit;
-		return true;
-	}
-
 	const auto TryResolveAndStore = [ChunkWorld, SchemaComponent](const FIntVector& CandidateBlockWorldPos, const FVector& RepresentativeWorldPos, EChunkWorldBlockHitResolveSource ResolveSource, FChunkWorldResolvedBlockHit& OutHit)
 	{
 		if (!TryResolveRepresentedBlock(ChunkWorld, CandidateBlockWorldPos, RepresentativeWorldPos, ResolveSource, OutHit))
@@ -182,6 +168,21 @@ bool UChunkWorldBlockHitBlueprintLibrary::TryResolveBlockHitContextFromHitResult
 		OutHit.BlockTypeSchemaComponent = SchemaComponent;
 		return true;
 	};
+
+	const bool bHasChunkWorldHit = ChunkWorldHit.CheckSuccess && IsRepresentedBlockHitVoxel(ChunkWorldHit.MaterialIndex, ChunkWorldHit.MeshIndex);
+	if (bHitInstancedMesh && bHasChunkWorldHit)
+	{
+		FChunkWorldResolvedBlockHit RevalidatedHit;
+		if (TryResolveAndStore(
+			ChunkWorldHit.BlockWorldPos,
+			ChunkWorld->BlockWorldPosToUEWorldPos(ChunkWorldHit.BlockWorldPos),
+			EChunkWorldBlockHitResolveSource::ChunkWorldHit,
+			RevalidatedHit))
+		{
+			OutResolvedHit = RevalidatedHit;
+			return true;
+		}
+	}
 
 	if (InstancedMeshComponent)
 	{
@@ -245,14 +246,14 @@ bool UChunkWorldBlockHitBlueprintLibrary::TryResolveBlockHitContextFromHitResult
 
 	if (bHasChunkWorldHit)
 	{
-		OutResolvedHit.ChunkWorld = ChunkWorld;
-		OutResolvedHit.BlockTypeSchemaComponent = SchemaComponent;
-		OutResolvedHit.bHasBlock = true;
-		OutResolvedHit.BlockWorldPos = ChunkWorldHit.BlockWorldPos;
-		OutResolvedHit.RepresentativeWorldPos = ChunkWorld->BlockWorldPosToUEWorldPos(ChunkWorldHit.BlockWorldPos);
-		OutResolvedHit.MaterialIndex = ChunkWorldHit.MaterialIndex;
-		OutResolvedHit.MeshIndex = ChunkWorldHit.MeshIndex;
-		OutResolvedHit.ResolveSource = EChunkWorldBlockHitResolveSource::ChunkWorldHit;
+		if (!TryResolveAndStore(
+			ChunkWorldHit.BlockWorldPos,
+			ChunkWorld->BlockWorldPosToUEWorldPos(ChunkWorldHit.BlockWorldPos),
+			EChunkWorldBlockHitResolveSource::ChunkWorldHit,
+			OutResolvedHit))
+		{
+			return false;
+		}
 		if (!bHitInstancedMesh
 			&& !IsMeshBackedBlockHitVoxel(OutResolvedHit.MeshIndex)
 			&& TryPromoteOverlayVoxel(ChunkWorld, OutResolvedHit.BlockWorldPos, OutResolvedHit.RepresentativeWorldPos, SafeImpactNormal, OutResolvedHit))

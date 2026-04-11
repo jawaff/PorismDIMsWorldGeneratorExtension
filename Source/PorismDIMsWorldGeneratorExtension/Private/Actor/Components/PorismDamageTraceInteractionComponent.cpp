@@ -396,6 +396,15 @@ bool UPorismDamageTraceInteractionComponent::TryBuildDamageBlockInteractionResul
 	OutResult.bIsDestructible = !HealthState.bIsInvincible;
 	OutResult.CurrentHealth = HealthState.CurrentHealth;
 	OutResult.MaxHealth = HealthState.MaxHealth;
+
+	// Hide blocks that have already settled to authoritative zero health so interaction/highlight UI does not
+	// keep targeting stale destruction windows while representation removal catches up on clients.
+	if (!OutResult.bUsingPredictedHealth && OutResult.bHasAuthoritativeHealth && OutResult.CurrentHealth <= 0)
+	{
+		OutResult = FChunkWorldDamageBlockInteractionResult();
+		return false;
+	}
+
 	return true;
 }
 

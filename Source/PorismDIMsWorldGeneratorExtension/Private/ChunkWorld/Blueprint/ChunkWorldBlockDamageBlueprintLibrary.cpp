@@ -247,10 +247,10 @@ bool UChunkWorldBlockDamageBlueprintLibrary::TryApplyBlockDamageForResolvedBlock
 
 	if (!OutResult.bAppliedDamage)
 	{
-		// Project-side fix: if the authoritative runtime state already says this represented block is at
-		// zero health, report it as destroyed so the caller can clean up the voxel immediately instead of
-		// requiring one more hit to transition from a stale zero-health custom-data value.
-		OutResult.bDestroyed = ClampedHealth <= 0;
+		// Reject repeated authoritative damage once the current runtime state is already settled at zero.
+		// That avoids replaying destruction presentation when debug or stale interaction requests target a
+		// block that has already been destroyed through the real authoritative path.
+		OutResult.bDestroyed = false;
 		return true;
 	}
 
