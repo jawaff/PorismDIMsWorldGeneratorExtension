@@ -39,18 +39,21 @@ Starter character class:
   - includes `UPorismDamageTraceInteractionComponent`
   - includes `UPorismPredictedBlockStateComponent`
   - includes `UChunkWorldProximityComponent`
+  - implements the chunk-world walker contract directly on the actor
+  - binds the owning player controller to available chunk worlds on the authority side
+  - includes `UPorismStartupFreezeComponent`
 
 ### Required Setup
 - use damage-oriented schema families in the registry
   - definition family derived from `FBlockDamageDefinition`
   - custom-data family derived from `FBlockDamageCustomData`
-- add `UPorismPredictedBlockStateComponent` to player-controlled characters that need to damage voxels or read shared health state for focused UI
+- if you are not using `AChunkWorldDamagePlayerCharacter`, make sure your player-controlled character exposes `UPorismPredictedBlockStateComponent` when it needs to damage voxels or read shared health state for focused UI
 - when damage-capable blocks also use actor swap, keep the damage interaction and predicted-state components on the same character that owns the proximity component so focused block UI and swap relevance stay aligned
 - if a block should spawn a dedicated destruction presentation on zero health, assign `DestructionActorClass` on the damage definition and implement `UChunkWorldDestructionActorInterface` on that actor class
 - destruction actors are one-shot presenters. Let that actor handle its own playback lifetime and call `Destroy()` or equivalent cleanup when the presentation is finished
 
 ### Interaction Support
-Only add `UPorismDamageTraceInteractionComponent` when that character also needs interaction support for focused damage-capable blocks.
+Only add `UPorismDamageTraceInteractionComponent` when you are building a custom character and that character also needs interaction support for focused damage-capable blocks.
 
 Do not treat the trace interaction component as the main damage interface. The main reusable damage interface is `UPorismPredictedBlockStateComponent`.
 
@@ -83,6 +86,9 @@ Starter character class:
 - `AChunkWorldPlayerCharacter`
   - includes `UPorismTraceInteractionComponent`
   - includes `UChunkWorldProximityComponent`
+  - implements the chunk-world walker contract directly on the actor
+  - binds the owning player controller to available chunk worlds on the authority side
+  - includes `UPorismStartupFreezeComponent`
 
 ### Required Setup
 - use the base struct families in the registry
@@ -90,7 +96,7 @@ Starter character class:
   - custom-data family derived from `FBlockCustomDataBase`
 
 ### Interaction Support
-If characters need interaction support, use `UPorismTraceInteractionComponent`.
+If you are not using `AChunkWorldPlayerCharacter`, use `UPorismTraceInteractionComponent` on the character that needs interaction support.
 
 This route does not require `UPorismPredictedBlockStateComponent` or `UPorismDamageTraceInteractionComponent`.
 
@@ -127,3 +133,10 @@ The extension plugin now includes two minimal player-facing character bases you 
 - `AChunkWorldDamagePlayerCharacter`
 
 These classes are intentionally minimal. They establish the component composition for each setup, but they do not include project-specific movement, camera, UI, input, or equipment logic.
+
+What they do include now:
+- direct `IChunkWorldWalker` participation on the actor
+- automatic registration with available `AChunkWorldExtended` instances
+- automatic authority-side `BindNewClientGenerator(...)` setup for owning player controllers
+- plugin-owned startup freeze through `UPorismStartupFreezeComponent`
+- the interaction and prediction components expected for their respective route

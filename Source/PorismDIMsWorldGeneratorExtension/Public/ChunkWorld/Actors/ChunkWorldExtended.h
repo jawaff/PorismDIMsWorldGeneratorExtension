@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
 #include "ChunkWorld/ChunkWorld.h"
+#include "UObject/ObjectKey.h"
 #include "ChunkWorld/Hit/ChunkWorldBlockHitTypes.h"
 #include "ChunkWorldExtended.generated.h"
 
@@ -85,6 +86,7 @@ struct FChunkWorldSettledBlockTransition
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnChunkWorldSettledBlockTransition, AChunkWorldExtended*, ChunkWorld, const FChunkWorldSettledBlockTransition&, Transition);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnChunkWorldReady, AChunkWorldExtended*, ChunkWorld);
 
 /**
  * Basic extension chunk world that hosts the reusable block type schema component used by project-specific block systems.
@@ -109,6 +111,9 @@ public:
 	 * Starts generation and then rebuilds the schema lookup maps once the world indexes are available.
 	 */
 	virtual void StartGen() override;
+
+	/** Ticks world-owned startup readiness after Porism updates walker streaming state. */
+	virtual void Tick(float DeltaTime) override;
 
 	/** Spawns any networked runtime helpers owned by the chunk world. */
 	virtual void BeginPlay() override;
@@ -149,6 +154,27 @@ public:
 	/** Returns the dedicated replicated courier that transports swap presentation events for this chunk world. */
 	AChunkWorldBlockSwapReplicationProxy* GetBlockSwapReplicationProxy() const;
 
+	/** Returns true once every registered chunk walker has reached the finest ready chunk around its tracked position. */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "ChunkWorld|Startup")
+	bool IsWorldReady() const { return bWorldReady; }
+
+	/** Returns true when the supplied walker is currently registered with this chunk world. */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "ChunkWorld|Startup")
+	bool HasRegisteredChunkWorldWalker(const UObject* WorldLoader) const;
+
+	/** Returns true when the supplied walker participated in the startup-ready transition for this chunk world. */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "ChunkWorld|Startup")
+	bool WasChunkWorldWalkerIncludedInStartupReady(const UObject* WorldLoader) const;
+
+	/** Adds a world loader and restarts aggregate startup readiness tracking for this chunk world. */
+	void AddChunkWorldWalker(UObject* NewWorldLoader);
+
+	/** Removes a world loader and recomputes aggregate startup readiness for the remaining walkers. */
+	void RemoveChunkWorldWalker(UObject* WorldLoaderToRemove);
+
+	/** Replaces the active world-loader set and recomputes aggregate startup readiness. */
+	void SetChunkWorldWalkers(TArray<UObject*> NewWorldLoaders);
+
 	/** Legacy narrower custom-data event kept only as a compatibility surface. New listeners should use `OnSettledBlockTransition` instead. */
 	UPROPERTY(BlueprintAssignable, Category = "Block|ChunkWorld", meta = (DeprecatedProperty, DeprecationMessage = "Use OnSettledBlockTransition instead so listeners observe the full settled replicated block transition payload."))
 	FOnChunkWorldBlockCustomDataChanged OnBlockCustomDataChanged;
@@ -156,6 +182,10 @@ public:
 	/** Broadcast after one locally settled replicated block transition is observed on this chunk world. */
 	UPROPERTY(BlueprintAssignable, Category = "Block|ChunkWorld")
 	FOnChunkWorldSettledBlockTransition OnSettledBlockTransition;
+
+	/** Broadcast when every currently registered walker has reached a startup-safe ready chunk on this world. */
+	UPROPERTY(BlueprintAssignable, Category = "ChunkWorld|Startup")
+	FOnChunkWorldReady OnWorldReady;
 
 	/**
 	 * Processes one server-committed block custom-data write after the schema component has already stored the slot values.
@@ -186,6 +216,15 @@ protected:
 	virtual void PostLoad() override;
 
 private:
+	struct FChunkWorldWalkerReadyState
+	{
+		TWeakObjectPtr<UObject> Walker;
+		bool bHasReceivedReadyInfo = false;
+		bool bIsReady = false;
+		int32 ReadyDetailLevel = INDEX_NONE;
+		FChunkWorldWalkerInfo LastWalkerInfo;
+	};
+
 	struct FDeferredBlockCustomDataChange
 	{
 		bool bTouchedHealth = false;
@@ -251,6 +290,21 @@ private:
 	/** Applies the actor-owned schema registry to the runtime schema component and adopts legacy component-authored values from older assets when needed. */
 	void SyncBlockTypeSchemaRegistry();
 
+	/** Records one walker update dispatched on the game thread and refreshes aggregate startup readiness. */
+	void HandlePendingWalkerInfo(UObject* Walker, const FChunkWorldWalkerInfo& Info);
+
+	/** Returns true when the reported walker chunk is the finest currently ready detail layer for this world. */
+	bool IsWalkerReadyForWorld(const FChunkWorldWalkerInfo& Info) const;
+
+	/** Recomputes aggregate startup readiness from the currently registered walker set. */
+	void RefreshWorldReadyState();
+
+	/** Drops stale walker entries that are no longer registered or no longer valid. */
+	void PruneWalkerReadyStates();
+
+	/** Resets aggregate startup readiness when generation or registration restarts. */
+	void ResetWorldReadyStateTracking();
+
 	/** Single actor-level schema registry entry shown in details panels for chunk world setup. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Block|ChunkWorld", meta = (AllowPrivateAccess = "true", NoClear, ToolTip = "Schema registry asset used by this chunk world's block schema component."))
 	TObjectPtr<UBlockTypeSchemaRegistry> BlockTypeSchemaRegistry = nullptr;
@@ -282,4 +336,16 @@ private:
 
 	/** True while one next-tick flush has already been scheduled for deferred block custom-data notifications. */
 	bool bHasDeferredBlockCustomDataFlushQueued = false;
+
+	/** Per-walker startup readiness observations keyed by the registered walker object. */
+	TMap<FObjectKey, FChunkWorldWalkerReadyState> WalkerReadyStates;
+
+	/** Snapshot of walkers that were part of the startup-ready transition when this world first became ready. */
+	TSet<FObjectKey> StartupReadyWalkerKeys;
+
+	/** True while every currently registered walker is ready to safely use this chunk world. */
+	bool bWorldReady = false;
+
+	/** True only while the initial startup-ready handshake is still being observed. */
+	bool bStartupWorldReadyTrackingActive = false;
 };

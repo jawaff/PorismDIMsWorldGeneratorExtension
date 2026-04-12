@@ -66,6 +66,7 @@ SCacheKey AChunkWorldExtended::StartGenDTs()
 void AChunkWorldExtended::StartGen()
 {
 	SyncBlockTypeSchemaRegistry();
+	ResetWorldReadyStateTracking();
 	Super::StartGen();
 
 	if (BlockTypeSchemaComponent != nullptr)
@@ -85,6 +86,37 @@ void AChunkWorldExtended::StartGen()
 	}
 }
 
+void AChunkWorldExtended::Tick(float DeltaTime)
+{
+	if (!bStartupWorldReadyTrackingActive)
+	{
+		Super::Tick(DeltaTime);
+		return;
+	}
+
+	TArray<SPendingWalkerInfo> PendingInfos;
+	{
+		std::lock_guard<std::mutex> PendingWalkerInfoLock(PendingWalkerInfos.Mutex);
+		PendingInfos.Reserve(static_cast<int32>(PendingWalkerInfos.WriteBuffer.size()));
+		for (const SPendingWalkerInfo& PendingInfo : PendingWalkerInfos.WriteBuffer)
+		{
+			PendingInfos.Add(PendingInfo);
+		}
+	}
+
+	for (const SPendingWalkerInfo& PendingInfo : PendingInfos)
+	{
+		if (IsValid(PendingInfo.Walker))
+		{
+			HandlePendingWalkerInfo(PendingInfo.Walker, PendingInfo.Info);
+		}
+	}
+
+	Super::Tick(DeltaTime);
+	PruneWalkerReadyStates();
+	RefreshWorldReadyState();
+}
+
 void AChunkWorldExtended::BeginPlay()
 {
 	Super::BeginPlay();
@@ -99,7 +131,76 @@ void AChunkWorldExtended::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		BlockSwapReplicationProxy = nullptr;
 	}
 
+	ResetWorldReadyStateTracking();
 	Super::EndPlay(EndPlayReason);
+}
+
+void AChunkWorldExtended::AddChunkWorldWalker(UObject* NewWorldLoader)
+{
+	Super::AddChunkWorldWalker(NewWorldLoader);
+
+	if (!bStartupWorldReadyTrackingActive || !NewWorldLoader)
+	{
+		return;
+	}
+
+	FChunkWorldWalkerReadyState& ReadyState = WalkerReadyStates.FindOrAdd(FObjectKey(NewWorldLoader));
+	ReadyState.Walker = NewWorldLoader;
+	ReadyState.bHasReceivedReadyInfo = false;
+	ReadyState.bIsReady = false;
+	ReadyState.ReadyDetailLevel = INDEX_NONE;
+	ReadyState.LastWalkerInfo = FChunkWorldWalkerInfo();
+	RefreshWorldReadyState();
+}
+
+void AChunkWorldExtended::RemoveChunkWorldWalker(UObject* WorldLoaderToRemove)
+{
+	Super::RemoveChunkWorldWalker(WorldLoaderToRemove);
+
+	if (!bStartupWorldReadyTrackingActive)
+	{
+		return;
+	}
+
+	if (WorldLoaderToRemove)
+	{
+		WalkerReadyStates.Remove(FObjectKey(WorldLoaderToRemove));
+	}
+
+	RefreshWorldReadyState();
+}
+
+void AChunkWorldExtended::SetChunkWorldWalkers(TArray<UObject*> NewWorldLoaders)
+{
+	Super::SetChunkWorldWalkers(NewWorldLoaders);
+
+	if (!bStartupWorldReadyTrackingActive)
+	{
+		return;
+	}
+
+	TMap<FObjectKey, FChunkWorldWalkerReadyState> NewWalkerReadyStates;
+	for (UObject* NewWorldLoader : NewWorldLoaders)
+	{
+		if (!NewWorldLoader)
+		{
+			continue;
+		}
+
+		const FObjectKey WalkerKey(NewWorldLoader);
+		if (const FChunkWorldWalkerReadyState* ExistingState = WalkerReadyStates.Find(WalkerKey))
+		{
+			NewWalkerReadyStates.Add(WalkerKey, *ExistingState);
+			NewWalkerReadyStates[WalkerKey].Walker = NewWorldLoader;
+			continue;
+		}
+
+		FChunkWorldWalkerReadyState& NewState = NewWalkerReadyStates.Add(WalkerKey);
+		NewState.Walker = NewWorldLoader;
+	}
+
+	WalkerReadyStates = MoveTemp(NewWalkerReadyStates);
+	RefreshWorldReadyState();
 }
 
 void AChunkWorldExtended::EnsureSchemaCustomDataCapacity()
@@ -147,6 +248,22 @@ AChunkWorldBlockSwapReplicationProxy* AChunkWorldExtended::GetBlockSwapReplicati
 	return BlockSwapReplicationProxy;
 }
 
+bool AChunkWorldExtended::HasRegisteredChunkWorldWalker(const UObject* WorldLoader) const
+{
+	if (WorldLoader == nullptr)
+	{
+		return false;
+	}
+
+	std::lock_guard<std::mutex> WorldLoaderLock(const_cast<std::mutex&>(WorldLoadersKey));
+	return WorldLoaders.Contains(const_cast<UObject*>(WorldLoader));
+}
+
+bool AChunkWorldExtended::WasChunkWorldWalkerIncludedInStartupReady(const UObject* WorldLoader) const
+{
+	return WorldLoader != nullptr && StartupReadyWalkerKeys.Contains(FObjectKey(WorldLoader));
+}
+
 void AChunkWorldExtended::PostLoad()
 {
 	Super::PostLoad();
@@ -186,6 +303,113 @@ void AChunkWorldExtended::SyncBlockTypeSchemaRegistry()
 	}
 
 	BlockTypeSchemaComponent->SetBlockTypeSchemaRegistry(BlockTypeSchemaRegistry);
+}
+
+void AChunkWorldExtended::HandlePendingWalkerInfo(UObject* Walker, const FChunkWorldWalkerInfo& Info)
+{
+	if (!bStartupWorldReadyTrackingActive || !Walker)
+	{
+		return;
+	}
+
+	FChunkWorldWalkerReadyState& ReadyState = WalkerReadyStates.FindOrAdd(FObjectKey(Walker));
+	ReadyState.Walker = Walker;
+	ReadyState.bHasReceivedReadyInfo = true;
+	ReadyState.bIsReady = IsWalkerReadyForWorld(Info);
+	ReadyState.ReadyDetailLevel = Info.DetailLevel;
+	ReadyState.LastWalkerInfo = Info;
+
+	RefreshWorldReadyState();
+}
+
+bool AChunkWorldExtended::IsWalkerReadyForWorld(const FChunkWorldWalkerInfo& Info) const
+{
+	if (!GeneratorIsRunning || WorldChunks.empty() || Info.Chunk.Chunk == nullptr || !Info.Chunk.Chunk->IsReady)
+	{
+		return false;
+	}
+
+	const int32 FinestDetailLevel = static_cast<int32>(WorldChunks.size()) - 1;
+	return Info.DetailLevel >= FinestDetailLevel;
+}
+
+void AChunkWorldExtended::RefreshWorldReadyState()
+{
+	if (!bStartupWorldReadyTrackingActive)
+	{
+		return;
+	}
+
+	PruneWalkerReadyStates();
+
+	bool bAllWalkersReady = WorldLoaders.Num() > 0;
+	for (UObject* WorldLoader : WorldLoaders)
+	{
+		if (!WorldLoader || !WorldLoader->GetClass()->ImplementsInterface(UChunkWorldWalker::StaticClass()))
+		{
+			continue;
+		}
+
+		const FChunkWorldWalkerReadyState* ReadyState = WalkerReadyStates.Find(FObjectKey(WorldLoader));
+		if (ReadyState == nullptr || !ReadyState->bHasReceivedReadyInfo || !ReadyState->bIsReady)
+		{
+			bAllWalkersReady = false;
+			break;
+		}
+	}
+
+	const bool bWasWorldReady = bWorldReady;
+	bWorldReady = bAllWalkersReady;
+	if (!bWasWorldReady && bWorldReady)
+	{
+		StartupReadyWalkerKeys.Reset();
+		for (UObject* WorldLoader : WorldLoaders)
+		{
+			if (IsValid(WorldLoader) && WorldLoader->GetClass()->ImplementsInterface(UChunkWorldWalker::StaticClass()))
+			{
+				StartupReadyWalkerKeys.Add(FObjectKey(WorldLoader));
+			}
+		}
+
+		UE_LOG(
+			LogChunkWorldExtended,
+			Log,
+			TEXT("Chunk world '%s' reached startup ready state for %d walkers."),
+			*GetNameSafe(this),
+			WorldLoaders.Num());
+		OnWorldReady.Broadcast(this);
+		bStartupWorldReadyTrackingActive = false;
+		WalkerReadyStates.Reset();
+	}
+}
+
+void AChunkWorldExtended::PruneWalkerReadyStates()
+{
+	TSet<FObjectKey> ActiveWalkerKeys;
+	for (UObject* WorldLoader : WorldLoaders)
+	{
+		if (IsValid(WorldLoader))
+		{
+			ActiveWalkerKeys.Add(FObjectKey(WorldLoader));
+		}
+	}
+
+	for (auto It = WalkerReadyStates.CreateIterator(); It; ++It)
+	{
+		const FChunkWorldWalkerReadyState& ReadyState = It.Value();
+		if (!ReadyState.Walker.IsValid() || !ActiveWalkerKeys.Contains(It.Key()))
+		{
+			It.RemoveCurrent();
+		}
+	}
+}
+
+void AChunkWorldExtended::ResetWorldReadyStateTracking()
+{
+	WalkerReadyStates.Reset();
+	StartupReadyWalkerKeys.Reset();
+	bWorldReady = false;
+	bStartupWorldReadyTrackingActive = true;
 }
 
 void AChunkWorldExtended::EnsureBlockSwapReplicationProxy()
