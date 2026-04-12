@@ -46,13 +46,13 @@ int32 UBlockTypeSchemaComponent::GetBlockDamageHealthCustomDataIndex() const
 	static const int32 CachedHealthSlotIndex = []()
 	{
 		FBlockCustomDataLayout Layout;
-		if (!Layout.Build(FBlockDamageCustomData::StaticStruct()))
+		if (!Layout.Build(FBlockHealthCustomData::StaticStruct()))
 		{
 			return static_cast<int32>(INDEX_NONE);
 		}
 
-		// Layout packing walks base struct properties before child struct properties, so the shared damage-family
-		// `Health` slot remains stable for every custom-data struct derived from `FBlockDamageCustomData`.
+		// Layout packing walks base struct properties before child struct properties, so the shared health-family
+		// `Health` slot remains stable for every custom-data struct derived from `FBlockHealthCustomData`.
 		return static_cast<int32>(Layout.GetValueSlotCount() - 1);
 	}();
 

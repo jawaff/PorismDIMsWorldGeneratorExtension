@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "GameplayTagContainer.h"
 #include "ChunkWorld/Hit/ChunkWorldBlockHitTypes.h"
 #include "ChunkWorldBlockFeedbackComponent.generated.h"
 

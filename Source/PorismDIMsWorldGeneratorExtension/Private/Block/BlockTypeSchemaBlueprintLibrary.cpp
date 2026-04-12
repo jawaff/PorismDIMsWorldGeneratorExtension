@@ -31,14 +31,24 @@ UScriptStruct* UBlockTypeSchemaBlueprintLibrary::GetBlockCustomDataBaseStruct()
 	return FBlockCustomDataBase::StaticStruct();
 }
 
+UScriptStruct* UBlockTypeSchemaBlueprintLibrary::GetBlockHealthDefinitionStruct()
+{
+	return FBlockHealthDefinition::StaticStruct();
+}
+
+UScriptStruct* UBlockTypeSchemaBlueprintLibrary::GetBlockHealthCustomDataStruct()
+{
+	return FBlockHealthCustomData::StaticStruct();
+}
+
 UScriptStruct* UBlockTypeSchemaBlueprintLibrary::GetBlockDamageDefinitionStruct()
 {
-	return FBlockDamageDefinition::StaticStruct();
+	return GetBlockHealthDefinitionStruct();
 }
 
 UScriptStruct* UBlockTypeSchemaBlueprintLibrary::GetBlockDamageCustomDataStruct()
 {
-	return FBlockDamageCustomData::StaticStruct();
+	return GetBlockHealthCustomDataStruct();
 }
 
 bool UBlockTypeSchemaBlueprintLibrary::IsBlockDefinitionPayload(const FInstancedStruct& Payload)
@@ -77,38 +87,72 @@ bool UBlockTypeSchemaBlueprintLibrary::TryGetBlockCustomDataBase(const FInstance
 	return true;
 }
 
-bool UBlockTypeSchemaBlueprintLibrary::IsBlockDamageDefinitionPayload(const FInstancedStruct& Payload)
+bool UBlockTypeSchemaBlueprintLibrary::IsBlockHealthDefinitionPayload(const FInstancedStruct& Payload)
 {
 	const UScriptStruct* PayloadStruct = Payload.GetScriptStruct();
-	return PayloadStruct != nullptr && PayloadStruct->IsChildOf(FBlockDamageDefinition::StaticStruct());
+	return PayloadStruct != nullptr && PayloadStruct->IsChildOf(FBlockHealthDefinition::StaticStruct());
 }
 
-bool UBlockTypeSchemaBlueprintLibrary::IsBlockDamageCustomDataPayload(const FInstancedStruct& Payload)
+bool UBlockTypeSchemaBlueprintLibrary::IsBlockHealthCustomDataPayload(const FInstancedStruct& Payload)
 {
 	const UScriptStruct* PayloadStruct = Payload.GetScriptStruct();
-	return PayloadStruct != nullptr && PayloadStruct->IsChildOf(FBlockDamageCustomData::StaticStruct());
+	return PayloadStruct != nullptr && PayloadStruct->IsChildOf(FBlockHealthCustomData::StaticStruct());
 }
 
-bool UBlockTypeSchemaBlueprintLibrary::TryGetBlockDamageDefinition(const FInstancedStruct& Payload, FBlockDamageDefinition& OutDamageDefinition)
+bool UBlockTypeSchemaBlueprintLibrary::TryGetBlockHealthDefinition(const FInstancedStruct& Payload, FBlockHealthDefinition& OutHealthDefinition)
 {
-	const FBlockDamageDefinition* DamageDefinition = GetCompatiblePayload<FBlockDamageDefinition>(Payload);
-	if (DamageDefinition == nullptr)
+	const FBlockHealthDefinition* HealthDefinition = GetCompatiblePayload<FBlockHealthDefinition>(Payload);
+	if (HealthDefinition == nullptr)
 	{
 		return false;
 	}
 
-	OutDamageDefinition = *DamageDefinition;
+	OutHealthDefinition = *HealthDefinition;
+	return true;
+}
+
+bool UBlockTypeSchemaBlueprintLibrary::TryGetBlockHealthCustomData(const FInstancedStruct& Payload, FBlockHealthCustomData& OutHealthCustomData)
+{
+	const FBlockHealthCustomData* HealthCustomData = GetCompatiblePayload<FBlockHealthCustomData>(Payload);
+	if (HealthCustomData == nullptr)
+	{
+		return false;
+	}
+
+	OutHealthCustomData = *HealthCustomData;
+	return true;
+}
+
+bool UBlockTypeSchemaBlueprintLibrary::IsBlockDamageDefinitionPayload(const FInstancedStruct& Payload)
+{
+	return IsBlockHealthDefinitionPayload(Payload);
+}
+
+bool UBlockTypeSchemaBlueprintLibrary::IsBlockDamageCustomDataPayload(const FInstancedStruct& Payload)
+{
+	return IsBlockHealthCustomDataPayload(Payload);
+}
+
+bool UBlockTypeSchemaBlueprintLibrary::TryGetBlockDamageDefinition(const FInstancedStruct& Payload, FBlockDamageDefinition& OutDamageDefinition)
+{
+	FBlockHealthDefinition HealthDefinition;
+	if (!TryGetBlockHealthDefinition(Payload, HealthDefinition))
+	{
+		return false;
+	}
+
+	static_cast<FBlockHealthDefinition&>(OutDamageDefinition) = HealthDefinition;
 	return true;
 }
 
 bool UBlockTypeSchemaBlueprintLibrary::TryGetBlockDamageCustomData(const FInstancedStruct& Payload, FBlockDamageCustomData& OutDamageCustomData)
 {
-	const FBlockDamageCustomData* DamageCustomData = GetCompatiblePayload<FBlockDamageCustomData>(Payload);
-	if (DamageCustomData == nullptr)
+	FBlockHealthCustomData HealthCustomData;
+	if (!TryGetBlockHealthCustomData(Payload, HealthCustomData))
 	{
 		return false;
 	}
 
-	OutDamageCustomData = *DamageCustomData;
+	static_cast<FBlockHealthCustomData&>(OutDamageCustomData) = HealthCustomData;
 	return true;
 }

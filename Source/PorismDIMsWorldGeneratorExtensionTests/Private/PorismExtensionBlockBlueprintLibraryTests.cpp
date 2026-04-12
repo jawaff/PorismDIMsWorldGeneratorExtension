@@ -15,22 +15,22 @@ namespace
 {
 	FInstancedStruct MakeExactDamageDefinitionPayload(int32 MaxHealth, bool bInvincible)
 	{
-		FBlockDamageDefinition Definition;
+		FBlockHealthDefinition Definition;
 		Definition.MaxHealth = MaxHealth;
 		Definition.bInvincible = bInvincible;
 
 		FInstancedStruct Payload;
-		Payload.InitializeAs<FBlockDamageDefinition>(Definition);
+		Payload.InitializeAs<FBlockHealthDefinition>(Definition);
 		return Payload;
 	}
 
 	FInstancedStruct MakeExactDamageCustomDataPayload(int32 Health)
 	{
-		FBlockDamageCustomData CustomData;
+		FBlockHealthCustomData CustomData;
 		CustomData.Health = Health;
 
 		FInstancedStruct Payload;
-		Payload.InitializeAs<FBlockDamageCustomData>(CustomData);
+		Payload.InitializeAs<FBlockHealthCustomData>(CustomData);
 		return Payload;
 	}
 }
@@ -106,17 +106,17 @@ bool FPorismExtensionBlockHitBlueprintLibraryRegistryPayloadTest::RunTest(const 
 	FInstancedStruct DefinitionPayload;
 	TestTrue(TEXT("Definition lookup succeeds for the authored block type tag"), UChunkWorldBlockHitBlueprintLibrary::TryGetBlockDefinitionForBlockTypeName(SchemaComponent, TAG_PorismExtension_TestBlock, DefinitionPayload));
 
-	FBlockDamageDefinition DamageDefinition;
-	TestTrue(TEXT("Resolved definition converts to the shared damage definition family"), UBlockTypeSchemaBlueprintLibrary::TryGetBlockDamageDefinition(DefinitionPayload, DamageDefinition));
-	TestEqual(TEXT("Resolved definition keeps the authored max health"), DamageDefinition.MaxHealth, 72);
-	TestTrue(TEXT("Resolved definition keeps the authored invincibility flag"), DamageDefinition.bInvincible);
+	FBlockHealthDefinition HealthDefinition;
+	TestTrue(TEXT("Resolved definition converts to the shared health definition family"), UBlockTypeSchemaBlueprintLibrary::TryGetBlockHealthDefinition(DefinitionPayload, HealthDefinition));
+	TestEqual(TEXT("Resolved definition keeps the authored max health"), HealthDefinition.MaxHealth, 72);
+	TestTrue(TEXT("Resolved definition keeps the authored invincibility flag"), HealthDefinition.bInvincible);
 
 	FInstancedStruct CustomDataPayload;
 	TestTrue(TEXT("Custom-data lookup succeeds for the authored block type tag"), UChunkWorldBlockHitBlueprintLibrary::TryGetBlockCustomDataForBlockTypeName(SchemaComponent, TAG_PorismExtension_TestBlock, CustomDataPayload));
 
-	FBlockDamageCustomData DamageCustomData;
-	TestTrue(TEXT("Resolved custom data converts to the shared damage custom-data family"), UBlockTypeSchemaBlueprintLibrary::TryGetBlockDamageCustomData(CustomDataPayload, DamageCustomData));
-	TestEqual(TEXT("Resolved custom data keeps the authored health value"), DamageCustomData.Health, 18);
+	FBlockHealthCustomData HealthCustomData;
+	TestTrue(TEXT("Resolved custom data converts to the shared health custom-data family"), UBlockTypeSchemaBlueprintLibrary::TryGetBlockHealthCustomData(CustomDataPayload, HealthCustomData));
+	TestEqual(TEXT("Resolved custom data keeps the authored health value"), HealthCustomData.Health, 18);
 
 	TestFalse(TEXT("Invalid block type tags do not resolve definitions"), UChunkWorldBlockHitBlueprintLibrary::TryGetBlockDefinitionForBlockTypeName(SchemaComponent, FGameplayTag(), DefinitionPayload));
 	TestFalse(TEXT("Invalid block type tags do not resolve custom data"), UChunkWorldBlockHitBlueprintLibrary::TryGetBlockCustomDataForBlockTypeName(SchemaComponent, FGameplayTag(), CustomDataPayload));

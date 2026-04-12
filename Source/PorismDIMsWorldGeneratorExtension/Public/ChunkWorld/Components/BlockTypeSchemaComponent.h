@@ -39,7 +39,7 @@ public:
 	int32 GetRequiredCustomDataChannelCount() const;
 
 	/**
-	 * Returns the shared runtime slot index used by the `Health` field in the `FBlockDamageCustomData` family.
+	 * Returns the shared runtime slot index used by the `Health` field in the canonical `FBlockHealthCustomData` family.
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld")
 	int32 GetBlockDamageHealthCustomDataIndex() const;

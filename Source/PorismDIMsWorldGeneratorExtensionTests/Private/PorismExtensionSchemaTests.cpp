@@ -14,22 +14,22 @@ namespace
 {
 	FInstancedStruct MakeExactDamageDefinitionPayload(int32 MaxHealth, bool bInvincible)
 	{
-		FBlockDamageDefinition Definition;
+		FBlockHealthDefinition Definition;
 		Definition.MaxHealth = MaxHealth;
 		Definition.bInvincible = bInvincible;
 
 		FInstancedStruct Payload;
-		Payload.InitializeAs<FBlockDamageDefinition>(Definition);
+		Payload.InitializeAs<FBlockHealthDefinition>(Definition);
 		return Payload;
 	}
 
 	FInstancedStruct MakeExactDamageCustomDataPayload(int32 Health)
 	{
-		FBlockDamageCustomData CustomData;
+		FBlockHealthCustomData CustomData;
 		CustomData.Health = Health;
 
 		FInstancedStruct Payload;
-		Payload.InitializeAs<FBlockDamageCustomData>(CustomData);
+		Payload.InitializeAs<FBlockHealthCustomData>(CustomData);
 		return Payload;
 	}
 }
@@ -91,10 +91,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FPorismExtensionCustomDataLayoutExactDamagePayloadTest::RunTest(const FString& Parameters)
 {
 	FBlockCustomDataLayout Layout;
-	TestTrue(TEXT("Exact damage custom-data layout builds"), Layout.Build(FBlockDamageCustomData::StaticStruct()));
+	TestTrue(TEXT("Exact damage custom-data layout builds"), Layout.Build(FBlockHealthCustomData::StaticStruct()));
 	TestEqual(TEXT("Exact damage payload uses one authored slot"), Layout.GetValueSlotCount(), 1);
 
-	FBlockDamageCustomData Source;
+	FBlockHealthCustomData Source;
 	Source.Health = 14;
 
 	TArray<int32> PackedValues;
@@ -102,7 +102,7 @@ bool FPorismExtensionCustomDataLayoutExactDamagePayloadTest::RunTest(const FStri
 	TestEqual(TEXT("Exact damage payload writes one slot"), PackedValues.Num(), 1);
 	TestEqual(TEXT("Health is stored in slot zero"), PackedValues[0], 14);
 
-	FBlockDamageCustomData Unpacked;
+	FBlockHealthCustomData Unpacked;
 	TestTrue(TEXT("Exact damage payload unpacks"), Layout.Unpack(PackedValues, &Unpacked));
 	TestEqual(TEXT("Exact damage payload round-trips health"), Unpacked.Health, 14);
 
@@ -143,7 +143,12 @@ bool FPorismExtensionSchemaBlueprintLibraryDerivedPayloadTest::RunTest(const FSt
 	CustomDataPayload.InitializeAs<FPorismExtensionDerivedDamageCustomData>(DerivedCustomData);
 
 	TestTrue(TEXT("Derived custom-data payload counts as block custom data"), UBlockTypeSchemaBlueprintLibrary::IsBlockCustomDataPayload(CustomDataPayload));
+	TestTrue(TEXT("Derived custom-data payload counts as block health custom data"), UBlockTypeSchemaBlueprintLibrary::IsBlockHealthCustomDataPayload(CustomDataPayload));
 	TestTrue(TEXT("Derived custom-data payload counts as block damage custom data"), UBlockTypeSchemaBlueprintLibrary::IsBlockDamageCustomDataPayload(CustomDataPayload));
+
+	FBlockHealthCustomData HealthCustomData;
+	TestTrue(TEXT("Derived custom-data payload can be read as shared health custom data"), UBlockTypeSchemaBlueprintLibrary::TryGetBlockHealthCustomData(CustomDataPayload, HealthCustomData));
+	TestEqual(TEXT("Shared health custom-data view keeps the derived health value"), HealthCustomData.Health, 21);
 
 	FBlockDamageCustomData DamageCustomData;
 	TestTrue(TEXT("Derived custom-data payload can be read as shared damage custom data"), UBlockTypeSchemaBlueprintLibrary::TryGetBlockDamageCustomData(CustomDataPayload, DamageCustomData));
@@ -158,7 +163,12 @@ bool FPorismExtensionSchemaBlueprintLibraryDerivedPayloadTest::RunTest(const FSt
 	DefinitionPayload.InitializeAs<FPorismExtensionDerivedDamageDefinition>(DerivedDefinition);
 
 	TestTrue(TEXT("Derived definition payload counts as block definition"), UBlockTypeSchemaBlueprintLibrary::IsBlockDefinitionPayload(DefinitionPayload));
+	TestTrue(TEXT("Derived definition payload counts as block health definition"), UBlockTypeSchemaBlueprintLibrary::IsBlockHealthDefinitionPayload(DefinitionPayload));
 	TestTrue(TEXT("Derived definition payload counts as block damage definition"), UBlockTypeSchemaBlueprintLibrary::IsBlockDamageDefinitionPayload(DefinitionPayload));
+
+	FBlockHealthDefinition HealthDefinition;
+	TestTrue(TEXT("Derived definition payload can be read as shared health definition"), UBlockTypeSchemaBlueprintLibrary::TryGetBlockHealthDefinition(DefinitionPayload, HealthDefinition));
+	TestEqual(TEXT("Shared health definition view keeps the derived max health"), HealthDefinition.MaxHealth, 80);
 
 	FBlockDamageDefinition DamageDefinition;
 	TestTrue(TEXT("Derived definition payload can be read as shared damage definition"), UBlockTypeSchemaBlueprintLibrary::TryGetBlockDamageDefinition(DefinitionPayload, DamageDefinition));
@@ -197,16 +207,16 @@ bool FPorismExtensionSchemaRegistryLookupTest::RunTest(const FString& Parameters
 	FInstancedStruct DefinitionPayload;
 	TestTrue(TEXT("Registry resolves definition payload"), Registry->TryGetBlockDefinition(TAG_PorismExtension_TestBlock, DefinitionPayload));
 
-	FBlockDamageDefinition DamageDefinition;
-	TestTrue(TEXT("Definition payload converts to shared damage definition"), UBlockTypeSchemaBlueprintLibrary::TryGetBlockDamageDefinition(DefinitionPayload, DamageDefinition));
-	TestEqual(TEXT("Resolved max health matches authored definition"), DamageDefinition.MaxHealth, 65);
+	FBlockHealthDefinition HealthDefinition;
+	TestTrue(TEXT("Definition payload converts to shared health definition"), UBlockTypeSchemaBlueprintLibrary::TryGetBlockHealthDefinition(DefinitionPayload, HealthDefinition));
+	TestEqual(TEXT("Resolved max health matches authored definition"), HealthDefinition.MaxHealth, 65);
 
 	FInstancedStruct CustomDataPayload;
 	TestTrue(TEXT("Registry resolves custom-data payload"), Registry->TryGetBlockCustomData(TAG_PorismExtension_TestBlock, CustomDataPayload));
 
-	FBlockDamageCustomData DamageCustomData;
-	TestTrue(TEXT("Custom-data payload converts to shared damage custom data"), UBlockTypeSchemaBlueprintLibrary::TryGetBlockDamageCustomData(CustomDataPayload, DamageCustomData));
-	TestEqual(TEXT("Resolved custom-data health matches authored value"), DamageCustomData.Health, 42);
+	FBlockHealthCustomData HealthCustomData;
+	TestTrue(TEXT("Custom-data payload converts to shared health custom data"), UBlockTypeSchemaBlueprintLibrary::TryGetBlockHealthCustomData(CustomDataPayload, HealthCustomData));
+	TestEqual(TEXT("Resolved custom-data health matches authored value"), HealthCustomData.Health, 42);
 
 	TestFalse(TEXT("Unknown tag does not resolve a definition"), Registry->TryGetBlockDefinition(FGameplayTag(), DefinitionPayload));
 	TestFalse(TEXT("Unknown tag does not resolve custom data"), Registry->TryGetBlockCustomData(FGameplayTag(), CustomDataPayload));
