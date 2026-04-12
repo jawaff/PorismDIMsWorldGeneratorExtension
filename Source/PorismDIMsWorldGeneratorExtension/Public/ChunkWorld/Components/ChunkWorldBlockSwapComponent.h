@@ -55,6 +55,9 @@ public:
 	/** Queues deferred refresh retries so async chunk rebuilds cannot recreate visible meshes for active swaps. */
 	void QueueActiveSwapPresentationRefresh();
 
+	/** Removes any stale local ISM instances still mapped to a block that has already settled to empty mesh state. */
+	void PurgeStaleRepresentedMeshInstances(const FIntVector& BlockWorldPos);
+
 	/** Applies one network-delivered swap enter event to the local presentation state. */
 	void HandleNetworkSwapEntered(const FReplicatedChunkWorldSwapItem& SwapItem);
 

@@ -452,6 +452,22 @@ bool AChunkWorldExtended::DestroyBlock(const FIntVector& BlockWorldPos, bool bRe
 				(void)BlockFeedbackComponent->BroadcastAuthoritativeDestroyFeedback(DestroyedFeedbackHit);
 			}
 			SetMeshDataByBlockWorldPos(BlockWorldPos, EmptyMeshData, bRefreshChunks);
+
+			// This is a fix for Porism seemingly causing there to be multiple instanced meshes, which impacts us removing them.
+			// Hopefully this can eventually be removed.
+			if (UWorld* World = GetWorld())
+			{
+				FTimerDelegate DelayedCleanup;
+				DelayedCleanup.BindLambda([this, BlockWorldPos]()
+				{
+					if (BlockSwapComponent != nullptr)
+					{
+						BlockSwapComponent->PurgeStaleRepresentedMeshInstances(BlockWorldPos);
+					}
+				});
+				FTimerHandle DelayedCleanupHandle;
+				World->GetTimerManager().SetTimer(DelayedCleanupHandle, DelayedCleanup, 0.20f, false);
+			}
 		    return true;
 		}
 

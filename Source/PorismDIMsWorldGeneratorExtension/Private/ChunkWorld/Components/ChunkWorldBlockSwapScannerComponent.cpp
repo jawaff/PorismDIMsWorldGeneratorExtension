@@ -68,14 +68,6 @@ void UChunkWorldBlockSwapScannerComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
-	UE_LOG(
-		LogChunkWorldBlockSwapScanner,
-		Log,
-		TEXT("SwapScanner BeginPlay Scanner=%s Owner=%s NetMode=%d"),
-		*GetNameSafe(this),
-		*GetNameSafe(GetOwner()),
-		GetWorld() != nullptr ? static_cast<int32>(GetWorld()->GetNetMode()) : INDEX_NONE);
-
 	if (UWorld* World = GetWorld())
 	{
 		if (UChunkWorldSwapRegistrationSubsystem* SwapRegistrationSubsystem = World->GetSubsystem<UChunkWorldSwapRegistrationSubsystem>())
@@ -85,21 +77,10 @@ void UChunkWorldBlockSwapScannerComponent::BeginPlay()
 	}
 
 	UpdateSwapScanTimer();
-	LogSwapDiagnostics(TEXT("BeginPlay"));
 }
 
 void UChunkWorldBlockSwapScannerComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	UE_LOG(
-		LogChunkWorldBlockSwapScanner,
-		Log,
-		TEXT("SwapScanner EndPlay Scanner=%s Owner=%s Reason=%d ActiveSwaps=%d Sources=%d"),
-		*GetNameSafe(this),
-		*GetNameSafe(GetOwner()),
-		static_cast<int32>(EndPlayReason),
-		ActiveSwaps.Num(),
-		ProximitySources.Num());
-
 	if (UWorld* World = GetWorld())
 	{
 		if (UChunkWorldSwapRegistrationSubsystem* SwapRegistrationSubsystem = World->GetSubsystem<UChunkWorldSwapRegistrationSubsystem>())
@@ -134,7 +115,6 @@ void UChunkWorldBlockSwapScannerComponent::EndPlay(const EEndPlayReason::Type En
 	ProximitySources.Reset();
 	ActiveSwaps.Reset();
 	SwapActorPools.Reset();
-	LogSwapDiagnostics(TEXT("EndPlay"));
 
 	Super::EndPlay(EndPlayReason);
 }
@@ -147,17 +127,7 @@ void UChunkWorldBlockSwapScannerComponent::RegisterProximitySource(UChunkWorldPr
 	}
 
 	ProximitySources.AddUnique(Source);
-	UE_LOG(
-		LogChunkWorldBlockSwapScanner,
-		Log,
-		TEXT("SwapScanner RegisterSource Scanner=%s Owner=%s Source=%s SourceOwner=%s Sources=%d"),
-		*GetNameSafe(this),
-		*GetNameSafe(GetOwner()),
-		*GetNameSafe(Source),
-		*GetNameSafe(Source->GetOwner()),
-		ProximitySources.Num());
 	UpdateSwapScanTimer();
-	LogSwapDiagnostics(TEXT("RegisterProximitySource"));
 }
 
 void UChunkWorldBlockSwapScannerComponent::UnregisterProximitySource(UChunkWorldProximityComponent* Source)
@@ -168,17 +138,7 @@ void UChunkWorldBlockSwapScannerComponent::UnregisterProximitySource(UChunkWorld
 	}
 
 	ProximitySources.RemoveSingleSwap(Source);
-	UE_LOG(
-		LogChunkWorldBlockSwapScanner,
-		Log,
-		TEXT("SwapScanner UnregisterSource Scanner=%s Owner=%s Source=%s SourceOwner=%s Sources=%d"),
-		*GetNameSafe(this),
-		*GetNameSafe(GetOwner()),
-		*GetNameSafe(Source),
-		*GetNameSafe(Source->GetOwner()),
-		ProximitySources.Num());
 	UpdateSwapScanTimer();
-	LogSwapDiagnostics(TEXT("UnregisterProximitySource"));
 }
 
 bool UChunkWorldBlockSwapScannerComponent::ForceRemoveSwapForDestroyedBlock(const FIntVector& BlockWorldPos)
@@ -215,14 +175,12 @@ void UChunkWorldBlockSwapScannerComponent::ScanForSwaps()
 {
 	if (!ShouldRunSwapScan())
 	{
-		UE_LOG(LogChunkWorldBlockSwapScanner, Log, TEXT("SwapScanner SkipScan Scanner=%s Owner=%s Reason=ShouldRunSwapScanFalse"), *GetNameSafe(this), *GetNameSafe(GetOwner()));
 		return;
 	}
 
 	CleanupInvalidSources();
 	if (ProximitySources.IsEmpty())
 	{
-		UE_LOG(LogChunkWorldBlockSwapScanner, Log, TEXT("SwapScanner SkipScan Scanner=%s Owner=%s Reason=NoSources"), *GetNameSafe(this), *GetNameSafe(GetOwner()));
 		return;
 	}
 
@@ -230,7 +188,6 @@ void UChunkWorldBlockSwapScannerComponent::ScanForSwaps()
 	AChunkWorld* ChunkWorld = GetOwningChunkWorld();
 	if (World == nullptr || !IsChunkWorldUsable(World, ChunkWorld))
 	{
-		UE_LOG(LogChunkWorldBlockSwapScanner, Log, TEXT("SwapScanner SkipScan Scanner=%s Owner=%s Reason=ChunkWorldNotUsable"), *GetNameSafe(this), *GetNameSafe(GetOwner()));
 		return;
 	}
 
@@ -240,27 +197,14 @@ void UChunkWorldBlockSwapScannerComponent::ScanForSwaps()
 		: nullptr;
 	if (SchemaComponent == nullptr)
 	{
-		UE_LOG(LogChunkWorldBlockSwapScanner, Log, TEXT("SwapScanner SkipScan Scanner=%s Owner=%s Reason=MissingSchemaComponent"), *GetNameSafe(this), *GetNameSafe(GetOwner()));
 		return;
 	}
 
 	const int32 BlockSize = ChunkWorld->PrimLayer->BlockSize;
 	if (BlockSize <= 0)
 	{
-		UE_LOG(LogChunkWorldBlockSwapScanner, Log, TEXT("SwapScanner SkipScan Scanner=%s Owner=%s Reason=InvalidBlockSize BlockSize=%d"), *GetNameSafe(this), *GetNameSafe(GetOwner()), BlockSize);
 		return;
 	}
-
-	UE_LOG(
-		LogChunkWorldBlockSwapScanner,
-		Log,
-		TEXT("SwapScanner StartScan Scanner=%s Owner=%s Sources=%d ActiveSwaps=%d Interval=%.3f Budget=%d"),
-		*GetNameSafe(this),
-		*GetNameSafe(GetOwner()),
-		ProximitySources.Num(),
-		ActiveSwaps.Num(),
-		SwapScanInterval,
-		MaxBlocksPerScan);
 
 	int32 ProcessedBlocks = 0;
 	int32 SwapsEntered = 0;
@@ -286,14 +230,6 @@ void UChunkWorldBlockSwapScannerComponent::ScanForSwaps()
 			{
 				if (!Active->Definition.SwapActorClass.IsNull() && !Active->SpawnedActor.IsValid())
 				{
-					UE_LOG(
-						LogChunkWorldBlockSwapScanner,
-						Log,
-						TEXT("SwapScanner ForceSwapOut Scanner=%s Owner=%s Block=%s BlockType=%s Reason=SpawnedActorDestroyed"),
-						*GetNameSafe(this),
-						*GetNameSafe(GetOwner()),
-						*BlockWorldPos.ToString(),
-						*Active->BlockTypeName.ToString());
 					if (TryApplySharedBlockSwap(ChunkWorld, BlockWorldPos, Active->BlockTypeName, false))
 					{
 						ActiveSwaps.Remove(BlockWorldPos);
@@ -312,8 +248,6 @@ void UChunkWorldBlockSwapScannerComponent::ScanForSwaps()
 	}
 
 	DrawDebugActiveSwapBlocks(ChunkWorld);
-
-	LogSwapDiagnostics(TEXT("ScanForSwaps"), ProcessedBlocks, SwapsEntered, SwapsExited, &Diagnostics);
 }
 
 void UChunkWorldBlockSwapScannerComponent::GatherSourceCandidateBlocks(AChunkWorld* ChunkWorld, UChunkWorldProximityComponent* Source, TSet<FIntVector>& EvaluatedBlockPositions, int32& InOutProcessedBlocks, int32& InOutSwapsEntered, FSwapScanDiagnostics& Diagnostics)
@@ -349,15 +283,6 @@ void UChunkWorldBlockSwapScannerComponent::GatherSourceCandidateBlocks(AChunkWor
 	Diagnostics.QueryHitCount += QueryHits.Num();
 	if (QueryHits.IsEmpty())
 	{
-		UE_LOG(
-			LogChunkWorldBlockSwapScanner,
-			Verbose,
-			TEXT("SwapScanner SourceQuery Scanner=%s Owner=%s Source=%s Origin=%s Radius=%.2f QueryHits=0"),
-			*GetNameSafe(this),
-			*GetNameSafe(GetOwner()),
-			*GetNameSafe(Source),
-			*Origin.ToString(),
-			Radius);
 		return;
 	}
 
@@ -402,14 +327,6 @@ void UChunkWorldBlockSwapScannerComponent::GatherSourceCandidateBlocks(AChunkWor
 		const int32 MeshIndex = ResolvedHit.MeshIndex;
 		if (MeshIndex == EmptyMesh || MeshIndex == DefaultMesh)
 		{
-			UE_LOG(
-				LogChunkWorldBlockSwapScanner,
-				Log,
-				TEXT("SwapScanner SkipCandidate Scanner=%s Owner=%s Block=%s Reason=NotMeshBacked MeshIndex=%d"),
-				*GetNameSafe(this),
-				*GetNameSafe(GetOwner()),
-				*BlockWorldPos.ToString(),
-				MeshIndex);
 			continue;
 		}
 
@@ -475,27 +392,10 @@ void UChunkWorldBlockSwapScannerComponent::UpdateSwapScanTimer()
 	if (ShouldRunSwapScan() && !ProximitySources.IsEmpty())
 	{
 		TimerManager.SetTimer(SwapScanHandle, this, &UChunkWorldBlockSwapScannerComponent::ScanForSwaps, SwapScanInterval, true);
-		UE_LOG(
-			LogChunkWorldBlockSwapScanner,
-			Log,
-			TEXT("SwapScanner UpdateTimer Scanner=%s Owner=%s Action=Set Interval=%.3f Sources=%d ShouldRun=%d"),
-			*GetNameSafe(this),
-			*GetNameSafe(GetOwner()),
-			SwapScanInterval,
-			ProximitySources.Num(),
-			ShouldRunSwapScan() ? 1 : 0);
 		return;
 	}
 
 	TimerManager.ClearTimer(SwapScanHandle);
-	UE_LOG(
-		LogChunkWorldBlockSwapScanner,
-		Log,
-		TEXT("SwapScanner UpdateTimer Scanner=%s Owner=%s Action=Clear Sources=%d ShouldRun=%d"),
-		*GetNameSafe(this),
-		*GetNameSafe(GetOwner()),
-		ProximitySources.Num(),
-		ShouldRunSwapScan() ? 1 : 0);
 }
 
 void UChunkWorldBlockSwapScannerComponent::TrySwapInBlock(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos, const FTransform& SwapTransform, const FGameplayTag& BlockTypeName, const FBlockDefinitionBase& Definition, FSwapScanDiagnostics& Diagnostics, bool& bOutEnteredSwap)
@@ -529,16 +429,6 @@ void UChunkWorldBlockSwapScannerComponent::TrySwapInBlock(AChunkWorld* ChunkWorl
 	if (!IsWithinAnySourceSwapDistance(BlockLocation, false, MinDistance, RelevantDistance))
 	{
 		++Diagnostics.SwapInRejectedByDistance;
-		UE_LOG(
-			LogChunkWorldBlockSwapScanner,
-			Log,
-			TEXT("SwapScanner RejectSwapIn Scanner=%s Owner=%s Block=%s BlockType=%s MinDistance=%.2f SwapInDistance=%.2f"),
-			*GetNameSafe(this),
-			*GetNameSafe(GetOwner()),
-			*BlockWorldPos.ToString(),
-			*BlockTypeName.ToString(),
-			MinDistance,
-			RelevantDistance);
 		return;
 	}
 
@@ -553,16 +443,6 @@ void UChunkWorldBlockSwapScannerComponent::TrySwapInBlock(AChunkWorld* ChunkWorl
 	PendingLoad.Definition = Definition;
 	PendingLoad.SwapTransform = SwapTransform;
 	RequestSwapActorClassPreload(Definition.SwapActorClass, DefaultSwapActorWarmPoolSize, &Diagnostics);
-
-	UE_LOG(
-		LogChunkWorldBlockSwapScanner,
-		Log,
-		TEXT("SwapScanner QueueSwapActorLoad Scanner=%s Owner=%s Block=%s BlockType=%s SwapActorClass=%s"),
-		*GetNameSafe(this),
-		*GetNameSafe(GetOwner()),
-		*BlockWorldPos.ToString(),
-		*BlockTypeName.ToString(),
-		*Definition.SwapActorClass.ToString());
 }
 
 void UChunkWorldBlockSwapScannerComponent::TrySwapOutBlock(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos, const FActiveBlockSwap& Active)
@@ -591,16 +471,6 @@ void UChunkWorldBlockSwapScannerComponent::TrySwapOutBlock(AChunkWorld* ChunkWor
 	}
 
 	ActiveSwaps.Remove(BlockWorldPos);
-
-	UE_LOG(
-		LogChunkWorldBlockSwapScanner,
-		Log,
-		TEXT("SwapScanner ExitSwap Scanner=%s Owner=%s Block=%s BlockType=%s RemainingActiveSwaps=%d"),
-		*GetNameSafe(this),
-		*GetNameSafe(GetOwner()),
-		*BlockWorldPos.ToString(),
-		*Active.BlockTypeName.ToString(),
-		ActiveSwaps.Num());
 
 	FChunkWorldBlockSwapRequest Request;
 	Request.BlockWorldPos = BlockWorldPos;
@@ -632,16 +502,6 @@ bool UChunkWorldBlockSwapScannerComponent::ForceRemoveSwap(AChunkWorld* ChunkWor
 
 	(void)TryApplySharedBlockSwap(ChunkWorld, BlockWorldPos, Active.BlockTypeName, false);
 
-	UE_LOG(
-		LogChunkWorldBlockSwapScanner,
-		Log,
-		TEXT("SwapScanner ForceRemoveSwap Scanner=%s Owner=%s Block=%s BlockType=%s Reason=%s RemainingActiveSwaps=%d"),
-		*GetNameSafe(this),
-		*GetNameSafe(GetOwner()),
-		*BlockWorldPos.ToString(),
-		*Active.BlockTypeName.ToString(),
-		Reason != nullptr ? Reason : TEXT("None"),
-		ActiveSwaps.Num());
 
 	FChunkWorldBlockSwapRequest Request;
 	Request.BlockWorldPos = BlockWorldPos;
@@ -746,14 +606,6 @@ void UChunkWorldBlockSwapScannerComponent::HandlePendingSwapActorClassLoaded(FSo
 		float RelevantDistance = TNumericLimits<float>::Max();
 		if (!IsWithinAnySourceSwapDistance(BlockLocation, false, MinDistance, RelevantDistance))
 		{
-			UE_LOG(
-				LogChunkWorldBlockSwapScanner,
-				Log,
-				TEXT("SwapScanner DropPendingSwap Scanner=%s Owner=%s Block=%s BlockType=%s Reason=NoLongerRelevant"),
-				*GetNameSafe(this),
-				*GetNameSafe(GetOwner()),
-				*BlockWorldPos.ToString(),
-				*PendingBlockLoad.BlockTypeName.ToString());
 			continue;
 		}
 
@@ -862,19 +714,6 @@ bool UChunkWorldBlockSwapScannerComponent::FinalizeSwapIn(AChunkWorld* ChunkWorl
 	}
 
 	ActiveSwaps.Add(BlockWorldPos, NewActive);
-
-	UE_LOG(
-		LogChunkWorldBlockSwapScanner,
-		Log,
-		TEXT("SwapScanner EnterSwap Scanner=%s Owner=%s Block=%s BlockType=%s MinDistance=%.2f ActiveSwaps=%d SpawnedActor=%s SpawnLocation=%s"),
-		*GetNameSafe(this),
-		*GetNameSafe(GetOwner()),
-		*BlockWorldPos.ToString(),
-		*BlockTypeName.ToString(),
-		MinDistance,
-		ActiveSwaps.Num(),
-		*GetNameSafe(NewActive.SpawnedActor.Get()),
-		*SwapTransform.GetLocation().ToString());
 
 	FChunkWorldBlockSwapRequest Request;
 	Request.BlockWorldPos = BlockWorldPos;
@@ -1317,36 +1156,4 @@ int32 UChunkWorldBlockSwapScannerComponent::GetPooledSwapActorCount() const
 	}
 
 	return PooledActorCount;
-}
-
-void UChunkWorldBlockSwapScannerComponent::LogSwapDiagnostics(const TCHAR* Stage, int32 ProcessedBlocks, int32 SwapsEntered, int32 SwapsExited, const FSwapScanDiagnostics* Diagnostics) const
-{
-	UE_LOG(
-		LogChunkWorldBlockSwapScanner,
-		Log,
-		TEXT("SwapScanner Stage=%s Owner=%s Sources=%d ActiveSwaps=%d SpawnedActors=%d PooledActors=%d ProcessedBlocks=%d SwapsEntered=%d SwapsExited=%d QueryHits=%d ResolvedBlockHits=%d CandidatesInRadius=%d SchemaHits=%d SwapAuthored=%d DistanceRejected=%d AlreadyActive=%d SharedApplyFailures=%d SpawnFailures=%d PreloadRequests=%d FreshSpawns=%d PooledAcquires=%d PooledReleases=%d Interval=%.3f Budget=%d"),
-		Stage,
-		*GetNameSafe(GetOwner()),
-		ProximitySources.Num(),
-		ActiveSwaps.Num(),
-		GetSpawnedSwapActorCount(),
-		GetPooledSwapActorCount(),
-		ProcessedBlocks,
-		SwapsEntered,
-		SwapsExited,
-		Diagnostics != nullptr ? Diagnostics->QueryHitCount : INDEX_NONE,
-		Diagnostics != nullptr ? Diagnostics->ResolvedBlockHits : INDEX_NONE,
-		Diagnostics != nullptr ? Diagnostics->CandidateBlocksInRadius : INDEX_NONE,
-		Diagnostics != nullptr ? Diagnostics->SchemaHits : INDEX_NONE,
-		Diagnostics != nullptr ? Diagnostics->SwapAuthoredBlocks : INDEX_NONE,
-		Diagnostics != nullptr ? Diagnostics->SwapInRejectedByDistance : INDEX_NONE,
-		Diagnostics != nullptr ? Diagnostics->AlreadyActiveBlocks : INDEX_NONE,
-		Diagnostics != nullptr ? Diagnostics->SharedApplyFailures : INDEX_NONE,
-		Diagnostics != nullptr ? Diagnostics->SwapActorSpawnFailures : INDEX_NONE,
-		Diagnostics != nullptr ? Diagnostics->SwapActorClassPreloadRequests : INDEX_NONE,
-		Diagnostics != nullptr ? Diagnostics->FreshSwapActorSpawns : INDEX_NONE,
-		Diagnostics != nullptr ? Diagnostics->PooledSwapActorAcquires : INDEX_NONE,
-		Diagnostics != nullptr ? Diagnostics->PooledSwapActorReleases : INDEX_NONE,
-		SwapScanInterval,
-		MaxBlocksPerScan);
 }

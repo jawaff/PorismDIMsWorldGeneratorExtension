@@ -49,13 +49,6 @@ void UChunkWorldBlockSwapComponent::BeginPlay()
 	Super::BeginPlay();
 
 	bRepresentedInstanceIndexDirty = true;
-	UE_LOG(
-		LogChunkWorldBlockSwapComponent,
-		Log,
-		TEXT("BlockSwapComponent BeginPlay Owner=%s NetMode=%s IsReplicated=%d"),
-		*GetNameSafe(GetOwner()),
-		LexNetModeSafe(GetWorld()),
-		GetIsReplicated() ? 1 : 0);
 }
 
 void UChunkWorldBlockSwapComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -83,44 +76,17 @@ bool UChunkWorldBlockSwapComponent::TryApplySwapRequest(
 	AChunkWorldExtended* ChunkWorld = GetChunkWorldOwner();
 	if (ChunkWorld == nullptr || !ChunkWorld->HasAuthority())
 	{
-		UE_LOG(
-			LogChunkWorldBlockSwapComponent,
-			Log,
-			TEXT("BlockSwapComponent RejectApply Owner=%s Block=%s Entering=%d Reason=MissingAuthorityOrOwner"),
-			*GetNameSafe(GetOwner()),
-			*BlockWorldPos.ToString(),
-			bEntering ? 1 : 0);
 		return false;
 	}
 
 	if (!CanApplySwapRequest(BlockWorldPos, bEntering))
 	{
-		UE_LOG(
-			LogChunkWorldBlockSwapComponent,
-			Log,
-			TEXT("BlockSwapComponent RejectApply Owner=%s Block=%s Entering=%d Reason=CanApplySwapRequestFailed ActiveStates=%d ReplicatedItems=%d"),
-			*GetNameSafe(GetOwner()),
-			*BlockWorldPos.ToString(),
-			bEntering ? 1 : 0,
-			LocalPresentationStates.Num(),
-			ActiveSwaps.Num());
 		return false;
 	}
 
 	const bool bApplied = bEntering
 		? AddActiveSwap(BlockWorldPos, BlockTypeName, PresentationTransform)
 		: RemoveActiveSwap(BlockWorldPos);
-	UE_LOG(
-		LogChunkWorldBlockSwapComponent,
-		Log,
-		TEXT("BlockSwapComponent ApplyRequest Owner=%s Block=%s BlockType=%s Entering=%d Result=%d ActiveStates=%d ReplicatedItems=%d"),
-		*GetNameSafe(GetOwner()),
-		*BlockWorldPos.ToString(),
-			*BlockTypeName.ToString(),
-			bEntering ? 1 : 0,
-			bApplied ? 1 : 0,
-			LocalPresentationStates.Num(),
-			ActiveSwaps.Num());
 	return bApplied;
 }
 
@@ -222,6 +188,94 @@ void UChunkWorldBlockSwapComponent::QueueActiveSwapPresentationRefresh()
 		0.05f,
 		true,
 		0.0f);
+}
+
+void UChunkWorldBlockSwapComponent::PurgeStaleRepresentedMeshInstances(const FIntVector& BlockWorldPos)
+{
+	AChunkWorldExtended* ChunkWorld = GetChunkWorldOwner();
+	if (ChunkWorld == nullptr)
+	{
+		return;
+	}
+
+	const int32 MeshId = ChunkWorld->GetMeshDataByBlockWorldPos(BlockWorldPos).MeshId;
+	if (MeshId != EmptyMesh && MeshId != DefaultMesh)
+	{
+		return;
+	}
+
+	if (bRepresentedInstanceIndexDirty)
+	{
+		RebuildRepresentedInstanceIndex();
+	}
+
+	const TArray<FResolvedSwapInstance>* IndexedInstances = RepresentedInstanceIndex.Find(BlockWorldPos);
+	if (IndexedInstances == nullptr || IndexedInstances->IsEmpty())
+	{
+		return;
+	}
+
+	TMap<TWeakObjectPtr<UInstancedStaticMeshComponent>, TArray<int32>> RemoveIndicesByComponent;
+	for (const FResolvedSwapInstance& IndexedInstance : *IndexedInstances)
+	{
+		if (UInstancedStaticMeshComponent* MeshComponent = IndexedInstance.Component.Get())
+		{
+			RemoveIndicesByComponent.FindOrAdd(MeshComponent).Add(IndexedInstance.InstanceIndex);
+		}
+	}
+
+	int32 RemovedInstanceCount = 0;
+	for (TPair<TWeakObjectPtr<UInstancedStaticMeshComponent>, TArray<int32>>& RemovalEntry : RemoveIndicesByComponent)
+	{
+		UInstancedStaticMeshComponent* MeshComponent = RemovalEntry.Key.Get();
+		if (MeshComponent == nullptr)
+		{
+			continue;
+		}
+
+		TArray<int32>& RemoveIndices = RemovalEntry.Value;
+		RemoveIndices.Sort([](const int32 A, const int32 B) { return A > B; });
+
+		TArray<int32> UniqueIndices;
+		int32 LastIndex = INDEX_NONE;
+		for (const int32 RemoveIndex : RemoveIndices)
+		{
+			if (RemoveIndex == LastIndex)
+			{
+				continue;
+			}
+
+			if (RemoveIndex >= 0 && RemoveIndex < MeshComponent->GetInstanceCount())
+			{
+				UniqueIndices.Add(RemoveIndex);
+				LastIndex = RemoveIndex;
+			}
+		}
+
+		if (UniqueIndices.IsEmpty())
+		{
+			continue;
+		}
+
+		UE_LOG(
+			LogChunkWorldBlockSwapComponent,
+			Warning,
+			TEXT("Stale represented mesh purge removing Block=%s Component=%s Class=%s Owner=%s Mesh=%s RemoveCount=%d InstanceCountBefore=%d"),
+			*BlockWorldPos.ToString(),
+			*GetNameSafe(MeshComponent),
+			*GetNameSafe(MeshComponent->GetClass()),
+			*GetNameSafe(MeshComponent->GetOwner()),
+			*GetNameSafe(MeshComponent->GetStaticMesh()),
+			UniqueIndices.Num(),
+			MeshComponent->GetInstanceCount());
+		MeshComponent->RemoveInstances(UniqueIndices, true);
+		RemovedInstanceCount += UniqueIndices.Num();
+	}
+
+	if (RemovedInstanceCount > 0)
+	{
+		bRepresentedInstanceIndexDirty = true;
+	}
 }
 
 bool UChunkWorldBlockSwapComponent::CanApplySwapRequest(const FIntVector& BlockWorldPos, bool bEntering) const
@@ -371,16 +425,6 @@ bool UChunkWorldBlockSwapComponent::ParkRepresentedInstance(const FReplicatedChu
 				PresentationState.InstanceIndex);
 			continue;
 		}
-
-		UE_LOG(
-			LogChunkWorldBlockSwapComponent,
-			Log,
-			TEXT("BlockSwapComponent ParkInstance Owner=%s Block=%s MeshId=%d Index=%d ParkingLocation=%s"),
-			*GetNameSafe(GetOwner()),
-			*SwapItem.BlockWorldPos.ToString(),
-			PresentationState.MeshId,
-			PresentationState.InstanceIndex,
-			*PresentationState.ParkedTransform.GetLocation().ToString());
 	}
 
 	if (PresentationStates.IsEmpty())
@@ -397,15 +441,6 @@ bool UChunkWorldBlockSwapComponent::ParkRepresentedInstance(const FReplicatedChu
 	}
 
 	LocalPresentationStates.Add(SwapItem.BlockWorldPos, MoveTemp(PresentationStates));
-	UE_LOG(
-		LogChunkWorldBlockSwapComponent,
-		Log,
-		TEXT("BlockSwapComponent ParkComplete Owner=%s NetMode=%s Block=%s CachedStates=%d ActiveLocalStates=%d"),
-		*GetNameSafe(GetOwner()),
-		LexNetModeSafe(GetWorld()),
-		*SwapItem.BlockWorldPos.ToString(),
-		LocalPresentationStates.FindRef(SwapItem.BlockWorldPos).Num(),
-		LocalPresentationStates.Num());
 	return true;
 }
 
@@ -414,23 +449,11 @@ bool UChunkWorldBlockSwapComponent::RestoreRepresentedInstance(const FReplicated
 	TArray<FLocalSwapPresentationState> PresentationStates;
 	if (!LocalPresentationStates.RemoveAndCopyValue(SwapItem.BlockWorldPos, PresentationStates))
 	{
-		UE_LOG(
-			LogChunkWorldBlockSwapComponent,
-			Log,
-			TEXT("BlockSwapComponent SkipRestore Owner=%s Block=%s Reason=MissingLocalPresentationState"),
-			*GetNameSafe(GetOwner()),
-			*SwapItem.BlockWorldPos.ToString());
 		return false;
 	}
 
 	if (!HasRepresentedMeshAt(SwapItem.BlockWorldPos))
 	{
-		UE_LOG(
-			LogChunkWorldBlockSwapComponent,
-			Log,
-			TEXT("BlockSwapComponent SkipRestore Owner=%s Block=%s Reason=BlockNoLongerMeshBacked"),
-			*GetNameSafe(GetOwner()),
-			*SwapItem.BlockWorldPos.ToString());
 		return false;
 	}
 
@@ -462,14 +485,6 @@ bool UChunkWorldBlockSwapComponent::RestoreRepresentedInstance(const FReplicated
 		}
 
 		bRestoredAny = true;
-		UE_LOG(
-			LogChunkWorldBlockSwapComponent,
-			Log,
-			TEXT("BlockSwapComponent RestoreInstance Owner=%s Block=%s MeshId=%d Index=%d"),
-			*GetNameSafe(GetOwner()),
-			*SwapItem.BlockWorldPos.ToString(),
-			PresentationState.MeshId,
-			PresentationState.InstanceIndex);
 	}
 
 	return bRestoredAny;
@@ -557,16 +572,6 @@ void UChunkWorldBlockSwapComponent::ResolveRepresentedInstances(const FReplicate
 		OutResolvedInstances.Add(IndexedInstance);
 	}
 
-	UE_LOG(
-		LogChunkWorldBlockSwapComponent,
-		Log,
-		TEXT("BlockSwapComponent ResolveRepresentedInstances Owner=%s NetMode=%s Block=%s ExpectedMeshId=%d Candidates=%d Matched=%d"),
-		*GetNameSafe(GetOwner()),
-		LexNetModeSafe(GetWorld()),
-		*BlockWorldPos.ToString(),
-		ExpectedMeshId,
-		IndexedInstances->Num(),
-		OutResolvedInstances.Num());
 }
 
 void UChunkWorldBlockSwapComponent::RebuildRepresentedInstanceIndex() const
@@ -632,15 +637,6 @@ void UChunkWorldBlockSwapComponent::RebuildRepresentedInstanceIndex() const
 	}
 
 	bRepresentedInstanceIndexDirty = false;
-	UE_LOG(
-		LogChunkWorldBlockSwapComponent,
-		Log,
-		TEXT("BlockSwapComponent RebuildInstanceIndex Owner=%s NetMode=%s IndexedBlocks=%d IndexedInstances=%d Components=%d"),
-		*GetNameSafe(GetOwner()),
-		LexNetModeSafe(GetWorld()),
-		RepresentedInstanceIndex.Num(),
-		IndexedInstanceCount,
-		InstancedMeshComponents.Num());
 }
 
 FTransform UChunkWorldBlockSwapComponent::BuildParkingTransform(const FIntVector& BlockWorldPos, const FTransform& OriginalTransform) const
@@ -669,16 +665,6 @@ FVector UChunkWorldBlockSwapComponent::BuildParkingLocation(const FIntVector& Bl
 void UChunkWorldBlockSwapComponent::HandleReplicatedSwapAdded(const FReplicatedChunkWorldSwapItem& SwapItem)
 {
 	UpsertActiveSwap(SwapItem);
-	UE_LOG(
-		LogChunkWorldBlockSwapComponent,
-		Log,
-		TEXT("BlockSwapComponent ReplicatedSwapAdded Owner=%s NetMode=%s Block=%s MeshId=%d PresentationLocation=%s SwapActor=%s"),
-		*GetNameSafe(GetOwner()),
-		LexNetModeSafe(GetWorld()),
-		*SwapItem.BlockWorldPos.ToString(),
-		SwapItem.MeshId,
-		*SwapItem.PresentationTransform.GetLocation().ToString(),
-		*GetNameSafe(SwapItem.SwapActor.Get()));
 	(void)ApplySwapPresentationState(SwapItem, true);
 	ReconcileSwapActorPresentation(SwapItem);
 	QueueActiveSwapPresentationRefresh();
@@ -686,15 +672,6 @@ void UChunkWorldBlockSwapComponent::HandleReplicatedSwapAdded(const FReplicatedC
 
 void UChunkWorldBlockSwapComponent::HandleReplicatedSwapRemoved(const FReplicatedChunkWorldSwapItem& SwapItem)
 {
-	UE_LOG(
-		LogChunkWorldBlockSwapComponent,
-		Log,
-		TEXT("BlockSwapComponent ReplicatedSwapRemoved Owner=%s NetMode=%s Block=%s SwapActor=%s LocalStateExists=%d"),
-		*GetNameSafe(GetOwner()),
-		LexNetModeSafe(GetWorld()),
-		*SwapItem.BlockWorldPos.ToString(),
-		*GetNameSafe(SwapItem.SwapActor.Get()),
-		LocalPresentationStates.Contains(SwapItem.BlockWorldPos) ? 1 : 0);
 	if (AActor* SwapActor = SwapItem.SwapActor.Get())
 	{
 		SwapActor->SetActorHiddenInGame(true);
@@ -723,16 +700,6 @@ void UChunkWorldBlockSwapComponent::HandleReplicatedSwapRemoved(const FReplicate
 void UChunkWorldBlockSwapComponent::HandleReplicatedSwapChanged(const FReplicatedChunkWorldSwapItem& SwapItem)
 {
 	UpsertActiveSwap(SwapItem);
-	UE_LOG(
-		LogChunkWorldBlockSwapComponent,
-		Log,
-		TEXT("BlockSwapComponent ReplicatedSwapChanged Owner=%s NetMode=%s Block=%s MeshId=%d PresentationLocation=%s SwapActor=%s"),
-		*GetNameSafe(GetOwner()),
-		LexNetModeSafe(GetWorld()),
-		*SwapItem.BlockWorldPos.ToString(),
-		SwapItem.MeshId,
-		*SwapItem.PresentationTransform.GetLocation().ToString(),
-		*GetNameSafe(SwapItem.SwapActor.Get()));
 	(void)ApplySwapPresentationState(SwapItem, true);
 	ReconcileSwapActorPresentation(SwapItem);
 	QueueActiveSwapPresentationRefresh();
@@ -744,16 +711,6 @@ void UChunkWorldBlockSwapComponent::ReconcileSwapActorPresentation(const FReplic
 	AActor* SwapActor = SwapItem.SwapActor.Get();
 	if (!bHasLocalPresentationState || SwapActor == nullptr)
 	{
-		UE_LOG(
-			LogChunkWorldBlockSwapComponent,
-			Log,
-			TEXT("BlockSwapComponent ReconcileDeferred Owner=%s NetMode=%s Block=%s HasLocalState=%d SwapActor=%s PendingBefore=%d"),
-			*GetNameSafe(GetOwner()),
-			LexNetModeSafe(GetWorld()),
-			*SwapItem.BlockWorldPos.ToString(),
-			bHasLocalPresentationState ? 1 : 0,
-			*GetNameSafe(SwapActor),
-			PendingSwapActorReconcileBlocks.Num());
 		PendingSwapActorReconcileBlocks.Add(SwapItem.BlockWorldPos);
 		UpdatePendingSwapActorReconcileTimer();
 		return;
@@ -761,14 +718,6 @@ void UChunkWorldBlockSwapComponent::ReconcileSwapActorPresentation(const FReplic
 
 	SwapActor->SetActorHiddenInGame(false);
 	SwapActor->SetActorEnableCollision(true);
-	UE_LOG(
-		LogChunkWorldBlockSwapComponent,
-		Log,
-		TEXT("BlockSwapComponent ReconcileVisible Owner=%s NetMode=%s Block=%s SwapActor=%s"),
-		*GetNameSafe(GetOwner()),
-		LexNetModeSafe(GetWorld()),
-		*SwapItem.BlockWorldPos.ToString(),
-		*GetNameSafe(SwapActor));
 	PendingSwapActorReconcileBlocks.Remove(SwapItem.BlockWorldPos);
 	UpdatePendingSwapActorReconcileTimer();
 }
@@ -795,14 +744,6 @@ void UChunkWorldBlockSwapComponent::ReconcilePendingSwapActors()
 			AActor* SwapActor = SwapItem->SwapActor.Get();
 			SwapActor->SetActorHiddenInGame(false);
 			SwapActor->SetActorEnableCollision(true);
-			UE_LOG(
-				LogChunkWorldBlockSwapComponent,
-				Log,
-				TEXT("BlockSwapComponent PendingReconcileVisible Owner=%s NetMode=%s Block=%s SwapActor=%s"),
-				*GetNameSafe(GetOwner()),
-				LexNetModeSafe(GetWorld()),
-				*BlockWorldPos.ToString(),
-				*GetNameSafe(SwapActor));
 			PendingSwapActorReconcileBlocks.Remove(BlockWorldPos);
 		}
 	}
@@ -854,40 +795,16 @@ void UChunkWorldBlockSwapComponent::ProcessQueuedActiveSwapPresentationRefresh()
 
 void UChunkWorldBlockSwapComponent::HandleNetworkSwapEntered(const FReplicatedChunkWorldSwapItem& SwapItem)
 {
-	UE_LOG(
-		LogChunkWorldBlockSwapComponent,
-		Log,
-		TEXT("BlockSwapComponent NetworkSwapEntered Owner=%s NetMode=%s Block=%s SwapActor=%s"),
-		*GetNameSafe(GetOwner()),
-		LexNetModeSafe(GetWorld()),
-		*SwapItem.BlockWorldPos.ToString(),
-		*GetNameSafe(SwapItem.SwapActor.Get()));
 	HandleReplicatedSwapAdded(SwapItem);
 }
 
 void UChunkWorldBlockSwapComponent::HandleNetworkSwapChanged(const FReplicatedChunkWorldSwapItem& SwapItem)
 {
-	UE_LOG(
-		LogChunkWorldBlockSwapComponent,
-		Log,
-		TEXT("BlockSwapComponent NetworkSwapChanged Owner=%s NetMode=%s Block=%s SwapActor=%s"),
-		*GetNameSafe(GetOwner()),
-		LexNetModeSafe(GetWorld()),
-		*SwapItem.BlockWorldPos.ToString(),
-		*GetNameSafe(SwapItem.SwapActor.Get()));
 	HandleReplicatedSwapChanged(SwapItem);
 }
 
 void UChunkWorldBlockSwapComponent::HandleNetworkSwapExited(const FReplicatedChunkWorldSwapItem& SwapItem)
 {
-	UE_LOG(
-		LogChunkWorldBlockSwapComponent,
-		Log,
-		TEXT("BlockSwapComponent NetworkSwapExited Owner=%s NetMode=%s Block=%s SwapActor=%s"),
-		*GetNameSafe(GetOwner()),
-		LexNetModeSafe(GetWorld()),
-		*SwapItem.BlockWorldPos.ToString(),
-		*GetNameSafe(SwapItem.SwapActor.Get()));
 	HandleReplicatedSwapRemoved(SwapItem);
 }
 

@@ -127,7 +127,6 @@ private:
 	void DrawDebugActiveSwapBlocks(AChunkWorld* ChunkWorld) const;
 	int32 GetSpawnedSwapActorCount() const;
 	int32 GetPooledSwapActorCount() const;
-	void LogSwapDiagnostics(const TCHAR* Stage, int32 ProcessedBlocks = INDEX_NONE, int32 SwapsEntered = INDEX_NONE, int32 SwapsExited = INDEX_NONE, const FSwapScanDiagnostics* Diagnostics = nullptr) const;
 
 	TArray<TWeakObjectPtr<UChunkWorldProximityComponent>> ProximitySources;
 	TMap<FIntVector, FActiveBlockSwap> ActiveSwaps;
