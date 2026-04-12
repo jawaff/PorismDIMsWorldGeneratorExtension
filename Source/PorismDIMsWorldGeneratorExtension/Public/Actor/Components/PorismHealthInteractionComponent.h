@@ -5,7 +5,7 @@
 #include "CoreMinimal.h"
 #include "Actor/Components/PorismTraceInteractionComponent.h"
 #include "Actor/Interaction/PorismDamageTraceInteractionTypes.h"
-#include "PorismDamageTraceInteractionComponent.generated.h"
+#include "PorismHealthInteractionComponent.generated.h"
 
 class UPorismPredictedBlockStateComponent;
 
@@ -16,14 +16,14 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnChunkWorldDamageBlockCustomDataIn
 /**
  * Shared interaction component that builds on the generic trace loop with optional health-aware block payloads.
  */
-UCLASS(ClassGroup = (Porism), BlueprintType, meta = (BlueprintSpawnableComponent, DisplayName = "Porism Damage Trace Interaction Component"))
-class PORISMDIMSWORLDGENERATOREXTENSION_API UPorismDamageTraceInteractionComponent : public UPorismTraceInteractionComponent
+UCLASS(ClassGroup = (Porism), BlueprintType, meta = (BlueprintSpawnableComponent, DisplayName = "Porism Health Interaction Component"))
+class PORISMDIMSWORLDGENERATOREXTENSION_API UPorismHealthInteractionComponent : public UPorismTraceInteractionComponent
 {
 	GENERATED_BODY()
 
 public:
 	/** Creates a damage-aware interaction component that only selects blocks when they support the shared damage schema family. */
-	UPorismDamageTraceInteractionComponent();
+	UPorismHealthInteractionComponent();
 
 	/** Returns the last health-aware block interaction payload. Pair this with HasActiveDamageBlockInteraction() before treating it as current state. */
 	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld|Damage")

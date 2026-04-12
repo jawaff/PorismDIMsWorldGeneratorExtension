@@ -1,6 +1,6 @@
 // Copyright 2026 Spotted Loaf Studio
 
-#include "Actor/Components/PorismDamageTraceInteractionComponent.h"
+#include "Actor/Components/PorismHealthInteractionComponent.h"
 
 #include "Actor/Components/PorismPredictedBlockStateComponent.h"
 #include "ChunkWorld/Components/BlockTypeSchemaComponent.h"
@@ -25,33 +25,33 @@ namespace
 	}
 }
 
-UPorismDamageTraceInteractionComponent::UPorismDamageTraceInteractionComponent()
+UPorismHealthInteractionComponent::UPorismHealthInteractionComponent()
 {
 }
 
-FChunkWorldDamageBlockInteractionResult UPorismDamageTraceInteractionComponent::GetLastDamageBlockInteractionResult() const
+FChunkWorldDamageBlockInteractionResult UPorismHealthInteractionComponent::GetLastDamageBlockInteractionResult() const
 {
 	return FocusedDamageState.Payload;
 }
 
-void UPorismDamageTraceInteractionComponent::BeginPlay()
+void UPorismHealthInteractionComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
 	if (GetWorld() != nullptr && GetWorld()->GetNetMode() != NM_DedicatedServer)
 	{
-		DebugDrawDelegateHandle = UDebugDrawService::Register(TEXT("Game"), FDebugDrawDelegate::CreateUObject(this, &UPorismDamageTraceInteractionComponent::DrawDebugStats));
+		DebugDrawDelegateHandle = UDebugDrawService::Register(TEXT("Game"), FDebugDrawDelegate::CreateUObject(this, &UPorismHealthInteractionComponent::DrawDebugStats));
 	}
 
-	OnBlockInteractionStarted.AddDynamic(this, &UPorismDamageTraceInteractionComponent::HandleBlockInteractionStarted);
-	OnBlockInteractionEnded.AddDynamic(this, &UPorismDamageTraceInteractionComponent::HandleBlockInteractionEnded);
-	OnBlockInteractionUpdated.AddDynamic(this, &UPorismDamageTraceInteractionComponent::HandleBlockInteractionUpdated);
-	OnBlockCustomDataInitialized.AddDynamic(this, &UPorismDamageTraceInteractionComponent::HandleBlockCustomDataInitialized);
+	OnBlockInteractionStarted.AddDynamic(this, &UPorismHealthInteractionComponent::HandleBlockInteractionStarted);
+	OnBlockInteractionEnded.AddDynamic(this, &UPorismHealthInteractionComponent::HandleBlockInteractionEnded);
+	OnBlockInteractionUpdated.AddDynamic(this, &UPorismHealthInteractionComponent::HandleBlockInteractionUpdated);
+	OnBlockCustomDataInitialized.AddDynamic(this, &UPorismHealthInteractionComponent::HandleBlockCustomDataInitialized);
 	BindPredictedBlockStateComponent();
 	RefreshFocusedDamageState();
 }
 
-void UPorismDamageTraceInteractionComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+void UPorismHealthInteractionComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	if (DebugDrawDelegateHandle.IsValid())
 	{
@@ -75,12 +75,12 @@ void UPorismDamageTraceInteractionComponent::EndPlay(const EEndPlayReason::Type 
 	Super::EndPlay(EndPlayReason);
 }
 
-bool UPorismDamageTraceInteractionComponent::ShouldAcceptBlockInteractionResult(const FChunkWorldBlockInteractionResult& BlockResult) const
+bool UPorismHealthInteractionComponent::ShouldAcceptBlockInteractionResult(const FChunkWorldBlockInteractionResult& BlockResult) const
 {
 	return Super::ShouldAcceptBlockInteractionResult(BlockResult);
 }
 
-bool UPorismDamageTraceInteractionComponent::DidBlockInteractionResultChange(
+bool UPorismHealthInteractionComponent::DidBlockInteractionResultChange(
 	const bool bHadPreviousResult,
 	const FChunkWorldBlockInteractionResult& PreviousResult,
 	const bool bHasNewResult,
@@ -89,27 +89,27 @@ bool UPorismDamageTraceInteractionComponent::DidBlockInteractionResultChange(
 	return Super::DidBlockInteractionResultChange(bHadPreviousResult, PreviousResult, bHasNewResult, NewResult);
 }
 
-void UPorismDamageTraceInteractionComponent::HandleBlockInteractionStarted(const FChunkWorldBlockInteractionResult& Result)
+void UPorismHealthInteractionComponent::HandleBlockInteractionStarted(const FChunkWorldBlockInteractionResult& Result)
 {
 	RefreshFocusedDamageState();
 }
 
-void UPorismDamageTraceInteractionComponent::HandleBlockInteractionEnded(const FChunkWorldBlockInteractionResult& Result)
+void UPorismHealthInteractionComponent::HandleBlockInteractionEnded(const FChunkWorldBlockInteractionResult& Result)
 {
 	RefreshFocusedDamageState();
 }
 
-void UPorismDamageTraceInteractionComponent::HandleBlockInteractionUpdated(const FChunkWorldBlockInteractionResult& Result)
+void UPorismHealthInteractionComponent::HandleBlockInteractionUpdated(const FChunkWorldBlockInteractionResult& Result)
 {
 	RefreshFocusedDamageState();
 }
 
-void UPorismDamageTraceInteractionComponent::HandleBlockCustomDataInitialized(const FChunkWorldBlockInteractionResult& Result)
+void UPorismHealthInteractionComponent::HandleBlockCustomDataInitialized(const FChunkWorldBlockInteractionResult& Result)
 {
 	RefreshFocusedDamageState();
 }
 
-void UPorismDamageTraceInteractionComponent::HandleTrackedBlockStateChanged(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos)
+void UPorismHealthInteractionComponent::HandleTrackedBlockStateChanged(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos)
 {
 	const FChunkWorldBlockInteractionResult CurrentBlockResult = GetLastBlockInteractionResult();
 	const bool bHasActiveInteraction = HasActiveBlockInteraction();
@@ -128,7 +128,7 @@ void UPorismDamageTraceInteractionComponent::HandleTrackedBlockStateChanged(AChu
 	RefreshFocusedDamageState();
 }
 
-void UPorismDamageTraceInteractionComponent::RefreshFocusedDamageState()
+void UPorismHealthInteractionComponent::RefreshFocusedDamageState()
 {
 	const FFocusedDamageBlockState PreviousState = FocusedDamageState;
 	FFocusedDamageBlockState NewState;
@@ -151,12 +151,12 @@ void UPorismDamageTraceInteractionComponent::RefreshFocusedDamageState()
 	FocusedDamageState = NewState;
 }
 
-void UPorismDamageTraceInteractionComponent::ResetFocusedDamageState()
+void UPorismHealthInteractionComponent::ResetFocusedDamageState()
 {
 	FocusedDamageState = FFocusedDamageBlockState();
 }
 
-bool UPorismDamageTraceInteractionComponent::IsSameFocusedBlock(
+bool UPorismHealthInteractionComponent::IsSameFocusedBlock(
 	const FFocusedDamageBlockState& State,
 	AChunkWorld* ChunkWorld,
 	const FIntVector& BlockWorldPos) const
@@ -164,12 +164,12 @@ bool UPorismDamageTraceInteractionComponent::IsSameFocusedBlock(
 	return State.bIsActive && State.ChunkWorld.Get() == ChunkWorld && State.BlockWorldPos == BlockWorldPos;
 }
 
-bool UPorismDamageTraceInteractionComponent::HasInitializedDisplayData(const FChunkWorldDamageBlockInteractionResult& Result) const
+bool UPorismHealthInteractionComponent::HasInitializedDisplayData(const FChunkWorldDamageBlockInteractionResult& Result) const
 {
 	return Result.bHasCustomData;
 }
 
-bool UPorismDamageTraceInteractionComponent::DidDamagePayloadChange(
+bool UPorismHealthInteractionComponent::DidDamagePayloadChange(
 	const FChunkWorldDamageBlockInteractionResult& PreviousResult,
 	const FChunkWorldDamageBlockInteractionResult& NewResult) const
 {
@@ -185,7 +185,7 @@ bool UPorismDamageTraceInteractionComponent::DidDamagePayloadChange(
 		|| PreviousResult.BlockTypeName != NewResult.BlockTypeName;
 }
 
-void UPorismDamageTraceInteractionComponent::EmitDamageStateTransition(
+void UPorismHealthInteractionComponent::EmitDamageStateTransition(
 	const FFocusedDamageBlockState& PreviousState,
 	FFocusedDamageBlockState& NewState)
 {
@@ -229,15 +229,15 @@ void UPorismDamageTraceInteractionComponent::EmitDamageStateTransition(
 	}
 }
 
-void UPorismDamageTraceInteractionComponent::BindPredictedBlockStateComponent()
+void UPorismHealthInteractionComponent::BindPredictedBlockStateComponent()
 {
 	if (UPorismPredictedBlockStateComponent* PredictionComponent = GetPredictedBlockStateComponent())
 	{
-		PredictionComponent->OnTrackedBlockStateChanged().AddUObject(this, &UPorismDamageTraceInteractionComponent::HandleTrackedBlockStateChanged);
+		PredictionComponent->OnTrackedBlockStateChanged().AddUObject(this, &UPorismHealthInteractionComponent::HandleTrackedBlockStateChanged);
 	}
 }
 
-void UPorismDamageTraceInteractionComponent::UnbindPredictedBlockStateComponent()
+void UPorismHealthInteractionComponent::UnbindPredictedBlockStateComponent()
 {
 	if (UPorismPredictedBlockStateComponent* PredictionComponent = PredictedBlockStateComponent.Get())
 	{
@@ -247,7 +247,7 @@ void UPorismDamageTraceInteractionComponent::UnbindPredictedBlockStateComponent(
 	PredictedBlockStateComponent.Reset();
 }
 
-bool UPorismDamageTraceInteractionComponent::ShouldDrawDebugStatsForPlayer(const APlayerController* DebugOwner) const
+bool UPorismHealthInteractionComponent::ShouldDrawDebugStatsForPlayer(const APlayerController* DebugOwner) const
 {
 	if (!bShowDebugStats || DebugOwner == nullptr || GetOwner() == nullptr)
 	{
@@ -258,7 +258,7 @@ bool UPorismDamageTraceInteractionComponent::ShouldDrawDebugStatsForPlayer(const
 	return ControlledPawn != nullptr && (ControlledPawn == GetOwner() || ControlledPawn == GetOwner()->GetOwner());
 }
 
-void UPorismDamageTraceInteractionComponent::MaybeLogDebugStats(const FString& Snapshot)
+void UPorismHealthInteractionComponent::MaybeLogDebugStats(const FString& Snapshot)
 {
 	const UWorld* World = GetWorld();
 	if (World == nullptr || !bShowDebugStats)
@@ -278,7 +278,7 @@ void UPorismDamageTraceInteractionComponent::MaybeLogDebugStats(const FString& S
 	UE_LOG(LogPorismDamageTraceInteraction, Log, TEXT("%s"), *Snapshot);
 }
 
-void UPorismDamageTraceInteractionComponent::DrawDebugStats(UCanvas* Canvas, APlayerController* DebugOwner)
+void UPorismHealthInteractionComponent::DrawDebugStats(UCanvas* Canvas, APlayerController* DebugOwner)
 {
 	if (!ShouldDrawDebugStatsForPlayer(DebugOwner) || Canvas == nullptr)
 	{
@@ -369,7 +369,7 @@ void UPorismDamageTraceInteractionComponent::DrawDebugStats(UCanvas* Canvas, APl
 	MaybeLogDebugStats(Snapshot);
 }
 
-bool UPorismDamageTraceInteractionComponent::TryBuildDamageBlockInteractionResult(
+bool UPorismHealthInteractionComponent::TryBuildDamageBlockInteractionResult(
 	const FChunkWorldBlockInteractionResult& BlockResult,
 	FChunkWorldDamageBlockInteractionResult& OutResult) const
 {
@@ -408,14 +408,14 @@ bool UPorismDamageTraceInteractionComponent::TryBuildDamageBlockInteractionResul
 	return true;
 }
 
-UPorismPredictedBlockStateComponent* UPorismDamageTraceInteractionComponent::GetPredictedBlockStateComponent() const
+UPorismPredictedBlockStateComponent* UPorismHealthInteractionComponent::GetPredictedBlockStateComponent() const
 {
 	if (UPorismPredictedBlockStateComponent* CachedPredictedBlockStateComponent = PredictedBlockStateComponent.Get())
 	{
 		return CachedPredictedBlockStateComponent;
 	}
 
-	UPorismDamageTraceInteractionComponent* MutableThis = const_cast<UPorismDamageTraceInteractionComponent*>(this);
+	UPorismHealthInteractionComponent* MutableThis = const_cast<UPorismHealthInteractionComponent*>(this);
 	MutableThis->PredictedBlockStateComponent = GetOwner() ? GetOwner()->FindComponentByClass<UPorismPredictedBlockStateComponent>() : nullptr;
 	return MutableThis->PredictedBlockStateComponent.Get();
 }

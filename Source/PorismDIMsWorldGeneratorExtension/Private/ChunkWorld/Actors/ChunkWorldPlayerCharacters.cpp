@@ -2,7 +2,7 @@
 
 #include "ChunkWorld/Actors/ChunkWorldPlayerCharacters.h"
 
-#include "Actor/Components/PorismDamageTraceInteractionComponent.h"
+#include "Actor/Components/PorismHealthInteractionComponent.h"
 #include "Actor/Components/PorismPredictedBlockStateComponent.h"
 #include "Actor/Components/PorismTraceInteractionComponent.h"
 #include "ChunkWorld/Actors/Components/ChunkWorldProximityComponent.h"
@@ -26,7 +26,7 @@ AChunkWorldDamagePlayerCharacter::AChunkWorldDamagePlayerCharacter(const FObject
 
 	GetCapsuleComponent()->InitCapsuleSize(42.0f, 96.0f);
 
-	DamageTraceInteractionComponent = CreateDefaultSubobject<UPorismDamageTraceInteractionComponent>(TEXT("DamageTraceInteractionComponent"));
+	DamageTraceInteractionComponent = CreateDefaultSubobject<UPorismHealthInteractionComponent>(TEXT("DamageTraceInteractionComponent"));
 	PredictedBlockStateComponent = CreateDefaultSubobject<UPorismPredictedBlockStateComponent>(TEXT("PredictedBlockStateComponent"));
 	ChunkWorldProximityComponent = CreateDefaultSubobject<UChunkWorldProximityComponent>(TEXT("ChunkWorldProximityComponent"));
 }

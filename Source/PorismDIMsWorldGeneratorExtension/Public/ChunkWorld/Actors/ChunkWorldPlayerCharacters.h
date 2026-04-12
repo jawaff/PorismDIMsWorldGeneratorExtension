@@ -7,7 +7,7 @@
 #include "ChunkWorldPlayerCharacters.generated.h"
 
 class UChunkWorldProximityComponent;
-class UPorismDamageTraceInteractionComponent;
+class UPorismHealthInteractionComponent;
 class UPorismPredictedBlockStateComponent;
 class UPorismTraceInteractionComponent;
 
@@ -55,7 +55,7 @@ public:
 
 	/** Returns the damage-aware interaction component used for health-capable chunk-world targeting. */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld|Character")
-	UPorismDamageTraceInteractionComponent* GetDamageTraceInteractionComponent() const { return DamageTraceInteractionComponent; }
+	UPorismHealthInteractionComponent* GetDamageTraceInteractionComponent() const { return DamageTraceInteractionComponent; }
 
 	/** Returns the shared predicted block state component used for local block-damage prediction and reconciliation. */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld|Character")
@@ -68,7 +68,7 @@ public:
 protected:
 	/** Damage-aware interaction component used for chunk-world block targeting under the shared damage schema family. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Block|ChunkWorld|Character", meta = (AllowPrivateAccess = "true"))
-	TObjectPtr<UPorismDamageTraceInteractionComponent> DamageTraceInteractionComponent = nullptr;
+	TObjectPtr<UPorismHealthInteractionComponent> DamageTraceInteractionComponent = nullptr;
 
 	/** Shared predicted block state component used for local damage prediction and authoritative reconciliation. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Block|ChunkWorld|Character", meta = (AllowPrivateAccess = "true"))

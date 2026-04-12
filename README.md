@@ -4,6 +4,10 @@
 
 This plugin's purpose is to extend the existing [PorismDIMsWorldGenerator plugin](https://www.fab.com/listings/664e9fcc-3639-40bf-a3bd-ae9d4b5aa8ba) with useful utilities for implementing gameplay logic. The base plugin does a great job of offering the necessary tools for generating a world, but is missing useful features for actual gameplay and that's where this plugin comes in to help out.
 
+## Docs
+
+Check the Docs/ direction for more implementation details and Docs/Usage/ for helpful information on how to integrate and use this plugin.
+
 ## Features
 
 ### Block Type Schema Management
@@ -19,3 +23,19 @@ Custom data is essentially the runtime data that is stored/replicated/saved with
 #### Definition
 
 The definition is a separate structure that contains constant values that don't get stored with each block. You can look up these definitions based on the block type to get information about the block, like MaxHealth, sounds and whatever you need. The idea behind this is that you can define your definition alongside the custom data and utilize your custom definition struct for gameplay logic instead of having to manage that separately, which requires you to associate the values with the material/mesh indexes that Porism assigns to the blocks in your world definition.
+
+### Mesh/Actor Swapping Management
+
+Porism supports meshes in the world, but sometimes you need actors with more complicated logic. This plugin provides a proximity component for the pawn, which will instruct the swap components on the chunk world to swap the mesh out for an actor that you've defined for that mesh's block type definition. This occurs when a pawn with the proximity component gets close to the mesh and will affect all other connected processes via replication.
+
+### Destruction Actor Swapping Management
+
+This is separate from the Mesh/Actor Swapping Management. There is a destruction actor that can be configured in the block type definition. If the block is destroyed then this destruction actor is spawned in its place and will trigger destruction. This also is replicated, but supports a number of avenues. Sometimes destruction should be done locally and sometimes it should be replicated, but the destruction actor is spawned on each connected process via replication regardless.
+
+### Trace Based Interaction
+
+It's common to be able to look at blocks and interact with them. This plugin provides a trace based interaction component that can be used for interacting with the chunk world or other actors unrelated to the chunk world. With this you can get updates about which block the player is looking at and do various things with it. There is also a health oriented subclass that provides health information related to the block so you can update your HUD with the health of the current block.
+
+### Health Management
+
+This plugin provides built in health management for blocks via the block type custom data. This is optional based on the plugins you use and the schemas you choose for your block types. This management integrated into the interaction component to provide updates to health and is completely replicated via Porism's built in custom data replication strategy. In addition to knowing the health of a block, there is a PredictedBlockStateComponent that serves as an interface for modifying the health of a block and is designed to support prediction of health and server authoritative updates.

@@ -1,6 +1,6 @@
 // Copyright 2026 Spotted Loaf Studio
 
-#include "Actor/Components/PorismDamageTraceInteractionComponent.h"
+#include "Actor/Components/PorismHealthInteractionComponent.h"
 #include "Actor/Components/PorismPredictedBlockStateComponent.h"
 #include "Actor/Components/PorismTraceInteractionComponent.h"
 #include "ChunkWorld/Actors/ChunkWorldExtended.h"
@@ -127,7 +127,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FPorismExtensionDamageTraceInteractionDefaultStateTest::RunTest(const FString& Parameters)
 {
 	AActor* Owner = NewObject<AActor>();
-	UPorismDamageTraceInteractionComponent* DamageTraceComponent = NewObject<UPorismDamageTraceInteractionComponent>(Owner);
+	UPorismHealthInteractionComponent* DamageTraceComponent = NewObject<UPorismHealthInteractionComponent>(Owner);
 	TestNotNull(TEXT("Damage trace interaction component is created"), DamageTraceComponent);
 
 	TestFalse(TEXT("Fresh damage trace components start without an active damage block interaction"), DamageTraceComponent->HasActiveDamageBlockInteraction());
