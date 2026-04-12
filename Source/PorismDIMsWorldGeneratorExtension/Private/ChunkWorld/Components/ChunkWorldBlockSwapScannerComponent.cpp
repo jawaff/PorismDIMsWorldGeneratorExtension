@@ -32,7 +32,12 @@ namespace
 			&& ChunkWorld->IsRuning();
 	}
 
-	bool TryApplySharedBlockSwap(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos, const FGameplayTag& BlockTypeName, bool bEntering)
+	bool TryApplySharedBlockSwap(
+		AChunkWorld* ChunkWorld,
+		const FIntVector& BlockWorldPos,
+		const FGameplayTag& BlockTypeName,
+		bool bEntering,
+		const FTransform& PresentationTransform = FTransform::Identity)
 	{
 		AChunkWorldExtended* ExtendedChunkWorld = Cast<AChunkWorldExtended>(ChunkWorld);
 		if (ExtendedChunkWorld == nullptr)
@@ -41,7 +46,7 @@ namespace
 		}
 
 		UChunkWorldBlockSwapComponent* SwapComponent = ExtendedChunkWorld->GetBlockSwapComponent();
-		return SwapComponent != nullptr && SwapComponent->TryApplySwapRequest(BlockWorldPos, BlockTypeName, bEntering);
+		return SwapComponent != nullptr && SwapComponent->TryApplySwapRequest(BlockWorldPos, BlockTypeName, bEntering, PresentationTransform);
 	}
 
 	template <typename TActorArray>
@@ -774,7 +779,7 @@ bool UChunkWorldBlockSwapScannerComponent::FinalizeSwapIn(AChunkWorld* ChunkWorl
 	NewActive.Definition = Definition;
 	NewActive.SwapTransform = SwapTransform;
 
-	if (!TryApplySharedBlockSwap(ChunkWorld, BlockWorldPos, BlockTypeName, true))
+	if (!TryApplySharedBlockSwap(ChunkWorld, BlockWorldPos, BlockTypeName, true, SwapTransform))
 	{
 		if (Diagnostics != nullptr)
 		{

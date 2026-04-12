@@ -292,6 +292,7 @@ public:
 protected:
 	/** Synchronizes the geometry collection component with the current tunable asset and local offset values. */
 	virtual void OnConstruction(const FTransform& Transform) override;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	/** Applies the actual destruction behavior once any configured startup delay has elapsed. */
 	virtual void ExecuteDestructionPresentation();
@@ -373,9 +374,20 @@ protected:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Block|ChunkWorld|Destruction|Diagnostics", meta = (ToolTip = "Most recent generated diagnostics suggestion summary for this actor."))
 	FString LastDiagnosticsSuggestionSummary;
 
+	/** Shared one-shot replicated trigger payload so every process can execute the authored Chaos startup path once. */
+	UPROPERTY(ReplicatedUsing = OnRep_ReplicatedTriggerState)
+	FChunkWorldReplicatedDestructionTriggerState ReplicatedTriggerState;
+
 private:
+	/** Accepts one destruction trigger, optionally recording the replicated trigger state on the authority first. */
+	void AcceptDestructionTrigger(const FChunkWorldBlockDestructionRequest& Request, bool bRecordReplicatedTriggerState);
+
 	/** Updates the geometry collection component from the current asset and local offset tuning. */
 	void RefreshGeometryCollectionPresentation();
+
+	/** Replays the authoritative trigger request locally once the replicated trigger state arrives. */
+	UFUNCTION()
+	void OnRep_ReplicatedTriggerState();
 
 	/** Executes the delayed destruction callback after the actor has already stored its request. */
 	UFUNCTION()

@@ -25,7 +25,7 @@ public:
 	/** Creates a lightweight destruction actor with a shared scene root and timed self-cleanup behavior. */
 	AChunkWorldTimedCleanupDestructionActor();
 
-	/** Starts the timed cleanup lifecycle for one block-destruction presentation request. */
+	/** Framework-owned trigger entry point for one block-destruction presentation request; Blueprint overrides must call parent. */
 	virtual void TriggerBlockDestruction_Implementation(const FChunkWorldBlockDestructionRequest& Request) override;
 
 	/** Returns the most recent destruction request accepted by this actor. */
@@ -33,7 +33,9 @@ public:
 	const FChunkWorldBlockDestructionRequest& GetLastDestructionRequest() const { return LastDestructionRequest; }
 
 protected:
-	/** Allows subclasses or Blueprints to react after the request is accepted and the actor transform is updated. */
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
+	/** Local per-process presentation hook that fires after the request is accepted and the actor transform is updated. */
 	UFUNCTION(BlueprintImplementableEvent, Category = "Block|ChunkWorld|Destruction")
 	void ReceiveDestructionTriggered(const FChunkWorldBlockDestructionRequest& Request);
 
@@ -52,4 +54,16 @@ protected:
 	/** True once the actor has already accepted its one destruction request. */
 	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Destruction")
 	bool bHasTriggeredDestruction = false;
+
+private:
+	/** Accepts one destruction trigger, optionally recording the replicated trigger state on the authority first. */
+	void AcceptDestructionTrigger(const FChunkWorldBlockDestructionRequest& Request, bool bRecordReplicatedTriggerState);
+
+	/** Replays the authoritative trigger request locally once the replicated trigger state arrives for replicated-actor delivery. */
+	UFUNCTION()
+	void OnRep_ReplicatedTriggerState();
+
+	/** Shared one-shot replicated trigger payload so replicated actor instances can run the same local presentation start path once. */
+	UPROPERTY(ReplicatedUsing = OnRep_ReplicatedTriggerState)
+	FChunkWorldReplicatedDestructionTriggerState ReplicatedTriggerState;
 };

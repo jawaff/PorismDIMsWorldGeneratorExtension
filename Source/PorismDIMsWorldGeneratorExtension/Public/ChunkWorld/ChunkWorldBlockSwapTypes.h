@@ -4,11 +4,9 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
-#include "Net/Serialization/FastArraySerializer.h"
 #include "ChunkWorldBlockSwapTypes.generated.h"
 
 class AActor;
-class UChunkWorldBlockSwapComponent;
 
 /** Generic swap request payload emitted when a block enters or leaves actor presentation. */
 USTRUCT(BlueprintType)
@@ -37,7 +35,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnChunkWorldBlockSwapRequest, const
 
 /** One replicated active swap entry for a currently parked voxel and its actor presentation. */
 USTRUCT()
-struct PORISMDIMSWORLDGENERATOREXTENSION_API FReplicatedChunkWorldSwapItem : public FFastArraySerializerItem
+struct PORISMDIMSWORLDGENERATOREXTENSION_API FReplicatedChunkWorldSwapItem
 {
 	GENERATED_BODY()
 
@@ -49,43 +47,15 @@ struct PORISMDIMSWORLDGENERATOREXTENSION_API FReplicatedChunkWorldSwapItem : pub
 	UPROPERTY()
 	FGameplayTag BlockTypeName;
 
+	/** Authoritative mesh id observed when the block first entered swap presentation. */
+	UPROPERTY()
+	int32 MeshId = INDEX_NONE;
+
+	/** Presentation transform resolved by the server when the block entered swap presentation. */
+	UPROPERTY()
+	FTransform PresentationTransform = FTransform::Identity;
+
 	/** Replicated actor currently presenting this parked voxel when the actor channel is available. */
 	UPROPERTY()
 	TObjectPtr<AActor> SwapActor = nullptr;
-};
-
-/** Replicated active swap array that forwards add/change/remove events into the owning swap component. */
-USTRUCT()
-struct PORISMDIMSWORLDGENERATOREXTENSION_API FReplicatedChunkWorldSwapArray : public FFastArraySerializer
-{
-	GENERATED_BODY()
-
-	/** Performs fast-array delta replication for the active swap list. */
-	bool NetDeltaSerialize(FNetDeltaSerializeInfo& DeltaParms);
-
-	void PreReplicatedRemove(const TArrayView<int32> RemovedIndices, int32 FinalSize);
-	void PostReplicatedAdd(const TArrayView<int32> AddedIndices, int32 FinalSize);
-	void PostReplicatedChange(const TArrayView<int32> ChangedIndices, int32 FinalSize);
-
-	/** Finds the current array item for the supplied block position. */
-	FReplicatedChunkWorldSwapItem* FindByBlockWorldPos(const FIntVector& BlockWorldPos);
-
-	/** Const lookup for the current array item for the supplied block position. */
-	const FReplicatedChunkWorldSwapItem* FindByBlockWorldPos(const FIntVector& BlockWorldPos) const;
-
-	/** Active authoritative swap entries. */
-	UPROPERTY()
-	TArray<FReplicatedChunkWorldSwapItem> Items;
-
-	/** Runtime back-pointer used by client replication callbacks. */
-	TObjectPtr<UChunkWorldBlockSwapComponent> Owner = nullptr;
-};
-
-template <>
-struct TStructOpsTypeTraits<FReplicatedChunkWorldSwapArray> : public TStructOpsTypeTraitsBase2<FReplicatedChunkWorldSwapArray>
-{
-	enum
-	{
-		WithNetDeltaSerializer = true,
-	};
 };

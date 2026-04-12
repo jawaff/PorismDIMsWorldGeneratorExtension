@@ -8,6 +8,7 @@
 #include "GeometryCollection/GeometryCollectionComponent.h"
 #include "GeometryCollection/GeometryCollectionObject.h"
 #include "Misc/StringBuilder.h"
+#include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogChunkWorldChaosDestructionPresentation, Log, All);
@@ -23,6 +24,7 @@ AChunkWorldChaosDestructionPresentationActor::AChunkWorldChaosDestructionPresent
 
 	GeometryCollectionComponent = CreateDefaultSubobject<UGeometryCollectionComponent>(TEXT("GeometryCollectionComponent"));
 	GeometryCollectionComponent->SetupAttachment(DestructionRoot);
+	GeometryCollectionComponent->SetIsReplicated(false);
 	GeometryCollectionComponent->SetMobility(EComponentMobility::Movable);
 	GeometryCollectionComponent->SetSimulatePhysics(true);
 	GeometryCollectionComponent->SetEnableGravity(true);
@@ -33,6 +35,7 @@ AChunkWorldChaosDestructionPresentationActor::AChunkWorldChaosDestructionPresent
 
 	FieldSystemComponent = CreateDefaultSubobject<UFieldSystemComponent>(TEXT("FieldSystemComponent"));
 	FieldSystemComponent->SetupAttachment(DestructionRoot);
+	FieldSystemComponent->SetIsReplicated(false);
 
 	InitialLifeSpan = 0.0f;
 }
@@ -44,7 +47,19 @@ void AChunkWorldChaosDestructionPresentationActor::OnConstruction(const FTransfo
 	RefreshGeometryCollectionPresentation();
 }
 
+void AChunkWorldChaosDestructionPresentationActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	DOREPLIFETIME(AChunkWorldChaosDestructionPresentationActor, ReplicatedTriggerState);
+}
+
 void AChunkWorldChaosDestructionPresentationActor::TriggerBlockDestruction_Implementation(const FChunkWorldBlockDestructionRequest& Request)
+{
+	AcceptDestructionTrigger(Request, HasAuthority());
+}
+
+void AChunkWorldChaosDestructionPresentationActor::AcceptDestructionTrigger(const FChunkWorldBlockDestructionRequest& Request, bool bRecordReplicatedTriggerState)
 {
 	if (bHasTriggeredDestruction)
 	{
@@ -53,6 +68,13 @@ void AChunkWorldChaosDestructionPresentationActor::TriggerBlockDestruction_Imple
 
 	bHasTriggeredDestruction = true;
 	LastDestructionRequest = Request;
+
+	if (bRecordReplicatedTriggerState && HasAuthority())
+	{
+		ReplicatedTriggerState.Request = Request;
+		++ReplicatedTriggerState.TriggerSerial;
+		ForceNetUpdate();
+	}
 
 	SetActorTransform(Request.SpawnTransform);
 	RefreshGeometryCollectionPresentation();
@@ -80,6 +102,16 @@ void AChunkWorldChaosDestructionPresentationActor::TriggerBlockDestruction_Imple
 	}
 
 	ExecuteDestructionPresentation();
+}
+
+void AChunkWorldChaosDestructionPresentationActor::OnRep_ReplicatedTriggerState()
+{
+	if (ReplicatedTriggerState.TriggerSerial <= 0)
+	{
+		return;
+	}
+
+	AcceptDestructionTrigger(ReplicatedTriggerState.Request, false);
 }
 
 void AChunkWorldChaosDestructionPresentationActor::ExecuteDestructionPresentation()

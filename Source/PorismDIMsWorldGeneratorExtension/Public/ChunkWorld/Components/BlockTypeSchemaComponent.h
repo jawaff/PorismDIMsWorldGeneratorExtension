@@ -114,6 +114,16 @@ public:
 	}
 
 	/**
+	 * Resolves the authored block definition directly from already-resolved runtime material and mesh indexes.
+	 */
+	bool GetBlockDefinitionForRepresentationIndexes(int32 MaterialIndex, int32 MeshIndex, FGameplayTag& OutBlockTypeName, FInstancedStruct& OutDefinition) const;
+
+	/**
+	 * Initializes block custom data using already-resolved runtime material and mesh indexes for schema selection.
+	 */
+	bool InitializeBlockCustomDataForRepresentationIndexes(const FIntVector& BlockWorldPos, int32 MaterialIndex, int32 MeshIndex);
+
+	/**
 	 * Initializes the block's custom data at the supplied world position when the runtime marker slot is still empty.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld")
@@ -130,6 +140,11 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld")
 	bool GetBlockCustomDataForBlockWorldPos(const FIntVector& BlockWorldPos, FGameplayTag& OutBlockTypeName, FInstancedStruct& OutCustomData) const;
+
+	/**
+	 * Reconstructs authored custom data using already-resolved runtime material and mesh indexes for schema selection.
+	 */
+	bool GetBlockCustomDataForRepresentationIndexes(const FIntVector& BlockWorldPos, int32 MaterialIndex, int32 MeshIndex, FGameplayTag& OutBlockTypeName, FInstancedStruct& OutCustomData) const;
 
 	/**
 	 * Writes one authored custom-data payload back into runtime slots for the supplied block world position.
@@ -245,10 +260,22 @@ private:
 	TMap<int32, FInstancedStruct> MaterialDefinitionLookup;
 
 	/**
+	 * Startup-built lookup from material index to authored block type tag.
+	 */
+	UPROPERTY(Transient)
+	TMap<int32, FGameplayTag> MaterialBlockTypeLookup;
+
+	/**
 	 * Startup-built lookup from mesh index to resolved block definition payload.
 	 */
 	UPROPERTY(Transient)
 	TMap<int32, FInstancedStruct> MeshDefinitionLookup;
+
+	/**
+	 * Startup-built lookup from mesh index to authored block type tag.
+	 */
+	UPROPERTY(Transient)
+	TMap<int32, FGameplayTag> MeshBlockTypeLookup;
 
 	/**
 	 * True after the startup lookup tables have been built successfully.

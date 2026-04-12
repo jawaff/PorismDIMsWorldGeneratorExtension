@@ -40,6 +40,23 @@ struct PORISMDIMSWORLDGENERATOREXTENSION_API FChunkWorldBlockDestructionRequest
 };
 
 /**
+ * Replicated one-shot destruction trigger state so each net instance can execute the same local presentation setup once.
+ */
+USTRUCT()
+struct PORISMDIMSWORLDGENERATOREXTENSION_API FChunkWorldReplicatedDestructionTriggerState
+{
+	GENERATED_BODY()
+
+	/** Monotonic trigger serial used so initial replication and later replays both share one idempotent entry point. */
+	UPROPERTY()
+	int32 TriggerSerial = 0;
+
+	/** Destruction request payload accepted on the authority before local presentation begins. */
+	UPROPERTY()
+	FChunkWorldBlockDestructionRequest Request;
+};
+
+/**
  * Optional destruction trigger contract for authored destruction presentation actors.
  */
 UINTERFACE(BlueprintType)
@@ -54,7 +71,9 @@ class PORISMDIMSWORLDGENERATOREXTENSION_API IChunkWorldDestructionActorInterface
 
 public:
 	/**
-	 * Starts one authored destruction presentation for a block that was just removed.
+	 * Framework-owned entry point that starts one authored destruction presentation for a block that was just removed.
+	 * Override this only when the actor needs to change authoritative trigger handling and always call the parent/base implementation.
+	 * Blueprint-authored local presentation effects should live in the actor-specific local hook instead of replacing this interface entry point.
 	 */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Block|ChunkWorld|Destruction")
 	void TriggerBlockDestruction(const FChunkWorldBlockDestructionRequest& Request);

@@ -14,6 +14,26 @@ DEFINE_LOG_CATEGORY_STATIC(LogBlockTypeSchemaComponent, Log, All);
 namespace
 {
 	constexpr int32 InitializedCustomDataMarkerValue = 1;
+
+	/** Reads one block's current representation using the same mesh path as runtime hit resolution. */
+	void GetCurrentBlockRepresentationIndexes(AChunkWorldBase* ChunkWorld, const FIntVector& BlockWorldPos, int32& OutMaterialIndex, int32& OutMeshIndex)
+	{
+		OutMaterialIndex = EmptyMaterial;
+		OutMeshIndex = EmptyMesh;
+		if (ChunkWorld == nullptr)
+		{
+			return;
+		}
+
+		OutMaterialIndex = ChunkWorld->GetBlockValueByBlockWorldPos(BlockWorldPos, ERessourceType::MaterialIndex);
+		if (AChunkWorld* TypedChunkWorld = Cast<AChunkWorld>(ChunkWorld))
+		{
+			OutMeshIndex = TypedChunkWorld->GetMeshDataByBlockWorldPos(BlockWorldPos).MeshId;
+			return;
+		}
+
+		OutMeshIndex = ChunkWorld->GetBlockValueByBlockWorldPos(BlockWorldPos, ERessourceType::MeshIndex);
+	}
 }
 
 UBlockTypeSchemaComponent::UBlockTypeSchemaComponent()
@@ -221,8 +241,26 @@ bool UBlockTypeSchemaComponent::GetBlockCustomDataForBlockWorldPos(const FIntVec
 		return false;
 	}
 
-	const int32 MaterialIndex = ChunkWorld->GetBlockValueByBlockWorldPos(BlockWorldPos, ERessourceType::MaterialIndex);
-	const int32 MeshIndex = ChunkWorld->GetBlockValueByBlockWorldPos(BlockWorldPos, ERessourceType::MeshIndex);
+	int32 MaterialIndex = EmptyMaterial;
+	int32 MeshIndex = EmptyMesh;
+	GetCurrentBlockRepresentationIndexes(ChunkWorld, BlockWorldPos, MaterialIndex, MeshIndex);
+	return GetBlockCustomDataForRepresentationIndexes(BlockWorldPos, MaterialIndex, MeshIndex, OutBlockTypeName, OutCustomData);
+}
+
+bool UBlockTypeSchemaComponent::GetBlockCustomDataForRepresentationIndexes(
+	const FIntVector& BlockWorldPos,
+	int32 MaterialIndex,
+	int32 MeshIndex,
+	FGameplayTag& OutBlockTypeName,
+	FInstancedStruct& OutCustomData) const
+{
+	FGameplayTag ResolvedBlockTypeName;
+	FInstancedStruct DefinitionPayload;
+	if (!GetBlockDefinitionForRepresentationIndexes(MaterialIndex, MeshIndex, ResolvedBlockTypeName, DefinitionPayload))
+	{
+		return false;
+	}
+
 	const FBlockTypeSchema* BlockType = FindBlockTypeSchemaForIndexes(MaterialIndex, MeshIndex);
 	if (BlockType == nullptr || !BlockType->CustomData.IsValid())
 	{
@@ -237,7 +275,7 @@ bool UBlockTypeSchemaComponent::GetBlockCustomDataForBlockWorldPos(const FIntVec
 		return false;
 	}
 
-	OutBlockTypeName = BlockType->BlockTypeName;
+	OutBlockTypeName = ResolvedBlockTypeName;
 
 	const UScriptStruct* StructType = BlockType->CustomData.GetScriptStruct();
 	const FBlockCustomDataLayout* Layout = GetOrBuildBlockCustomDataLayout(StructType);
@@ -318,17 +356,60 @@ bool UBlockTypeSchemaComponent::GetBlockDefinitionForBlockWorldPos(const FIntVec
 		return false;
 	}
 
-	const int32 MaterialIndex = ChunkWorld->GetBlockValueByBlockWorldPos(BlockWorldPos, ERessourceType::MaterialIndex);
-	const int32 MeshIndex = ChunkWorld->GetBlockValueByBlockWorldPos(BlockWorldPos, ERessourceType::MeshIndex);
+	int32 MaterialIndex = EmptyMaterial;
+	int32 MeshIndex = EmptyMesh;
+	GetCurrentBlockRepresentationIndexes(ChunkWorld, BlockWorldPos, MaterialIndex, MeshIndex);
+	return GetBlockDefinitionForRepresentationIndexes(MaterialIndex, MeshIndex, OutBlockTypeName, OutDefinition);
+}
+
+bool UBlockTypeSchemaComponent::GetBlockDefinitionForRepresentationIndexes(int32 MaterialIndex, int32 MeshIndex, FGameplayTag& OutBlockTypeName, FInstancedStruct& OutDefinition) const
+{
+	OutBlockTypeName = FGameplayTag();
+	OutDefinition.Reset();
+
+	if (!bBlockDefinitionLookupReady)
+	{
+		UE_LOG(LogBlockTypeSchemaComponent, Warning, TEXT("Cannot reconstruct block definition on %s because the lookup maps are not ready."), *GetNameSafe(GetOwner()));
+		return false;
+	}
+
+	auto ResolveLookup = [](
+		const TMap<int32, FGameplayTag>& BlockTypeLookup,
+		const TMap<int32, FInstancedStruct>& DefinitionLookup,
+		int32 RepresentationIndex,
+		FGameplayTag& OutResolvedBlockTypeName,
+		FInstancedStruct& OutResolvedDefinition) -> bool
+	{
+		const FGameplayTag* FoundBlockTypeName = BlockTypeLookup.Find(RepresentationIndex);
+		const FInstancedStruct* FoundDefinition = DefinitionLookup.Find(RepresentationIndex);
+		if (FoundBlockTypeName == nullptr || !FoundBlockTypeName->IsValid() || FoundDefinition == nullptr || !FoundDefinition->IsValid())
+		{
+			return false;
+		}
+
+		OutResolvedBlockTypeName = *FoundBlockTypeName;
+		OutResolvedDefinition = *FoundDefinition;
+		return true;
+	};
+
+	if (MeshIndex != EmptyMesh && ResolveLookup(MeshBlockTypeLookup, MeshDefinitionLookup, MeshIndex, OutBlockTypeName, OutDefinition))
+	{
+		return true;
+	}
+
+	if (MaterialIndex != EmptyMaterial && ResolveLookup(MaterialBlockTypeLookup, MaterialDefinitionLookup, MaterialIndex, OutBlockTypeName, OutDefinition))
+	{
+		return true;
+	}
+
 	const FBlockTypeSchema* BlockType = FindBlockTypeSchemaForIndexes(MaterialIndex, MeshIndex);
-	if (BlockType == nullptr || !BlockType->Definition.IsValid())
+	if (BlockType == nullptr || !BlockType->BlockTypeName.IsValid() || !BlockType->Definition.IsValid())
 	{
 		UE_LOG(
 			LogBlockTypeSchemaComponent,
 			Warning,
-			TEXT("Cannot reconstruct block definition on %s at %s because no valid block type schema was found for material index %d and mesh index %d."),
+			TEXT("Cannot reconstruct block definition on %s because no valid block type schema was found for material index %d and mesh index %d."),
 			*GetNameSafe(GetOwner()),
-			*BlockWorldPos.ToString(),
 			MaterialIndex,
 			MeshIndex);
 		return false;
@@ -433,8 +514,20 @@ bool UBlockTypeSchemaComponent::InitializeBlockCustomData(const FIntVector& Bloc
 		return false;
 	}
 
-	const int32 MaterialIndex = ChunkWorld->GetBlockValueByBlockWorldPos(BlockWorldPos, ERessourceType::MaterialIndex);
-	const int32 MeshIndex = ChunkWorld->GetBlockValueByBlockWorldPos(BlockWorldPos, ERessourceType::MeshIndex);
+	int32 MaterialIndex = EmptyMaterial;
+	int32 MeshIndex = EmptyMesh;
+	GetCurrentBlockRepresentationIndexes(ChunkWorld, BlockWorldPos, MaterialIndex, MeshIndex);
+	return InitializeBlockCustomDataForRepresentationIndexes(BlockWorldPos, MaterialIndex, MeshIndex);
+}
+
+bool UBlockTypeSchemaComponent::InitializeBlockCustomDataForRepresentationIndexes(const FIntVector& BlockWorldPos, int32 MaterialIndex, int32 MeshIndex)
+{
+	AChunkWorldBase* ChunkWorld = Cast<AChunkWorldBase>(GetOwner());
+	if (ChunkWorld == nullptr)
+	{
+		return false;
+	}
+
 	const FBlockTypeSchema* BlockType = FindBlockTypeSchemaForIndexes(MaterialIndex, MeshIndex);
 	if (BlockType == nullptr || !BlockType->CustomData.IsValid())
 	{
@@ -487,8 +580,9 @@ bool UBlockTypeSchemaComponent::IsBlockCustomDataInitialized(const FIntVector& B
 		return false;
 	}
 
-	const int32 MaterialIndex = ChunkWorld->GetBlockValueByBlockWorldPos(BlockWorldPos, ERessourceType::MaterialIndex);
-	const int32 MeshIndex = ChunkWorld->GetBlockValueByBlockWorldPos(BlockWorldPos, ERessourceType::MeshIndex);
+	int32 MaterialIndex = EmptyMaterial;
+	int32 MeshIndex = EmptyMesh;
+	GetCurrentBlockRepresentationIndexes(ChunkWorld, BlockWorldPos, MaterialIndex, MeshIndex);
 	const FBlockTypeSchema* BlockType = FindBlockTypeSchemaForIndexes(MaterialIndex, MeshIndex);
 	if (BlockType == nullptr || !BlockType->CustomData.IsValid())
 	{
@@ -588,15 +682,25 @@ void UBlockTypeSchemaComponent::RebuildBlockDefinitionLookupMaps()
 				UE_LOG(LogBlockTypeSchemaComponent, Warning, TEXT("Duplicate material index %d while building block definition lookup maps on %s."), MaterialIndex, *GetNameSafe(GetOwner()));
 			}
 			MaterialDefinitionLookup.Add(MaterialIndex, BlockType.Definition);
+			MaterialBlockTypeLookup.Add(MaterialIndex, BlockType.BlockTypeName);
 		}
 
 		if (MeshIndex != EmptyMesh)
 		{
 			if (MeshDefinitionLookup.Contains(MeshIndex))
 			{
-				UE_LOG(LogBlockTypeSchemaComponent, Warning, TEXT("Duplicate mesh index %d while building block definition lookup maps on %s."), MeshIndex, *GetNameSafe(GetOwner()));
+				const FGameplayTag* ExistingTag = MeshBlockTypeLookup.Find(MeshIndex);
+				UE_LOG(
+					LogBlockTypeSchemaComponent,
+					Warning,
+					TEXT("Duplicate mesh index %d while building block definition lookup maps on %s. ExistingBlockTypeName=%s NewBlockTypeName=%s"),
+					MeshIndex,
+					*GetNameSafe(GetOwner()),
+					ExistingTag != nullptr && ExistingTag->IsValid() ? *ExistingTag->ToString() : TEXT("Invalid"),
+					BlockType.BlockTypeName.IsValid() ? *BlockType.BlockTypeName.ToString() : TEXT("Invalid"));
 			}
 			MeshDefinitionLookup.Add(MeshIndex, BlockType.Definition);
+			MeshBlockTypeLookup.Add(MeshIndex, BlockType.BlockTypeName);
 		}
 	}
 
@@ -616,7 +720,9 @@ void UBlockTypeSchemaComponent::RebuildBlockDefinitionLookupMaps()
 void UBlockTypeSchemaComponent::ClearBlockDefinitionLookupMaps()
 {
 	MaterialDefinitionLookup.Reset();
+	MaterialBlockTypeLookup.Reset();
 	MeshDefinitionLookup.Reset();
+	MeshBlockTypeLookup.Reset();
 	bBlockDefinitionLookupReady = false;
 }
 

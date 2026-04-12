@@ -193,37 +193,6 @@ void UPorismTraceInteractionComponent::DrawDebugBlockLookupCube(const AChunkWorl
 	DrawDebugBox(World, CubeCenter, FVector(HalfExtent), Color, false, DebugDrawDuration, 0, DebugDrawThickness);
 }
 
-void UPorismTraceInteractionComponent::LogBlockLookupDiagnostic(const TCHAR* Stage, const FHitResult* Hit, const FIntVector* BlockWorldPos, const TCHAR* Extra) const
-{
-	if (!bLogBlockLookupDiagnostics)
-	{
-		return;
-	}
-
-	const FString HitActorName = Hit ? GetNameSafe(Hit->GetActor()) : TEXT("None");
-	const FString HitComponentName = Hit ? GetNameSafe(Hit->GetComponent()) : TEXT("None");
-	const FString ImpactPointString = Hit ? Hit->ImpactPoint.ToString() : TEXT("None");
-	const FString TraceStartString = Hit ? Hit->TraceStart.ToString() : TEXT("None");
-	const FString BlockPosString = BlockWorldPos ? BlockWorldPos->ToString() : TEXT("None");
-	const int32 HitItem = Hit ? Hit->Item : INDEX_NONE;
-	const int32 FaceIndex = Hit ? Hit->FaceIndex : INDEX_NONE;
-
-	UE_LOG(
-		LogPorismTraceInteraction,
-		Warning,
-		TEXT("BlockLookupDiagnostic Stage=%s Owner=%s HitActor=%s HitComponent=%s ImpactPoint=%s TraceStart=%s HitItem=%d FaceIndex=%d BlockWorldPos=%s %s"),
-		Stage,
-		*GetNameSafe(GetOwner()),
-		*HitActorName,
-		*HitComponentName,
-		*ImpactPointString,
-		*TraceStartString,
-		HitItem,
-		FaceIndex,
-		*BlockPosString,
-		Extra ? Extra : TEXT(""));
-}
-
 void UPorismTraceInteractionComponent::PerformTrace()
 {
 	if (!ShouldRunTrace())
@@ -309,7 +278,9 @@ void UPorismTraceInteractionComponent::PerformTrace()
 		NewResult = ActorResult;
 	}
 
-	if (ShouldAcceptBlockInteractionResult(BlockResult) && IsBlockResultCloser(TraceStart, BlockResult, NewResult))
+	const bool bBlockAccepted = ShouldAcceptBlockInteractionResult(BlockResult);
+	const bool bBlockWon = bBlockAccepted && IsBlockResultCloser(TraceStart, BlockResult, NewResult);
+	if (bBlockWon)
 	{
 		NewResult = FPorismTraceInteractionResult();
 		NewResult.bHasHit = true;
@@ -318,7 +289,6 @@ void UPorismTraceInteractionComponent::PerformTrace()
 		NewBlockResult = BlockResult;
 		bHasNewBlockResult = true;
 	}
-
 	const bool bChanged = LastTraceResult.TargetType != NewResult.TargetType
 		|| LastTraceResult.InteractableActor != NewResult.InteractableActor
 		|| LastTraceResult.bHasHit != NewResult.bHasHit;
@@ -391,11 +361,6 @@ bool UPorismTraceInteractionComponent::TryBuildBlockResult(const FVector& TraceD
 		{
 			const FIntVector ApproximateBlockWorldPos = ApproximateChunkWorld->UEWorldPosToBlockWorldPos(Hit.ImpactPoint);
 			DrawDebugBlockLookupCube(ApproximateChunkWorld, ApproximateBlockWorldPos, FColor::Red);
-			LogBlockLookupDiagnostic(TEXT("ResolveBlockHitFailed"), &Hit, &ApproximateBlockWorldPos);
-		}
-		else
-		{
-			LogBlockLookupDiagnostic(TEXT("ResolveBlockHitFailed"), &Hit, nullptr);
 		}
 		return false;
 	}
@@ -405,7 +370,6 @@ bool UPorismTraceInteractionComponent::TryBuildBlockResult(const FVector& TraceD
 	if (!UChunkWorldBlockHitBlueprintLibrary::TryGetBlockDefinitionForResolvedBlockHit(ResolvedHit, BlockTypeName, Definition) || !BlockTypeName.IsValid())
 	{
 		DrawDebugBlockLookupCube(ResolvedHit.ChunkWorld, ResolvedHit.BlockWorldPos, FColor::Red);
-		LogBlockLookupDiagnostic(TEXT("ResolveBlockTypeFailed"), &Hit, &ResolvedHit.BlockWorldPos);
 		return false;
 	}
 
@@ -415,17 +379,6 @@ bool UPorismTraceInteractionComponent::TryBuildBlockResult(const FVector& TraceD
 	InOutResult.BlockTypeName = BlockTypeName;
 
 	DrawDebugBlockLookupCube(ResolvedHit.ChunkWorld, ResolvedHit.BlockWorldPos, FColor::Green);
-	LogBlockLookupDiagnostic(
-		TEXT("BlockLookupSuccess"),
-		&Hit,
-		&ResolvedHit.BlockWorldPos,
-		*FString::Printf(
-			TEXT("BlockTypeName=%s ResolveSource=%d MaterialIndex=%d MeshIndex=%d RepresentativeWorldPos=%s"),
-			*BlockTypeName.ToString(),
-			static_cast<int32>(ResolvedHit.ResolveSource),
-			ResolvedHit.MaterialIndex,
-			ResolvedHit.MeshIndex,
-			*ResolvedHit.RepresentativeWorldPos.ToString()));
 	return true;
 }
 

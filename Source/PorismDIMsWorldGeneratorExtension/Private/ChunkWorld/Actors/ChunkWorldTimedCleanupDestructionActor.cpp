@@ -3,6 +3,7 @@
 #include "ChunkWorld/Actors/ChunkWorldTimedCleanupDestructionActor.h"
 
 #include "Components/SceneComponent.h"
+#include "Net/UnrealNetwork.h"
 
 AChunkWorldTimedCleanupDestructionActor::AChunkWorldTimedCleanupDestructionActor()
 {
@@ -16,7 +17,19 @@ AChunkWorldTimedCleanupDestructionActor::AChunkWorldTimedCleanupDestructionActor
 	InitialLifeSpan = 0.0f;
 }
 
+void AChunkWorldTimedCleanupDestructionActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	DOREPLIFETIME(AChunkWorldTimedCleanupDestructionActor, ReplicatedTriggerState);
+}
+
 void AChunkWorldTimedCleanupDestructionActor::TriggerBlockDestruction_Implementation(const FChunkWorldBlockDestructionRequest& Request)
+{
+	AcceptDestructionTrigger(Request, HasAuthority());
+}
+
+void AChunkWorldTimedCleanupDestructionActor::AcceptDestructionTrigger(const FChunkWorldBlockDestructionRequest& Request, bool bRecordReplicatedTriggerState)
 {
 	if (bHasTriggeredDestruction)
 	{
@@ -25,6 +38,13 @@ void AChunkWorldTimedCleanupDestructionActor::TriggerBlockDestruction_Implementa
 
 	bHasTriggeredDestruction = true;
 	LastDestructionRequest = Request;
+
+	if (bRecordReplicatedTriggerState && HasAuthority())
+	{
+		ReplicatedTriggerState.Request = Request;
+		++ReplicatedTriggerState.TriggerSerial;
+		ForceNetUpdate();
+	}
 
 	SetActorTransform(Request.SpawnTransform);
 	ReceiveDestructionTriggered(Request);
@@ -36,4 +56,14 @@ void AChunkWorldTimedCleanupDestructionActor::TriggerBlockDestruction_Implementa
 	}
 
 	Destroy();
+}
+
+void AChunkWorldTimedCleanupDestructionActor::OnRep_ReplicatedTriggerState()
+{
+	if (ReplicatedTriggerState.TriggerSerial <= 0)
+	{
+		return;
+	}
+
+	AcceptDestructionTrigger(ReplicatedTriggerState.Request, false);
 }

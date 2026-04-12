@@ -10,10 +10,11 @@
 
 class UBlockTypeSchemaComponent;
 class UBlockTypeSchemaRegistry;
+class AChunkWorldBlockSwapReplicationProxy;
 class UChunkWorldBlockFeedbackComponent;
 class UChunkWorldBlockSwapScannerComponent;
 class UChunkWorldBlockSwapComponent;
-class AChunkWorldExtended;
+enum class EBlockDestructionPresentationNetMode : uint8;
 struct FChunkWorldBlockDestructionRequest;
 #if WITH_EDITOR
 struct FPropertyChangedEvent;
@@ -109,6 +110,12 @@ public:
 	 */
 	virtual void StartGen() override;
 
+	/** Spawns any networked runtime helpers owned by the chunk world. */
+	virtual void BeginPlay() override;
+
+	/** Cleans up any networked runtime helpers owned by the chunk world. */
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
 	/**
 	 * Returns the reusable schema component that owns the block-definition lookup maps.
 	 */
@@ -138,6 +145,9 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld")
 	UChunkWorldBlockSwapComponent* GetBlockSwapComponent() const;
+
+	/** Returns the dedicated replicated courier that transports swap presentation events for this chunk world. */
+	AChunkWorldBlockSwapReplicationProxy* GetBlockSwapReplicationProxy() const;
 
 	/** Legacy narrower custom-data event kept only as a compatibility surface. New listeners should use `OnSettledBlockTransition` instead. */
 	UPROPERTY(BlueprintAssignable, Category = "Block|ChunkWorld", meta = (DeprecatedProperty, DeprecationMessage = "Use OnSettledBlockTransition instead so listeners observe the full settled replicated block transition payload."))
@@ -217,6 +227,12 @@ private:
 	/** Spawns and triggers one authored destruction presentation actor when the destroyed block uses the shared damage definition family. */
 	void TrySpawnDestructionActorForDestroyedBlock(const FIntVector& BlockWorldPos, const FChunkWorldResolvedBlockHit* DestroyedFeedbackHit, const FGameplayTag& BlockTypeName);
 
+	/** Spawns one destruction presentation actor from an already resolved class/request pair, forcing the authored network delivery policy. */
+	void SpawnResolvedDestructionActor(
+		UClass* DestructionActorClass,
+		const FChunkWorldBlockDestructionRequest& Request,
+		EBlockDestructionPresentationNetMode PresentationNetMode);
+
 	/** Merges one observed settled replicated health transition into the next deferred transition flush. */
 	void QueueObservedReplicatedHealthTransition(const FIntVector& BlockWorldPos, int32 PreviousHealth, int32 CurrentHealth);
 
@@ -225,6 +241,9 @@ private:
 
 	/** Removes a block after a committed health write leaves the shared damage-family health slot at zero or lower on the server. */
 	void TryDestroyBlockFromCommittedHealth(const FIntVector& BlockWorldPos, bool bTouchedHealth);
+
+	/** Spawns the dedicated replicated swap courier used for multiplayer mesh parking events. */
+	void EnsureBlockSwapReplicationProxy();
 
 	/** Ensures WorldGenDef and runtime config expose enough custom-data channels for the active schema layout. */
 	void EnsureSchemaCustomDataCapacity();
@@ -253,6 +272,10 @@ private:
 	/** Reusable replicated block swap host used by shared chunk-world hide/restore transitions. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Block|ChunkWorld", meta = (AllowPrivateAccess = "true", ToolTip = "Replicated block swap host used by shared chunk-world hide and restore transitions."))
 	TObjectPtr<UChunkWorldBlockSwapComponent> BlockSwapComponent = nullptr;
+
+	/** Dedicated replicated courier used to transport live swap presentation events outside the Porism chunk-world actor path. */
+	UPROPERTY(Transient)
+	TObjectPtr<AChunkWorldBlockSwapReplicationProxy> BlockSwapReplicationProxy = nullptr;
 
 	/** Deferred block custom-data notifications coalesced until the next tick so reads see settled runtime state. */
 	TMap<FIntVector, FDeferredBlockCustomDataChange> DeferredBlockCustomDataChanges;

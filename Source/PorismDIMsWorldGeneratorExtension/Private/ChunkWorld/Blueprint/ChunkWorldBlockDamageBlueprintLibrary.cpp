@@ -107,10 +107,18 @@ bool UChunkWorldBlockDamageBlueprintLibrary::TryResolveDamageSchemaForResolvedBl
 
 	if (bAllowInitialization)
 	{
-		(void)ResolvedHit.BlockTypeSchemaComponent->InitializeBlockCustomData(ResolvedHit.BlockWorldPos);
+		(void)ResolvedHit.BlockTypeSchemaComponent->InitializeBlockCustomDataForRepresentationIndexes(
+			ResolvedHit.BlockWorldPos,
+			ResolvedHit.MaterialIndex,
+			ResolvedHit.MeshIndex);
 	}
 
-	if (!ResolvedHit.BlockTypeSchemaComponent->GetBlockCustomDataForBlockWorldPos(ResolvedHit.BlockWorldPos, OutBlockTypeName, OutCustomDataPayload))
+	if (!ResolvedHit.BlockTypeSchemaComponent->GetBlockCustomDataForRepresentationIndexes(
+		ResolvedHit.BlockWorldPos,
+		ResolvedHit.MaterialIndex,
+		ResolvedHit.MeshIndex,
+		OutBlockTypeName,
+		OutCustomDataPayload))
 	{
 		// These are all fallbacks
 		FInstancedStruct DefinitionStruct;

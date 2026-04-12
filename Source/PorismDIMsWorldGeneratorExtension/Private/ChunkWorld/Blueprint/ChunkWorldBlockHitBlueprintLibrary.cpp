@@ -15,6 +15,8 @@ DEFINE_LOG_CATEGORY_STATIC(LogChunkWorldBlockHitBlueprintLibrary, Log, All);
 
 namespace
 {
+	bool TryResolveRepresentedBlock(AChunkWorld* ChunkWorld, const FIntVector& CandidateBlockWorldPos, const FVector& RepresentativeWorldPos, EChunkWorldBlockHitResolveSource ResolveSource, FChunkWorldResolvedBlockHit& OutHit);
+
 	/**
 	 * Returns true when the block uses a mesh-backed representation.
 	 */
@@ -29,6 +31,30 @@ namespace
 	bool IsRepresentedBlockHitVoxel(int32 MaterialIndex, int32 MeshIndex)
 	{
 		return MaterialIndex != EmptyMaterial || IsMeshBackedBlockHitVoxel(MeshIndex);
+	}
+
+	/**
+	 * Returns the represented block directly above the supplied support block when that overlay exists.
+	 */
+	bool TryResolveOverlayBlockAbove(AChunkWorld* ChunkWorld, const FIntVector& BaseBlockWorldPos, FChunkWorldResolvedBlockHit& OutOverlayHit)
+	{
+		if (!IsValid(ChunkWorld))
+		{
+			return false;
+		}
+
+		const FIntVector AboveBlockWorldPos = BaseBlockWorldPos + FIntVector(0, 0, 1);
+		if (!TryResolveRepresentedBlock(
+			ChunkWorld,
+			AboveBlockWorldPos,
+			ChunkWorld->BlockWorldPosToUEWorldPos(AboveBlockWorldPos),
+			EChunkWorldBlockHitResolveSource::LocalProbe,
+			OutOverlayHit))
+		{
+			return false;
+		}
+
+		return IsMeshBackedBlockHitVoxel(OutOverlayHit.MeshIndex);
 	}
 
 	/**
@@ -60,26 +86,27 @@ namespace
 	/**
 	 * Promotes a mesh-backed block that sits directly above a terrain surface candidate.
 	 */
-	bool TryPromoteOverlayVoxel(AChunkWorld* ChunkWorld, const FIntVector& BaseBlockWorldPos, const FVector& BaseRepresentativeWorldPos, const FVector& SafeImpactNormal, FChunkWorldResolvedBlockHit& OutHit)
+	bool TryPromoteOverlayVoxel(
+		AChunkWorld* ChunkWorld,
+		UBlockTypeSchemaComponent* SchemaComponent,
+		const FIntVector& BaseBlockWorldPos,
+		const FVector& BaseRepresentativeWorldPos,
+		FChunkWorldResolvedBlockHit& OutHit)
 	{
-		if (!IsValid(ChunkWorld) || SafeImpactNormal.Z < 0.6f)
+		if (!IsValid(ChunkWorld))
 		{
 			return false;
 		}
 
-		const FIntVector AboveBlockWorldPos = BaseBlockWorldPos + FIntVector(0, 0, 1);
 		FChunkWorldResolvedBlockHit OverlayHit;
-		if (!TryResolveRepresentedBlock(ChunkWorld, AboveBlockWorldPos, ChunkWorld->BlockWorldPosToUEWorldPos(AboveBlockWorldPos), EChunkWorldBlockHitResolveSource::LocalProbe, OverlayHit))
-		{
-			return false;
-		}
-
-		if (!IsMeshBackedBlockHitVoxel(OverlayHit.MeshIndex))
+		if (!TryResolveOverlayBlockAbove(ChunkWorld, BaseBlockWorldPos, OverlayHit))
 		{
 			return false;
 		}
 
 		OutHit = OverlayHit;
+		OutHit.ChunkWorld = ChunkWorld;
+		OutHit.BlockTypeSchemaComponent = SchemaComponent;
 		OutHit.RepresentativeWorldPos = BaseRepresentativeWorldPos;
 		return true;
 	}
@@ -231,13 +258,18 @@ bool UChunkWorldBlockHitBlueprintLibrary::TryResolveBlockHitContextFromHitResult
 			continue;
 		}
 
-		const bool bTerrainTopFaceCandidate = !bHitInstancedMesh
+		const bool bTerrainOverlayCandidate = !bHitInstancedMesh
 			&& !IsMeshBackedBlockHitVoxel(CandidateHit.MeshIndex)
 			&& SafeImpactNormal.Z >= 0.6f;
-		if (bTerrainTopFaceCandidate && TryPromoteOverlayVoxel(ChunkWorld, CandidateHit.BlockWorldPos, CandidateProbeLocation, SafeImpactNormal, CandidateHit))
+		if (bTerrainOverlayCandidate)
 		{
-			OutResolvedHit = CandidateHit;
-			return true;
+			FChunkWorldResolvedBlockHit OverlayHit;
+			const bool bPromotedOverlay = TryPromoteOverlayVoxel(ChunkWorld, SchemaComponent, CandidateHit.BlockWorldPos, CandidateProbeLocation, OverlayHit);
+			if (bPromotedOverlay)
+			{
+				OutResolvedHit = OverlayHit;
+				return true;
+			}
 		}
 
 		OutResolvedHit = CandidateHit;
@@ -256,9 +288,15 @@ bool UChunkWorldBlockHitBlueprintLibrary::TryResolveBlockHitContextFromHitResult
 		}
 		if (!bHitInstancedMesh
 			&& !IsMeshBackedBlockHitVoxel(OutResolvedHit.MeshIndex)
-			&& TryPromoteOverlayVoxel(ChunkWorld, OutResolvedHit.BlockWorldPos, OutResolvedHit.RepresentativeWorldPos, SafeImpactNormal, OutResolvedHit))
+			&& SafeImpactNormal.Z >= 0.6f)
 		{
-			return true;
+			FChunkWorldResolvedBlockHit OverlayHit;
+			const bool bPromotedOverlay = TryPromoteOverlayVoxel(ChunkWorld, SchemaComponent, OutResolvedHit.BlockWorldPos, OutResolvedHit.RepresentativeWorldPos, OverlayHit);
+			if (bPromotedOverlay)
+			{
+				OutResolvedHit = OverlayHit;
+				return true;
+			}
 		}
 		return true;
 	}
@@ -307,7 +345,13 @@ bool UChunkWorldBlockHitBlueprintLibrary::TryGetBlockCustomDataForResolvedBlockH
 		return false;
 	}
 
-	return ResolvedHit.BlockTypeSchemaComponent->GetBlockCustomDataForBlockWorldPos(ResolvedHit.BlockWorldPos, OutBlockTypeName, OutCustomData);
+	// Reuse the representation indexes captured during hit resolution so promoted overlay voxels do not depend on a second world read.
+	return ResolvedHit.BlockTypeSchemaComponent->GetBlockCustomDataForRepresentationIndexes(
+		ResolvedHit.BlockWorldPos,
+		ResolvedHit.MaterialIndex,
+		ResolvedHit.MeshIndex,
+		OutBlockTypeName,
+		OutCustomData);
 }
 
 bool UChunkWorldBlockHitBlueprintLibrary::TryGetBlockDefinitionForResolvedBlockHit(const FChunkWorldResolvedBlockHit& ResolvedHit, FGameplayTag& OutBlockTypeName, FInstancedStruct& OutDefinition)
@@ -326,12 +370,17 @@ bool UChunkWorldBlockHitBlueprintLibrary::TryGetBlockDefinitionForResolvedBlockH
 		return false;
 	}
 
-	if (!ResolvedHit.BlockTypeSchemaComponent->GetBlockDefinitionForBlockWorldPos(ResolvedHit.BlockWorldPos, OutBlockTypeName, OutDefinition))
+	// Reuse the representation indexes captured during hit resolution so promoted overlay voxels do not depend on a second world read.
+	if (!ResolvedHit.BlockTypeSchemaComponent->GetBlockDefinitionForRepresentationIndexes(
+		ResolvedHit.MaterialIndex,
+		ResolvedHit.MeshIndex,
+		OutBlockTypeName,
+		OutDefinition))
 	{
 		UE_LOG(
 			LogPorismDIMsWorldGeneratorExtension,
 			Warning,
-			TEXT("Failed to resolve block definition for chunk world '%s' at %s. LookupReady=%d Registry=%s MaterialIndex=%d MeshIndex=%d ResolveSource=%d"),
+			TEXT("Failed to resolve block definition for chunk world '%s' at %s using resolved indexes. LookupReady=%d Registry=%s MaterialIndex=%d MeshIndex=%d ResolveSource=%d"),
 			*GetNameSafe(ResolvedHit.ChunkWorld),
 			*ResolvedHit.BlockWorldPos.ToString(),
 			ResolvedHit.BlockTypeSchemaComponent->IsBlockDefinitionLookupReady(),

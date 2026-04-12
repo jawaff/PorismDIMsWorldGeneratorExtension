@@ -72,6 +72,17 @@ struct FBlockCustomDataBase
 	GENERATED_BODY()
 };
 
+/** Network delivery policy for one destruction presentation actor spawn. */
+UENUM(BlueprintType)
+enum class EBlockDestructionPresentationNetMode : uint8
+{
+	/** Only the authority spawns the destruction actor, and the actor class is expected to replicate when needed. */
+	ReplicatedActor UMETA(DisplayName = "Replicated Actor"),
+
+	/** Each machine spawns its own local destruction actor after it observes the authoritative block removal. */
+	LocalOnlyPerClient UMETA(DisplayName = "Local Only Per Client")
+};
+
 /**
  * Default damage-oriented definition payload for blocks that can take hits.
  */
@@ -86,23 +97,27 @@ struct FBlockDamageDefinition : public FBlockDefinitionBase
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (DisplayPriority = "7", ToolTip = "Optional destruction presentation actor spawned when this block reaches zero health and is removed. Implement the chunk-world destruction actor interface on that class so it can run its authored destruction behavior when triggered."))
 	TSoftClassPtr<AActor> DestructionActorClass;
 
+	/** Network delivery mode used when spawning the authored destruction presentation actor. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (DisplayPriority = "8", ToolTip = "Controls whether the destruction presentation actor is spawned only on the authority and allowed to replicate, or spawned locally on each machine after it observes the authoritative block removal. Use Local Only Per Client for Chaos-driven cosmetic destruction presentations."))
+	EBlockDestructionPresentationNetMode DestructionPresentationNetMode = EBlockDestructionPresentationNetMode::ReplicatedActor;
+
 	/**
 	 * Maximum health for this block type before it is destroyed.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (DisplayPriority = "8", ClampMin = "0", UIMin = "0", ToolTip = "Maximum health for this block type before it is destroyed."))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (DisplayPriority = "9", ClampMin = "0", UIMin = "0", ToolTip = "Maximum health for this block type before it is destroyed."))
 	int32 MaxHealth = 1;
 
 	/**
 	 * Generic authored damage scalar applied by project-side damage calculators after they compute their local damage model.
 	 * Kept in the shared damage schema so projects can opt into a simple block-wide multiplier before introducing richer damage families.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (DisplayPriority = "9", ClampMin = "0.0", UIMin = "0.0", ToolTip = "Generic authored damage scalar applied by project-side damage calculators after they compute their local damage model."))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (DisplayPriority = "10", ClampMin = "0.0", UIMin = "0.0", ToolTip = "Generic authored damage scalar applied by project-side damage calculators after they compute their local damage model."))
 	double DamageMultiplier = 1.0;
 
 	/**
 	 * Sound to play when this block type is hit but not destroyed.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (DisplayPriority = "10", ToolTip = "Sound to play when this block type is hit but not destroyed."))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (DisplayPriority = "11", ToolTip = "Sound to play when this block type is hit but not destroyed."))
 	TObjectPtr<USoundBase> HitSound = nullptr;
 };
 

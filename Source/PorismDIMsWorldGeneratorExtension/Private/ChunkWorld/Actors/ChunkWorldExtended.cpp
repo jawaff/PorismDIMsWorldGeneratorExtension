@@ -4,6 +4,7 @@
 
 #include "Block/BlockTypeSchemaRegistry.h"
 #include "Block/BlockTypeSchemaBlueprintLibrary.h"
+#include "ChunkWorld/Actors/ChunkWorldBlockSwapReplicationProxy.h"
 #include "ChunkWorld/Actors/ChunkWorldDestructionActorInterface.h"
 #include "ChunkWorld/Blueprint/ChunkWorldBlockHitBlueprintLibrary.h"
 #include "ChunkWorld/Components/BlockTypeSchemaComponent.h"
@@ -42,6 +43,7 @@ namespace
 			CustomFeatureDefaultData.SetNumZeroed(RequiredChannelCount);
 		}
 	}
+
 }
 
 AChunkWorldExtended::AChunkWorldExtended()
@@ -50,6 +52,7 @@ AChunkWorldExtended::AChunkWorldExtended()
 	BlockFeedbackComponent = CreateDefaultSubobject<UChunkWorldBlockFeedbackComponent>(TEXT("BlockFeedbackComponent"));
 	BlockSwapScannerComponent = CreateDefaultSubobject<UChunkWorldBlockSwapScannerComponent>(TEXT("BlockSwapScannerComponent"));
 	BlockSwapComponent = CreateDefaultSubobject<UChunkWorldBlockSwapComponent>(TEXT("BlockSwapComponent"));
+	BlockFeedbackComponent->SetIsReplicated(true);
 	SyncBlockTypeSchemaRegistry();
 }
 
@@ -80,6 +83,23 @@ void AChunkWorldExtended::StartGen()
 				*GetNameSafe(WorldGenDef));
 		}
 	}
+}
+
+void AChunkWorldExtended::BeginPlay()
+{
+	Super::BeginPlay();
+	EnsureBlockSwapReplicationProxy();
+}
+
+void AChunkWorldExtended::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (HasAuthority() && BlockSwapReplicationProxy != nullptr)
+	{
+		BlockSwapReplicationProxy->Destroy();
+		BlockSwapReplicationProxy = nullptr;
+	}
+
+	Super::EndPlay(EndPlayReason);
 }
 
 void AChunkWorldExtended::EnsureSchemaCustomDataCapacity()
@@ -122,6 +142,11 @@ UChunkWorldBlockSwapComponent* AChunkWorldExtended::GetBlockSwapComponent() cons
 	return BlockSwapComponent;
 }
 
+AChunkWorldBlockSwapReplicationProxy* AChunkWorldExtended::GetBlockSwapReplicationProxy() const
+{
+	return BlockSwapReplicationProxy;
+}
+
 void AChunkWorldExtended::PostLoad()
 {
 	Super::PostLoad();
@@ -161,6 +186,32 @@ void AChunkWorldExtended::SyncBlockTypeSchemaRegistry()
 	}
 
 	BlockTypeSchemaComponent->SetBlockTypeSchemaRegistry(BlockTypeSchemaRegistry);
+}
+
+void AChunkWorldExtended::EnsureBlockSwapReplicationProxy()
+{
+	if (!HasAuthority() || GetNetMode() == NM_Standalone || BlockSwapReplicationProxy != nullptr)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.Owner = this;
+	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	BlockSwapReplicationProxy = World->SpawnActor<AChunkWorldBlockSwapReplicationProxy>(
+		AChunkWorldBlockSwapReplicationProxy::StaticClass(),
+		GetActorTransform(),
+		SpawnParameters);
+	if (BlockSwapReplicationProxy != nullptr)
+	{
+		BlockSwapReplicationProxy->InitializeForChunkWorld(this);
+	}
 }
 
 void AChunkWorldExtended::WriteCustomDataValuesAndUpdate(const TArray<SCustomDataChangeCall>& NetCustomDataChangeCalls)
@@ -515,20 +566,6 @@ void AChunkWorldExtended::TrySpawnDestructionActorForDestroyedBlock(
 		return;
 	}
 
-	AActor* DestructionActor = World->SpawnActorDeferred<AActor>(
-		DestructionActorClass,
-		SpawnTransform,
-		nullptr,
-		nullptr,
-		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
-	if (DestructionActor == nullptr)
-	{
-		return;
-	}
-
-	DestructionActor->SetReplicates(true);
-	UGameplayStatics::FinishSpawningActor(DestructionActor, SpawnTransform);
-
 	FChunkWorldBlockDestructionRequest Request;
 	Request.ChunkWorld = this;
 	Request.BlockTypeName = BlockTypeName;
@@ -537,6 +574,59 @@ void AChunkWorldExtended::TrySpawnDestructionActorForDestroyedBlock(
 	Request.RepresentativeWorldPos = DestroyedFeedbackHit != nullptr
 		? DestroyedFeedbackHit->RepresentativeWorldPos
 		: SpawnTransform.GetLocation();
+
+	const EBlockDestructionPresentationNetMode PresentationNetMode = DamageDefinition.DestructionPresentationNetMode;
+	if (HasAuthority())
+	{
+		SpawnResolvedDestructionActor(DestructionActorClass, Request, PresentationNetMode);
+		return;
+	}
+
+	if (PresentationNetMode == EBlockDestructionPresentationNetMode::ReplicatedActor)
+	{
+		return;
+	}
+
+	SpawnResolvedDestructionActor(DestructionActorClass, Request, PresentationNetMode);
+}
+
+void AChunkWorldExtended::SpawnResolvedDestructionActor(
+	UClass* DestructionActorClass,
+	const FChunkWorldBlockDestructionRequest& Request,
+	const EBlockDestructionPresentationNetMode PresentationNetMode)
+{
+	if (DestructionActorClass == nullptr)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	AActor* DestructionActor = World->SpawnActorDeferred<AActor>(
+		DestructionActorClass,
+		Request.SpawnTransform,
+		nullptr,
+		nullptr,
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	if (DestructionActor == nullptr)
+	{
+		return;
+	}
+
+	const bool bShouldReplicateActor = PresentationNetMode == EBlockDestructionPresentationNetMode::ReplicatedActor;
+	// Project-specific change: destruction presentation delivery is authored per block definition, so force the spawn
+	// instance to match that policy instead of inheriting whichever replication default the actor class currently has.
+	DestructionActor->SetReplicates(bShouldReplicateActor);
+	if (!bShouldReplicateActor)
+	{
+		DestructionActor->SetReplicateMovement(false);
+	}
+
+	UGameplayStatics::FinishSpawningActor(DestructionActor, Request.SpawnTransform);
 	IChunkWorldDestructionActorInterface::Execute_TriggerBlockDestruction(DestructionActor, Request);
 }
 
@@ -583,6 +673,17 @@ void AChunkWorldExtended::FlushDeferredBlockCustomDataChanges()
 		FChunkWorldSettledBlockTransition Transition;
 		if (BuildSettledBlockTransition(PendingChange.Key, PendingChange.Value, Transition))
 		{
+			if (!HasAuthority()
+				&& Transition.bObservedRepresentationRemoved
+				&& Transition.PreviousResolvedHit.bHasBlock
+				&& Transition.PreviousBlockTypeName.IsValid())
+			{
+				TrySpawnDestructionActorForDestroyedBlock(
+					Transition.BlockWorldPos,
+					&Transition.PreviousResolvedHit,
+					Transition.PreviousBlockTypeName);
+			}
+
 			OnSettledBlockTransition.Broadcast(this, Transition);
 		}
 

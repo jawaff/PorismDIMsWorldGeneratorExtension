@@ -155,9 +155,6 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Debug", meta = (ToolTip = "If true, draws a block-sized debug cube around the resolved block target. Green means success, red means lookup failure."))
 	bool bDebugDrawBlockLookup = false;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Debug", meta = (ToolTip = "If true, logs which step in shared block-hit lookup failed or succeeded."))
-	bool bLogBlockLookupDiagnostics = false;
-
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Debug", meta = (ClampMin = "1.0", UIMin = "1.0", ToolTip = "Multiplier applied to the debug cube size so it draws slightly larger than the represented block mesh."))
 	float DebugBlockCubeScale = 1.05f;
 
@@ -188,7 +185,6 @@ private:
 	bool IsInteractableActor(AActor* Actor) const;
 	bool TryBuildActorResult(const FHitResult& Hit, FPorismTraceInteractionResult& InOutResult) const;
 	bool TryBuildBlockResult(const FVector& TraceDirection, const FHitResult& Hit, FChunkWorldBlockInteractionResult& InOutResult) const;
-	void LogBlockLookupDiagnostic(const TCHAR* Stage, const FHitResult* Hit, const FIntVector* BlockWorldPos, const TCHAR* Extra = TEXT("")) const;
 	bool IsResultCloser(const FVector& TraceStart, const FPorismTraceInteractionResult& CandidateResult, const FPorismTraceInteractionResult& CurrentBestResult) const;
 	bool IsBlockResultCloser(const FVector& TraceStart, const FChunkWorldBlockInteractionResult& CandidateResult, const FPorismTraceInteractionResult& CurrentBestResult) const;
 	bool ShouldRunTrace() const;
