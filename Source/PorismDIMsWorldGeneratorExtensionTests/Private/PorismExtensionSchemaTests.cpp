@@ -12,7 +12,7 @@
 
 namespace
 {
-	FInstancedStruct MakeExactDamageDefinitionPayload(int32 MaxHealth, bool bInvincible)
+	FInstancedStruct MakeExactHealthDefinitionPayload(int32 MaxHealth, bool bInvincible)
 	{
 		FBlockHealthDefinition Definition;
 		Definition.MaxHealth = MaxHealth;
@@ -23,7 +23,7 @@ namespace
 		return Payload;
 	}
 
-	FInstancedStruct MakeExactDamageCustomDataPayload(int32 Health)
+	FInstancedStruct MakeExactHealthCustomDataPayload(int32 Health)
 	{
 		FBlockHealthCustomData CustomData;
 		CustomData.Health = Health;
@@ -38,31 +38,31 @@ UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_PorismExtension_TestBlock, "DropType");
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FPorismExtensionCustomDataLayoutRoundTripTest,
-	"PorismExtension.Schema.CustomDataLayout.RoundTripDerivedDamagePayload",
+	"PorismExtension.Schema.CustomDataLayout.RoundTripDerivedHealthPayload",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FPorismExtensionCustomDataLayoutRoundTripTest::RunTest(const FString& Parameters)
 {
 	FBlockCustomDataLayout Layout;
-	TestTrue(TEXT("Derived damage custom-data layout builds"), Layout.Build(FPorismExtensionDerivedDamageCustomData::StaticStruct()));
-	TestEqual(TEXT("Derived damage payload uses four authored slots"), Layout.GetValueSlotCount(), 4);
+	TestTrue(TEXT("Derived health custom-data layout builds"), Layout.Build(FPorismExtensionDerivedHealthCustomData::StaticStruct()));
+	TestEqual(TEXT("Derived health payload uses four authored slots"), Layout.GetValueSlotCount(), 4);
 
-	FPorismExtensionDerivedDamageCustomData Source;
+	FPorismExtensionDerivedHealthCustomData Source;
 	Source.Health = 37;
 	Source.BonusHealth = 9;
 	Source.Nested.bHasDust = true;
 	Source.Nested.DustAmount = 4;
 
 	TArray<int32> PackedValues;
-	TestTrue(TEXT("Derived damage payload packs"), Layout.Pack(&Source, PackedValues));
+	TestTrue(TEXT("Derived health payload packs"), Layout.Pack(&Source, PackedValues));
 	TestEqual(TEXT("Packed slot count matches layout"), PackedValues.Num(), 4);
 	TestEqual(TEXT("Health stays in slot zero"), PackedValues[0], 37);
 	TestEqual(TEXT("Bonus health follows the shared health field"), PackedValues[1], 9);
 	TestEqual(TEXT("Nested bool is packed as one"), PackedValues[2], 1);
 	TestEqual(TEXT("Nested scalar is packed after nested bool"), PackedValues[3], 4);
 
-	FPorismExtensionDerivedDamageCustomData Unpacked;
-	TestTrue(TEXT("Derived damage payload unpacks"), Layout.Unpack(PackedValues, &Unpacked));
+	FPorismExtensionDerivedHealthCustomData Unpacked;
+	TestTrue(TEXT("Derived health payload unpacks"), Layout.Unpack(PackedValues, &Unpacked));
 	TestEqual(TEXT("Unpacked health matches source"), Unpacked.Health, 37);
 	TestEqual(TEXT("Unpacked bonus health matches source"), Unpacked.BonusHealth, 9);
 	TestTrue(TEXT("Unpacked nested bool matches source"), Unpacked.Nested.bHasDust);
@@ -85,26 +85,26 @@ bool FPorismExtensionCustomDataLayoutRejectsUnsupportedPropertyTest::RunTest(con
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FPorismExtensionCustomDataLayoutExactDamagePayloadTest,
-	"PorismExtension.Schema.CustomDataLayout.RoundTripExactDamagePayload",
+	"PorismExtension.Schema.CustomDataLayout.RoundTripExactHealthPayload",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FPorismExtensionCustomDataLayoutExactDamagePayloadTest::RunTest(const FString& Parameters)
 {
 	FBlockCustomDataLayout Layout;
-	TestTrue(TEXT("Exact damage custom-data layout builds"), Layout.Build(FBlockHealthCustomData::StaticStruct()));
-	TestEqual(TEXT("Exact damage payload uses one authored slot"), Layout.GetValueSlotCount(), 1);
+	TestTrue(TEXT("Exact health custom-data layout builds"), Layout.Build(FBlockHealthCustomData::StaticStruct()));
+	TestEqual(TEXT("Exact health payload uses one authored slot"), Layout.GetValueSlotCount(), 1);
 
 	FBlockHealthCustomData Source;
 	Source.Health = 14;
 
 	TArray<int32> PackedValues;
-	TestTrue(TEXT("Exact damage payload packs"), Layout.Pack(&Source, PackedValues));
-	TestEqual(TEXT("Exact damage payload writes one slot"), PackedValues.Num(), 1);
+	TestTrue(TEXT("Exact health payload packs"), Layout.Pack(&Source, PackedValues));
+	TestEqual(TEXT("Exact health payload writes one slot"), PackedValues.Num(), 1);
 	TestEqual(TEXT("Health is stored in slot zero"), PackedValues[0], 14);
 
 	FBlockHealthCustomData Unpacked;
-	TestTrue(TEXT("Exact damage payload unpacks"), Layout.Unpack(PackedValues, &Unpacked));
-	TestEqual(TEXT("Exact damage payload round-trips health"), Unpacked.Health, 14);
+	TestTrue(TEXT("Exact health payload unpacks"), Layout.Unpack(PackedValues, &Unpacked));
+	TestEqual(TEXT("Exact health payload round-trips health"), Unpacked.Health, 14);
 
 	return true;
 }
@@ -117,9 +117,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FPorismExtensionCustomDataLayoutRejectsShortPackedArrayTest::RunTest(const FString& Parameters)
 {
 	FBlockCustomDataLayout Layout;
-	TestTrue(TEXT("Derived damage custom-data layout builds"), Layout.Build(FPorismExtensionDerivedDamageCustomData::StaticStruct()));
+	TestTrue(TEXT("Derived health custom-data layout builds"), Layout.Build(FPorismExtensionDerivedHealthCustomData::StaticStruct()));
 
-	FPorismExtensionDerivedDamageCustomData Unpacked;
+	FPorismExtensionDerivedHealthCustomData Unpacked;
 	TArray<int32> ShortPackedValues;
 	ShortPackedValues.Add(11);
 	ShortPackedValues.Add(3);
@@ -130,54 +130,42 @@ bool FPorismExtensionCustomDataLayoutRejectsShortPackedArrayTest::RunTest(const 
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FPorismExtensionSchemaBlueprintLibraryDerivedPayloadTest,
-	"PorismExtension.Schema.BlueprintLibrary.AcceptsDerivedDamagePayloads",
+	"PorismExtension.Schema.BlueprintLibrary.AcceptsDerivedHealthPayloads",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FPorismExtensionSchemaBlueprintLibraryDerivedPayloadTest::RunTest(const FString& Parameters)
 {
-	FPorismExtensionDerivedDamageCustomData DerivedCustomData;
+	FPorismExtensionDerivedHealthCustomData DerivedCustomData;
 	DerivedCustomData.Health = 21;
 	DerivedCustomData.BonusHealth = 6;
 
 	FInstancedStruct CustomDataPayload;
-	CustomDataPayload.InitializeAs<FPorismExtensionDerivedDamageCustomData>(DerivedCustomData);
+	CustomDataPayload.InitializeAs<FPorismExtensionDerivedHealthCustomData>(DerivedCustomData);
 
 	TestTrue(TEXT("Derived custom-data payload counts as block custom data"), UBlockTypeSchemaBlueprintLibrary::IsBlockCustomDataPayload(CustomDataPayload));
 	TestTrue(TEXT("Derived custom-data payload counts as block health custom data"), UBlockTypeSchemaBlueprintLibrary::IsBlockHealthCustomDataPayload(CustomDataPayload));
-	TestTrue(TEXT("Derived custom-data payload counts as block damage custom data"), UBlockTypeSchemaBlueprintLibrary::IsBlockDamageCustomDataPayload(CustomDataPayload));
-
 	FBlockHealthCustomData HealthCustomData;
 	TestTrue(TEXT("Derived custom-data payload can be read as shared health custom data"), UBlockTypeSchemaBlueprintLibrary::TryGetBlockHealthCustomData(CustomDataPayload, HealthCustomData));
 	TestEqual(TEXT("Shared health custom-data view keeps the derived health value"), HealthCustomData.Health, 21);
 
-	FBlockDamageCustomData DamageCustomData;
-	TestTrue(TEXT("Derived custom-data payload can be read as shared damage custom data"), UBlockTypeSchemaBlueprintLibrary::TryGetBlockDamageCustomData(CustomDataPayload, DamageCustomData));
-	TestEqual(TEXT("Shared damage custom-data view keeps the derived health value"), DamageCustomData.Health, 21);
-
-	FPorismExtensionDerivedDamageDefinition DerivedDefinition;
+	FPorismExtensionDerivedHealthDefinition DerivedDefinition;
 	DerivedDefinition.MaxHealth = 80;
 	DerivedDefinition.Hardness = 5;
 	DerivedDefinition.Quality = EPorismExtensionTestQuality::High;
 
 	FInstancedStruct DefinitionPayload;
-	DefinitionPayload.InitializeAs<FPorismExtensionDerivedDamageDefinition>(DerivedDefinition);
+	DefinitionPayload.InitializeAs<FPorismExtensionDerivedHealthDefinition>(DerivedDefinition);
 
 	TestTrue(TEXT("Derived definition payload counts as block definition"), UBlockTypeSchemaBlueprintLibrary::IsBlockDefinitionPayload(DefinitionPayload));
 	TestTrue(TEXT("Derived definition payload counts as block health definition"), UBlockTypeSchemaBlueprintLibrary::IsBlockHealthDefinitionPayload(DefinitionPayload));
-	TestTrue(TEXT("Derived definition payload counts as block damage definition"), UBlockTypeSchemaBlueprintLibrary::IsBlockDamageDefinitionPayload(DefinitionPayload));
-
 	FBlockHealthDefinition HealthDefinition;
 	TestTrue(TEXT("Derived definition payload can be read as shared health definition"), UBlockTypeSchemaBlueprintLibrary::TryGetBlockHealthDefinition(DefinitionPayload, HealthDefinition));
 	TestEqual(TEXT("Shared health definition view keeps the derived max health"), HealthDefinition.MaxHealth, 80);
 
-	FBlockDamageDefinition DamageDefinition;
-	TestTrue(TEXT("Derived definition payload can be read as shared damage definition"), UBlockTypeSchemaBlueprintLibrary::TryGetBlockDamageDefinition(DefinitionPayload, DamageDefinition));
-	TestEqual(TEXT("Shared damage definition view keeps the derived max health"), DamageDefinition.MaxHealth, 80);
-
 	FInstancedStruct IncompatiblePayload;
 	IncompatiblePayload.InitializeAs<FVector>(FVector(1.0, 2.0, 3.0));
 	TestFalse(TEXT("Unrelated payload is not treated as block custom data"), UBlockTypeSchemaBlueprintLibrary::IsBlockCustomDataPayload(IncompatiblePayload));
-	TestFalse(TEXT("Unrelated payload does not convert to shared damage custom data"), UBlockTypeSchemaBlueprintLibrary::TryGetBlockDamageCustomData(IncompatiblePayload, DamageCustomData));
+	TestFalse(TEXT("Unrelated payload does not convert to shared health custom data"), UBlockTypeSchemaBlueprintLibrary::TryGetBlockHealthCustomData(IncompatiblePayload, HealthCustomData));
 
 	return true;
 }
@@ -194,8 +182,8 @@ bool FPorismExtensionSchemaRegistryLookupTest::RunTest(const FString& Parameters
 
 	FBlockTypeSchema Row;
 	Row.BlockTypeName = TAG_PorismExtension_TestBlock;
-	Row.Definition = MakeExactDamageDefinitionPayload(65, false);
-	Row.CustomData = MakeExactDamageCustomDataPayload(42);
+	Row.Definition = MakeExactHealthDefinitionPayload(65, false);
+	Row.CustomData = MakeExactHealthCustomDataPayload(42);
 
 	TArray<FBlockTypeSchema>& MutableRows = const_cast<TArray<FBlockTypeSchema>&>(Registry->GetBlockTypeDefinitions());
 	MutableRows.Add(Row);
@@ -240,7 +228,7 @@ bool FPorismExtensionSchemaComponentRequiredChannelCountTest::RunTest(const FStr
 
 	FBlockTypeSchema Row;
 	Row.BlockTypeName = TAG_PorismExtension_TestBlock;
-	Row.CustomData.InitializeAs<FPorismExtensionDerivedDamageCustomData>();
+	Row.CustomData.InitializeAs<FPorismExtensionDerivedHealthCustomData>();
 
 	TArray<FBlockTypeSchema>& MutableRows = const_cast<TArray<FBlockTypeSchema>&>(Registry->GetBlockTypeDefinitions());
 	MutableRows.Add(Row);
@@ -248,7 +236,7 @@ bool FPorismExtensionSchemaComponentRequiredChannelCountTest::RunTest(const FStr
 	SchemaComponent->SetBlockTypeSchemaRegistry(Registry);
 
 	TestEqual(TEXT("Derived payload requires authored slots plus the initialization marker"), SchemaComponent->GetRequiredCustomDataChannelCount(), 5);
-	TestEqual(TEXT("Shared damage health slot stays at index zero"), SchemaComponent->GetBlockDamageHealthCustomDataIndex(), 0);
+	TestEqual(TEXT("Shared health slot stays at index zero"), SchemaComponent->GetBlockHealthCustomDataIndex(), 0);
 
 	return true;
 }

@@ -34,16 +34,25 @@ bool FPorismExtensionPredictedBlockStateInvalidInputTest::RunTest(const FString&
 	UPorismPredictedBlockStateComponent* PredictionComponent = NewObject<UPorismPredictedBlockStateComponent>(Owner);
 	TestNotNull(TEXT("Prediction component is created"), PredictionComponent);
 
-	FChunkWorldBlockDamageRequest InvalidRequest;
-	FChunkWorldBlockDamageRequestResult RequestResult;
-	AddExpectedError(TEXT("damage amount was 0"), EAutomationExpectedErrorFlags::Contains, 1);
+	FChunkWorldBlockHealthDeltaRequest InvalidRequest;
+	FChunkWorldBlockHealthDeltaRequestResult RequestResult;
+	AddExpectedError(TEXT("amount was 0"), EAutomationExpectedErrorFlags::Contains, 1);
 	TestFalse(TEXT("Invalid predicted block damage requests are rejected"), PredictionComponent->ApplyPredictedDamageRequest(InvalidRequest, RequestResult));
 
+	FChunkWorldBlockHealthDeltaRequest InvalidHealingRequest;
+	AddExpectedError(TEXT("amount was 0"), EAutomationExpectedErrorFlags::Contains, 1);
+	TestFalse(TEXT("Invalid predicted block healing requests are rejected"), PredictionComponent->ApplyPredictedHealingRequest(InvalidHealingRequest, RequestResult));
+
 	FChunkWorldResolvedBlockHit ResolvedHit;
-	FChunkWorldBlockDamageRequest InvalidAuthoritativeRequest;
-	InvalidAuthoritativeRequest.DamageAmount = 4;
+	FChunkWorldBlockHealthDeltaRequest InvalidAuthoritativeRequest;
+	InvalidAuthoritativeRequest.Amount = 4;
 	AddExpectedError(TEXT("resolved hit was invalid"), EAutomationExpectedErrorFlags::Contains, 1);
 	TestFalse(TEXT("Invalid authoritative block damage requests are rejected"), PredictionComponent->ApplyAuthoritativeDamageRequest(InvalidAuthoritativeRequest, RequestResult));
+
+	FChunkWorldBlockHealthDeltaRequest InvalidAuthoritativeHealingRequest;
+	InvalidAuthoritativeHealingRequest.Amount = 4;
+	AddExpectedError(TEXT("resolved hit was invalid"), EAutomationExpectedErrorFlags::Contains, 1);
+	TestFalse(TEXT("Invalid authoritative block healing requests are rejected"), PredictionComponent->ApplyAuthoritativeHealingRequest(InvalidAuthoritativeHealingRequest, RequestResult));
 
 	int32 Health = 0;
 	bool bIsInvincible = false;
@@ -76,10 +85,13 @@ bool FPorismExtensionPredictedBlockStateInvalidInputNoBroadcastTest::RunTest(con
 		++BroadcastCount;
 	});
 
-	FChunkWorldBlockDamageRequest InvalidRequest;
-	FChunkWorldBlockDamageRequestResult RequestResult;
-	AddExpectedError(TEXT("damage amount was 0"), EAutomationExpectedErrorFlags::Contains, 1);
+	FChunkWorldBlockHealthDeltaRequest InvalidRequest;
+	FChunkWorldBlockHealthDeltaRequestResult RequestResult;
+	AddExpectedError(TEXT("amount was 0"), EAutomationExpectedErrorFlags::Contains, 1);
 	TestFalse(TEXT("Invalid predicted requests are rejected"), PredictionComponent->ApplyPredictedDamageRequest(InvalidRequest, RequestResult));
+	FChunkWorldBlockHealthDeltaRequest InvalidHealingRequest;
+	AddExpectedError(TEXT("amount was 0"), EAutomationExpectedErrorFlags::Contains, 1);
+	TestFalse(TEXT("Invalid predicted healing requests are rejected"), PredictionComponent->ApplyPredictedHealingRequest(InvalidHealingRequest, RequestResult));
 	TestEqual(TEXT("Rejected requests do not broadcast tracked block state changes"), BroadcastCount, 0);
 
 	return true;
@@ -120,18 +132,18 @@ bool FPorismExtensionTraceInteractionConfigurationTest::RunTest(const FString& P
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FPorismExtensionDamageTraceInteractionDefaultStateTest,
-	"PorismExtension.DamageTraceInteraction.Component.DefaultStateRejectsDamage",
+	FPorismExtensionHealthTraceInteractionDefaultStateTest,
+	"PorismExtension.HealthTraceInteraction.Component.DefaultStateRejectsHealthInteraction",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FPorismExtensionDamageTraceInteractionDefaultStateTest::RunTest(const FString& Parameters)
+bool FPorismExtensionHealthTraceInteractionDefaultStateTest::RunTest(const FString& Parameters)
 {
 	AActor* Owner = NewObject<AActor>();
-	UPorismHealthInteractionComponent* DamageTraceComponent = NewObject<UPorismHealthInteractionComponent>(Owner);
-	TestNotNull(TEXT("Damage trace interaction component is created"), DamageTraceComponent);
+	UPorismHealthInteractionComponent* HealthTraceComponent = NewObject<UPorismHealthInteractionComponent>(Owner);
+	TestNotNull(TEXT("Health trace interaction component is created"), HealthTraceComponent);
 
-	TestFalse(TEXT("Fresh damage trace components start without an active damage block interaction"), DamageTraceComponent->HasActiveDamageBlockInteraction());
-	TestEqual(TEXT("Fresh damage trace components expose an empty damage payload"), DamageTraceComponent->GetLastDamageBlockInteractionResult().CurrentHealth, 0);
+	TestFalse(TEXT("Fresh health trace components start without an active health block interaction"), HealthTraceComponent->HasActiveHealthBlockInteraction());
+	TestEqual(TEXT("Fresh health trace components expose an empty health payload"), HealthTraceComponent->GetLastHealthBlockInteractionResult().CurrentHealth, 0);
 
 	return true;
 }

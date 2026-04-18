@@ -441,7 +441,7 @@ void AChunkWorldExtended::EnsureBlockSwapReplicationProxy()
 void AChunkWorldExtended::WriteCustomDataValuesAndUpdate(const TArray<SCustomDataChangeCall>& NetCustomDataChangeCalls)
 {
 	const int32 HealthCustomDataIndex = BlockTypeSchemaComponent != nullptr
-		? BlockTypeSchemaComponent->GetBlockDamageHealthCustomDataIndex()
+		? BlockTypeSchemaComponent->GetBlockHealthCustomDataIndex()
 		: INDEX_NONE;
 	TMap<FIntVector, FObservedBlockCustomDataChange> ObservedBlockChanges;
 	TMap<FIntVector, int32> PreApplyHealthByBlock;
@@ -491,6 +491,8 @@ void AChunkWorldExtended::WriteCustomDataValuesAndUpdate(const TArray<SCustomDat
 				int32 CurrentHealth = 0;
 				if (TryGetObservedRuntimeHealth(ObservedBlockChange.Key, CurrentHealth) && CurrentHealth != *PreviousHealth)
 				{
+					// Project-specific change: preserve both damage and healing deltas from the settled client-only
+					// replication callback so UI/prediction listeners can react to health restoration as well.
 					QueueObservedReplicatedHealthTransition(ObservedBlockChange.Key, *PreviousHealth, CurrentHealth);
 				}
 			}
@@ -755,18 +757,18 @@ void AChunkWorldExtended::TrySpawnDestructionActorForDestroyedBlock(
 		return;
 	}
 
-	FBlockDamageDefinition DamageDefinition;
-	if (!UBlockTypeSchemaBlueprintLibrary::TryGetBlockDamageDefinition(DefinitionPayload, DamageDefinition)
-		|| DamageDefinition.DestructionActorClass.IsNull())
+	FBlockHealthDefinition HealthDefinition;
+	if (!UBlockTypeSchemaBlueprintLibrary::TryGetBlockHealthDefinition(DefinitionPayload, HealthDefinition)
+		|| HealthDefinition.DestructionActorClass.IsNull())
 	{
 		return;
 	}
 
-	UClass* DestructionActorClass = DamageDefinition.DestructionActorClass.Get();
+	UClass* DestructionActorClass = HealthDefinition.DestructionActorClass.Get();
 	if (DestructionActorClass == nullptr)
 	{
 		// Project-facing behavior: try one blocking load as a fallback so the first lethal destroy can still present.
-		DestructionActorClass = DamageDefinition.DestructionActorClass.LoadSynchronous();
+		DestructionActorClass = HealthDefinition.DestructionActorClass.LoadSynchronous();
 		if (DestructionActorClass == nullptr)
 		{
 			return;
@@ -815,7 +817,7 @@ void AChunkWorldExtended::TrySpawnDestructionActorForDestroyedBlock(
 		? DestroyedFeedbackHit->RepresentativeWorldPos
 		: SpawnTransform.GetLocation();
 
-	const EBlockDestructionPresentationNetMode PresentationNetMode = DamageDefinition.DestructionPresentationNetMode;
+	const EBlockDestructionPresentationNetMode PresentationNetMode = HealthDefinition.DestructionPresentationNetMode;
 	if (HasAuthority())
 	{
 		SpawnResolvedDestructionActor(DestructionActorClass, Request, PresentationNetMode);
@@ -873,7 +875,7 @@ void AChunkWorldExtended::SpawnResolvedDestructionActor(
 void AChunkWorldExtended::HandleCommittedBlockCustomData(const FIntVector& BlockWorldPos, const TArray<int32>& PackedValues)
 {
 	const int32 HealthCustomDataIndex = BlockTypeSchemaComponent != nullptr
-		? BlockTypeSchemaComponent->GetBlockDamageHealthCustomDataIndex()
+		? BlockTypeSchemaComponent->GetBlockHealthCustomDataIndex()
 		: INDEX_NONE;
 	const bool bTouchedHealth = HealthCustomDataIndex != INDEX_NONE && PackedValues.IsValidIndex(HealthCustomDataIndex);
 
@@ -948,6 +950,7 @@ bool AChunkWorldExtended::BuildSettledBlockTransition(
 	OutTransition.bTouchedHealth = DeferredChange.bTouchedHealth;
 	OutTransition.bObservedHealthChange = DeferredChange.bObservedReplicatedHealthChange;
 	OutTransition.bObservedHealthDecrease = DeferredChange.bObservedReplicatedHealthDecrease;
+	OutTransition.bObservedHealthIncrease = DeferredChange.bObservedReplicatedHealthIncrease;
 	OutTransition.bObservedRepresentationRemoved = DeferredChange.bObservedReplicatedRepresentationRemoved;
 	OutTransition.bHasPreviousHealth = DeferredChange.bHasPreviousHealth;
 	OutTransition.PreviousHealth = DeferredChange.PreviousHealth;
@@ -1029,6 +1032,7 @@ void AChunkWorldExtended::QueueObservedReplicatedHealthTransition(
 	FDeferredBlockCustomDataChange& DeferredChange = DeferredBlockCustomDataChanges.FindOrAdd(BlockWorldPos);
 	DeferredChange.bObservedReplicatedHealthChange = true;
 	DeferredChange.bObservedReplicatedHealthDecrease |= CurrentHealth < PreviousHealth;
+	DeferredChange.bObservedReplicatedHealthIncrease |= CurrentHealth > PreviousHealth;
 	DeferredChange.bHasPreviousHealth = true;
 	DeferredChange.PreviousHealth = PreviousHealth;
 	DeferredChange.bHasCurrentHealth = true;
@@ -1059,7 +1063,7 @@ void AChunkWorldExtended::TryDestroyBlockFromCommittedHealth(const FIntVector& B
 		return;
 	}
 
-	const int32 HealthCustomDataIndex = BlockTypeSchemaComponent->GetBlockDamageHealthCustomDataIndex();
+	const int32 HealthCustomDataIndex = BlockTypeSchemaComponent->GetBlockHealthCustomDataIndex();
 	if (HealthCustomDataIndex == INDEX_NONE)
 	{
 		return;
@@ -1077,8 +1081,8 @@ void AChunkWorldExtended::TryDestroyBlockFromCommittedHealth(const FIntVector& B
 		return;
 	}
 
-	const FBlockDamageCustomData* DamageCustomData = BlockCustomData.GetPtr<FBlockDamageCustomData>();
-	if (DamageCustomData == nullptr || DamageCustomData->Health > 0)
+	const FBlockHealthCustomData* HealthCustomData = BlockCustomData.GetPtr<FBlockHealthCustomData>();
+	if (HealthCustomData == nullptr || HealthCustomData->Health > 0)
 	{
 		return;
 	}

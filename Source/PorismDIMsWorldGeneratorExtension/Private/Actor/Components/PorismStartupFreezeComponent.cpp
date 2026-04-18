@@ -11,6 +11,24 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogPorismStartupFreeze, Log, All);
 
+namespace PorismStartupFreeze
+{
+	static EMovementMode ResolveCharacterMovementRestoreMode(const UCharacterMovementComponent* CharacterMovement, const EMovementMode CapturedMode)
+	{
+		if (CapturedMode != MOVE_None)
+		{
+			return CapturedMode;
+		}
+
+		if (CharacterMovement != nullptr && CharacterMovement->DefaultLandMovementMode != MOVE_None)
+		{
+			return CharacterMovement->DefaultLandMovementMode;
+		}
+
+		return MOVE_Walking;
+	}
+}
+
 UPorismStartupFreezeComponent::UPorismStartupFreezeComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
@@ -250,7 +268,12 @@ void UPorismStartupFreezeComponent::RestoreFrozenState()
 		{
 			if (UCharacterMovementComponent* CharacterMovement = Cast<UCharacterMovementComponent>(MovementComponent))
 			{
-				CharacterMovement->SetMovementMode(FreezeState.CharacterMovementMode, FreezeState.CustomMovementMode);
+				// Project fix: startup freeze can capture MOVE_None during early BeginPlay, which would otherwise strand the character after release.
+				const EMovementMode RestoredMovementMode = PorismStartupFreeze::ResolveCharacterMovementRestoreMode(CharacterMovement, FreezeState.CharacterMovementMode);
+				const uint8 RestoredCustomMovementMode = RestoredMovementMode == FreezeState.CharacterMovementMode
+					? FreezeState.CustomMovementMode
+					: 0;
+				CharacterMovement->SetMovementMode(RestoredMovementMode, RestoredCustomMovementMode);
 				CharacterMovement->GravityScale = FreezeState.GravityScale;
 			}
 		}

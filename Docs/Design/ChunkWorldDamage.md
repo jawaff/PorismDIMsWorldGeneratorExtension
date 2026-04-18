@@ -1,15 +1,15 @@
 # ChunkWorldDamage
 
 ## Purpose
-`UChunkWorldBlockDamageBlueprintLibrary`, `UPorismPredictedBlockStateComponent`, and `UChunkWorldBlockFeedbackComponent` provide the shared chunk-world block damage route for projects using the extension plugin.
+`UChunkWorldBlockDamageBlueprintLibrary`, `UPorismPredictedBlockStateComponent`, and `UChunkWorldBlockFeedbackComponent` provide the shared chunk-world block health route for projects using the extension plugin.
 
 They provide:
-- authoritative block damage application from `FChunkWorldResolvedBlockHit`
-- explicit predicted and authoritative damage entry points on `UPorismPredictedBlockStateComponent`
+- authoritative block damage and healing application from `FChunkWorldResolvedBlockHit`
+- explicit predicted and authoritative damage/healing entry points on `UPorismPredictedBlockStateComponent`
 - local-only predicted health results without mutating client chunk-world custom data
 - schema-aligned health and invincibility reads through `FBlockDamageDefinition` and `FBlockDamageCustomData`
 - a damage-aware interaction component for health-capable blocks
-- authoritative hit and destroy feedback with optional immediate local initiator feedback
+- authoritative hit and destroy feedback with optional immediate local initiator feedback for damage paths
 - event-driven retirement of predicted values when authoritative health-related custom-data replication arrives
 
 ## Main Types
@@ -18,7 +18,7 @@ They provide:
 - `UPorismPredictedBlockStateComponent`
 - `UChunkWorldBlockFeedbackComponent`
 - `UChunkWorldDestructionActorInterface`
-- `FChunkWorldBlockDamageResult`
+- `FChunkWorldBlockHealthDeltaResult`
 - `FChunkWorldBlockDestructionRequest`
 - `FChunkWorldResolvedBlockHit`
 - `FChunkWorldBlockHitAuthorityPayload`
@@ -53,17 +53,20 @@ If the resolved block does not use those schema families, the shared damage help
 ## Current Behavior
 - Reads the current block health view through `UPorismPredictedBlockStateComponent::TryGetHealthState(...)`.
 - Applies local-only prediction through `UPorismPredictedBlockStateComponent::ApplyPredictedDamageRequest(...)`.
+- Applies local-only prediction through `UPorismPredictedBlockStateComponent::ApplyPredictedHealingRequest(...)` when health is being restored.
 - Applies authoritative mutation on the server through `UPorismPredictedBlockStateComponent::ApplyAuthoritativeDamageRequest(...)`.
+- Applies authoritative healing on the server through `UPorismPredictedBlockStateComponent::ApplyAuthoritativeHealingRequest(...)`.
 - Falls back to authored max health before runtime custom data is initialized.
 - Initializes block custom data on demand for authoritative writes only.
 - Honors `bInvincible` from `FBlockCustomDataBase`.
 - Applies real block mutation only on the server.
 - Removes the block through `AChunkWorldExtended::DestroyBlock(...)` when health reaches zero or lower after an authoritative write.
 - Spawns and triggers `DestructionActorClass` through `UChunkWorldDestructionActorInterface` when that class is authored on the damage definition.
-- Reports `BlockTypeName` in `FChunkWorldBlockDamageResult`.
+- Reports `BlockTypeName` in `FChunkWorldBlockHealthDeltaResult`.
 - Plays non-lethal hit feedback through the shared feedback component on authoritative non-lethal writes.
 - Plays destroy feedback through the shared feedback component on authoritative destroy paths.
 - Plays immediate local hit feedback for locally predicted requests.
+- Keeps healing side effects separate from damage side effects so restoring health does not trigger hit or destroy feedback.
 - Retires predictions when authoritative health-related custom-data replication is applied for the same `ChunkWorld + BlockWorldPos`.
 - Falls back to timeout cleanup for stale predictions.
 
@@ -77,7 +80,7 @@ The shared path intentionally does not own:
 ## How To Use
 1. Resolve a block hit into `FChunkWorldResolvedBlockHit` with `UChunkWorldHitBlueprintLibrary`.
 2. Compute final gameplay damage outside the plugin.
-3. Submit the request through `UPorismPredictedBlockStateComponent`.
+3. Submit damage through the damage request functions or healing through the healing request functions on `UPorismPredictedBlockStateComponent`.
 4. Read current block health through `UPorismPredictedBlockStateComponent`.
 
 If your interaction flow needs focused UI or input helpers, add `UPorismDamageTraceInteractionComponent` on the same owner.
@@ -91,9 +94,9 @@ If your interaction flow needs focused UI or input helpers, add `UPorismDamageTr
 Typical authoritative flow:
 1. Resolve `FChunkWorldResolvedBlockHit`.
 2. Compute project-specific damage outside the plugin.
-3. Build `FChunkWorldBlockDamageRequest`.
+3. Build `FChunkWorldBlockHealthDeltaRequest`.
 4. Call `ApplyAuthoritativeDamageRequest(...)` on an authority-owned `UPorismPredictedBlockStateComponent`.
-5. Inspect `FChunkWorldBlockDamageRequestResult` and `FChunkWorldBlockDamageResult` for:
+5. Inspect `FChunkWorldBlockHealthDeltaRequestResult` and `FChunkWorldBlockHealthDeltaResult` for:
    - `bAccepted`
    - `bAuthoritativeDamageApplied`
    - `bAppliedDamage`
@@ -106,11 +109,21 @@ Typical authoritative flow:
 Typical predicted flow:
 1. Resolve `FChunkWorldResolvedBlockHit`.
 2. Compute project-specific damage outside the plugin.
-3. Build `FChunkWorldBlockDamageRequest`.
+3. Build `FChunkWorldBlockHealthDeltaRequest`.
 4. Call `ApplyPredictedDamageRequest(...)` on a locally controlled client-owned `UPorismPredictedBlockStateComponent`.
-5. Inspect `FChunkWorldBlockDamageRequestResult` for:
+5. Inspect `FChunkWorldBlockHealthDeltaRequestResult` for:
    - `bPredictionWritten`
    - `bPlayedImmediateLocalFeedback`
+
+Typical predicted healing flow:
+1. Resolve `FChunkWorldResolvedBlockHit`.
+2. Compute project-specific healing outside the plugin.
+3. Build `FChunkWorldBlockHealthDeltaRequest`.
+4. Call `ApplyPredictedHealingRequest(...)` on a locally controlled client-owned `UPorismPredictedBlockStateComponent`.
+5. Inspect `FChunkWorldBlockHealthDeltaRequestResult` for:
+   - `bPredictionWritten`
+   - `HealthDeltaResult.bAppliedHealing`
+   - `HealthDeltaResult.NewHealth`
 
 ## Shared Request Model
 `UPorismPredictedBlockStateComponent` is the main reusable block-damage boundary.
@@ -125,6 +138,11 @@ Use it for:
 The request model is intentionally source-agnostic:
 - `ResolvedHit`
 - `DamageAmount`
+- optional `RequestContextTag`
+
+Healing uses the same source-agnostic model with:
+- `ResolvedHit`
+- `HealingAmount`
 - optional `RequestContextTag`
 
 For client-to-server handoff, do not send `FChunkWorldResolvedBlockHit` as authoritative truth. Convert it into `FChunkWorldBlockHitAuthorityPayload`, send that payload, and let the server re-resolve a fresh `FChunkWorldResolvedBlockHit` before it computes and applies damage.
@@ -152,7 +170,7 @@ Use it when:
 
 Current behavior:
 - stores predicted results by `ChunkWorld + BlockWorldPos`
-- steps predicted health down from the latest stored predicted result for the same block
+- steps predicted health from the latest stored predicted result for the same block, whether the next request is damage or healing
 - prefers predicted values over authoritative reads until reconciliation
 - never writes authoritative values into the prediction cache
 - retires predictions on:
@@ -167,7 +185,7 @@ The shared reconciliation path is event-driven.
 Current route:
 1. authoritative custom-data replication is applied by the chunk world
 2. `AChunkWorldExtended` broadcasts `OnBlockCustomDataChanged`
-3. `UPorismPredictedBlockStateComponent` clears matching prediction and pending queued damage when appropriate
+3. `UPorismPredictedBlockStateComponent` clears matching prediction and pending queued health requests when appropriate
 4. `UPorismPredictedBlockStateComponent` broadcasts `OnTrackedBlockStateChanged`
 
 This avoids chunk scans and keeps the prediction cache bounded.

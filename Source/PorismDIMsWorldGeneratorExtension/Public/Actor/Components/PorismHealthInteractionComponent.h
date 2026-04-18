@@ -4,14 +4,14 @@
 
 #include "CoreMinimal.h"
 #include "Actor/Components/PorismTraceInteractionComponent.h"
-#include "Actor/Interaction/PorismDamageTraceInteractionTypes.h"
+#include "Actor/Interaction/PorismHealthTraceInteractionTypes.h"
 #include "PorismHealthInteractionComponent.generated.h"
 
 class UPorismPredictedBlockStateComponent;
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnChunkWorldDamageBlockInteractionChanged, const FChunkWorldDamageBlockInteractionResult&, Result);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnChunkWorldDamageBlockInteractionUpdated, const FChunkWorldDamageBlockInteractionResult&, Result);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnChunkWorldDamageBlockCustomDataInitialized, const FChunkWorldDamageBlockInteractionResult&, Result);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnChunkWorldHealthBlockInteractionChanged, const FChunkWorldHealthBlockInteractionResult&, Result);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnChunkWorldHealthBlockInteractionUpdated, const FChunkWorldHealthBlockInteractionResult&, Result);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnChunkWorldHealthBlockCustomDataInitialized, const FChunkWorldHealthBlockInteractionResult&, Result);
 
 /**
  * Shared interaction component that builds on the generic trace loop with optional health-aware block payloads.
@@ -22,29 +22,29 @@ class PORISMDIMSWORLDGENERATOREXTENSION_API UPorismHealthInteractionComponent : 
 	GENERATED_BODY()
 
 public:
-	/** Creates a damage-aware interaction component that only selects blocks when they support the shared damage schema family. */
+	/** Creates a health-aware interaction component that only selects blocks when they support the shared health schema family. */
 	UPorismHealthInteractionComponent();
 
-	/** Returns the last health-aware block interaction payload. Pair this with HasActiveDamageBlockInteraction() before treating it as current state. */
-	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld|Damage")
-	FChunkWorldDamageBlockInteractionResult GetLastDamageBlockInteractionResult() const;
+	/** Returns the last health-aware block interaction payload. Pair this with HasActiveHealthBlockInteraction() before treating it as current state. */
+	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld|Health")
+	FChunkWorldHealthBlockInteractionResult GetLastHealthBlockInteractionResult() const;
 
-	/** Returns whether a damage-capable block interaction target is currently active. */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld|Damage")
-	bool HasActiveDamageBlockInteraction() const { return FocusedDamageState.bIsActive; }
+	/** Returns whether a health-aware block interaction target is currently active. */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld|Health")
+	bool HasActiveHealthBlockInteraction() const { return FocusedHealthState.bIsActive; }
 
-	UPROPERTY(BlueprintAssignable, Category = "Block|ChunkWorld|Damage")
-	FOnChunkWorldDamageBlockInteractionChanged OnDamageBlockInteractionStarted;
+	UPROPERTY(BlueprintAssignable, Category = "Block|ChunkWorld|Health")
+	FOnChunkWorldHealthBlockInteractionChanged OnHealthBlockInteractionStarted;
 
-	UPROPERTY(BlueprintAssignable, Category = "Block|ChunkWorld|Damage")
-	FOnChunkWorldDamageBlockInteractionChanged OnDamageBlockInteractionEnded;
+	UPROPERTY(BlueprintAssignable, Category = "Block|ChunkWorld|Health")
+	FOnChunkWorldHealthBlockInteractionChanged OnHealthBlockInteractionEnded;
 
-	UPROPERTY(BlueprintAssignable, Category = "Block|ChunkWorld|Damage")
-	FOnChunkWorldDamageBlockInteractionUpdated OnDamageBlockInteractionUpdated;
+	UPROPERTY(BlueprintAssignable, Category = "Block|ChunkWorld|Health")
+	FOnChunkWorldHealthBlockInteractionUpdated OnHealthBlockInteractionUpdated;
 
-	/** Broadcast when the focused damage-capable block has runtime custom data initialized. */
-	UPROPERTY(BlueprintAssignable, Category = "Block|ChunkWorld|Damage")
-	FOnChunkWorldDamageBlockCustomDataInitialized OnDamageBlockCustomDataInitialized;
+	/** Broadcast when the focused health-aware block has runtime custom data initialized. */
+	UPROPERTY(BlueprintAssignable, Category = "Block|ChunkWorld|Health")
+	FOnChunkWorldHealthBlockCustomDataInitialized OnHealthBlockCustomDataInitialized;
 
 protected:
 	virtual void BeginPlay() override;
@@ -52,21 +52,21 @@ protected:
 	virtual bool ShouldAcceptBlockInteractionResult(const FChunkWorldBlockInteractionResult& BlockResult) const override;
 	virtual bool DidBlockInteractionResultChange(bool bHadPreviousResult, const FChunkWorldBlockInteractionResult& PreviousResult, bool bHasNewResult, const FChunkWorldBlockInteractionResult& NewResult) const override;
 
-	/** If true, draws a persistent on-screen stats block for the current damage trace target and payload state. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Debug", meta = (ToolTip = "If true, draws a persistent on-screen stats block for the current damage trace target and payload state."))
+	/** If true, draws a persistent on-screen stats block for the current health interaction target and payload state. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Debug", meta = (ToolTip = "If true, draws a persistent on-screen stats block for the current health interaction target and payload state."))
 	bool bShowDebugStats = false;
 
 private:
-	struct FFocusedDamageBlockState
+	struct FFocusedHealthBlockState
 	{
 		bool bIsActive = false;
 		bool bHasAnnouncedInitialized = false;
 		TWeakObjectPtr<AChunkWorld> ChunkWorld;
 		FIntVector BlockWorldPos = FIntVector::ZeroValue;
-		FChunkWorldDamageBlockInteractionResult Payload;
+		FChunkWorldHealthBlockInteractionResult Payload;
 	};
 
-	FFocusedDamageBlockState FocusedDamageState;
+	FFocusedHealthBlockState FocusedHealthState;
 	TWeakObjectPtr<UPorismPredictedBlockStateComponent> PredictedBlockStateComponent;
 
 	UFUNCTION()
@@ -82,18 +82,18 @@ private:
 	void HandleBlockCustomDataInitialized(const FChunkWorldBlockInteractionResult& Result);
 
 	void HandleTrackedBlockStateChanged(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos);
-	void RefreshFocusedDamageState();
-	void ResetFocusedDamageState();
-	bool IsSameFocusedBlock(const FFocusedDamageBlockState& State, AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos) const;
-	bool HasInitializedDisplayData(const FChunkWorldDamageBlockInteractionResult& Result) const;
-	bool DidDamagePayloadChange(const FChunkWorldDamageBlockInteractionResult& PreviousResult, const FChunkWorldDamageBlockInteractionResult& NewResult) const;
-	void EmitDamageStateTransition(const FFocusedDamageBlockState& PreviousState, FFocusedDamageBlockState& NewState);
+	void RefreshFocusedHealthState();
+	void ResetFocusedHealthState();
+	bool IsSameFocusedBlock(const FFocusedHealthBlockState& State, AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos) const;
+	bool HasInitializedDisplayData(const FChunkWorldHealthBlockInteractionResult& Result) const;
+	bool DidHealthPayloadChange(const FChunkWorldHealthBlockInteractionResult& PreviousResult, const FChunkWorldHealthBlockInteractionResult& NewResult) const;
+	void EmitHealthStateTransition(const FFocusedHealthBlockState& PreviousState, FFocusedHealthBlockState& NewState);
 	void BindPredictedBlockStateComponent();
 	void UnbindPredictedBlockStateComponent();
 	void DrawDebugStats(class UCanvas* Canvas, class APlayerController* DebugOwner);
 	bool ShouldDrawDebugStatsForPlayer(const class APlayerController* DebugOwner) const;
 	void MaybeLogDebugStats(const FString& Snapshot);
-	bool TryBuildDamageBlockInteractionResult(const FChunkWorldBlockInteractionResult& BlockResult, FChunkWorldDamageBlockInteractionResult& OutResult) const;
+	bool TryBuildHealthBlockInteractionResult(const FChunkWorldBlockInteractionResult& BlockResult, FChunkWorldHealthBlockInteractionResult& OutResult) const;
 	UPorismPredictedBlockStateComponent* GetPredictedBlockStateComponent() const;
 
 	FDelegateHandle DebugDrawDelegateHandle;

@@ -146,7 +146,7 @@ The damage result includes:
 The component caches one focused damage-state record and emits transitions from that record. It does not treat every generic trace refresh as a damage update, and it ignores tracked block-state change notifications for blocks that are not currently focused.
 
 ### Damage Apply Helper
-`ApplyDamageToCurrentBlock(...)` is a convenience wrapper for focused interaction flows. It builds a shared `FChunkWorldBlockDamageRequest` and forwards it into `UPorismPredictedBlockStateComponent`.
+`ApplyDamageToCurrentBlock(...)` is a convenience wrapper for focused interaction flows. It builds a shared `FChunkWorldBlockHealthDeltaRequest` and forwards it into `UPorismPredictedBlockStateComponent`.
 
 That means:
 - authority-owned callers apply real damage immediately

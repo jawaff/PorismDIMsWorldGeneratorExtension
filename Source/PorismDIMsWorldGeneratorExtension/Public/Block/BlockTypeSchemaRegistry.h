@@ -137,26 +137,6 @@ struct FBlockHealthCustomData : public FBlockCustomDataBase
 };
 
 /**
- * Backward-compatible damage alias kept so existing assets and gameplay code continue to deserialize while
- * the project-standard schema naming migrates to the health family.
- */
-USTRUCT(BlueprintType)
-struct FBlockDamageDefinition : public FBlockHealthDefinition
-{
-	GENERATED_BODY()
-};
-
-/**
- * Backward-compatible damage alias kept so existing assets and gameplay code continue to deserialize while
- * the project-standard schema naming migrates to the health family.
- */
-USTRUCT(BlueprintType)
-struct FBlockDamageCustomData : public FBlockHealthCustomData
-{
-	GENERATED_BODY()
-};
-
-/**
  * Authored payloads for one semantic block type.
  */
 USTRUCT(BlueprintType)

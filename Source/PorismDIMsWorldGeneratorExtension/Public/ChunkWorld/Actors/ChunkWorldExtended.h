@@ -48,6 +48,10 @@ struct FChunkWorldSettledBlockTransition
 	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld")
 	bool bObservedHealthDecrease = false;
 
+	/** True when the settled local health view increased across this batch. */
+	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld")
+	bool bObservedHealthIncrease = false;
+
 	/** True when the settled local representation changed from represented to not represented across this batch. */
 	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld")
 	bool bObservedRepresentationRemoved = false;
@@ -230,6 +234,7 @@ private:
 		bool bTouchedHealth = false;
 		bool bObservedReplicatedHealthChange = false;
 		bool bObservedReplicatedHealthDecrease = false;
+		bool bObservedReplicatedHealthIncrease = false;
 		bool bObservedReplicatedRepresentationRemoved = false;
 		bool bHasPreviousHealth = false;
 		int32 PreviousHealth = 0;

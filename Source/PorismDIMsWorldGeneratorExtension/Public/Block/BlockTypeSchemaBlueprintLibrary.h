@@ -44,18 +44,6 @@ public:
 	static UScriptStruct* GetBlockHealthCustomDataStruct();
 
 	/**
-	 * Returns the default health-oriented definition struct.
-	 */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|Schema")
-	static UScriptStruct* GetBlockDamageDefinitionStruct();
-
-	/**
-	 * Returns the default health-oriented custom-data struct.
-	 */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|Schema")
-	static UScriptStruct* GetBlockDamageCustomDataStruct();
-
-	/**
 	 * Returns true when the supplied instanced payload derives from the block definition base family.
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|Schema")
@@ -103,31 +91,4 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|Schema|Health")
 	static bool TryGetBlockHealthCustomData(const FInstancedStruct& Payload, FBlockHealthCustomData& OutHealthCustomData);
 
-	/**
-	 * Returns true when the supplied instanced payload derives from the health definition family.
-	 * Kept for backward compatibility with older damage-oriented naming.
-	 */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|Schema|Health")
-	static bool IsBlockDamageDefinitionPayload(const FInstancedStruct& Payload);
-
-	/**
-	 * Returns true when the supplied instanced payload derives from the health custom-data family.
-	 * Kept for backward compatibility with older damage-oriented naming.
-	 */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|Schema|Health")
-	static bool IsBlockDamageCustomDataPayload(const FInstancedStruct& Payload);
-
-	/**
-	 * Copies a health-oriented definition payload out of an instanced struct when the payload derives from the shared health definition base.
-	 * Kept for backward compatibility with older damage-oriented naming.
-	 */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|Schema|Health")
-	static bool TryGetBlockDamageDefinition(const FInstancedStruct& Payload, FBlockDamageDefinition& OutDamageDefinition);
-
-	/**
-	 * Copies a health-oriented custom-data payload out of an instanced struct when the payload derives from the shared health custom-data base.
-	 * Kept for backward compatibility with older damage-oriented naming.
-	 */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|Schema|Health")
-	static bool TryGetBlockDamageCustomData(const FInstancedStruct& Payload, FBlockDamageCustomData& OutDamageCustomData);
 };

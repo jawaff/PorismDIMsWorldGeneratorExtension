@@ -26,7 +26,7 @@ struct FPorismExtensionNestedCustomData : public FBlockCustomDataBase
 };
 
 USTRUCT()
-struct FPorismExtensionDerivedDamageCustomData : public FBlockHealthCustomData
+struct FPorismExtensionDerivedHealthCustomData : public FBlockHealthCustomData
 {
 	GENERATED_BODY()
 
@@ -47,7 +47,7 @@ struct FPorismExtensionUnsupportedCustomData : public FBlockCustomDataBase
 };
 
 USTRUCT()
-struct FPorismExtensionDerivedDamageDefinition : public FBlockHealthDefinition
+struct FPorismExtensionDerivedHealthDefinition : public FBlockHealthDefinition
 {
 	GENERATED_BODY()
 

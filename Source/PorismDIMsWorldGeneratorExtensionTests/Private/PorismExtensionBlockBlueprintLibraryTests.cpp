@@ -13,7 +13,7 @@
 
 namespace
 {
-	FInstancedStruct MakeExactDamageDefinitionPayload(int32 MaxHealth, bool bInvincible)
+	FInstancedStruct MakeExactHealthDefinitionPayload(int32 MaxHealth, bool bInvincible)
 	{
 		FBlockHealthDefinition Definition;
 		Definition.MaxHealth = MaxHealth;
@@ -24,7 +24,7 @@ namespace
 		return Payload;
 	}
 
-	FInstancedStruct MakeExactDamageCustomDataPayload(int32 Health)
+	FInstancedStruct MakeExactHealthCustomDataPayload(int32 Health)
 	{
 		FBlockHealthCustomData CustomData;
 		CustomData.Health = Health;
@@ -93,8 +93,8 @@ bool FPorismExtensionBlockHitBlueprintLibraryRegistryPayloadTest::RunTest(const 
 
 	FBlockTypeSchema Row;
 	Row.BlockTypeName = TAG_PorismExtension_TestBlock;
-	Row.Definition = MakeExactDamageDefinitionPayload(72, true);
-	Row.CustomData = MakeExactDamageCustomDataPayload(18);
+	Row.Definition = MakeExactHealthDefinitionPayload(72, true);
+	Row.CustomData = MakeExactHealthCustomDataPayload(18);
 
 	TArray<FBlockTypeSchema>& MutableRows = const_cast<TArray<FBlockTypeSchema>&>(Registry->GetBlockTypeDefinitions());
 	MutableRows.Add(Row);
@@ -132,10 +132,12 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FPorismExtensionBlockDamageBlueprintLibraryInvalidInputTest::RunTest(const FString& Parameters)
 {
 	FChunkWorldResolvedBlockHit ResolvedHit;
-	FChunkWorldBlockDamageResult DamageResult;
+	FChunkWorldBlockHealthDeltaResult DamageResult;
 	TestFalse(TEXT("Hit feedback rejects invalid resolved hits"), UChunkWorldBlockDamageBlueprintLibrary::TryBroadcastHitFeedbackForResolvedBlockHit(ResolvedHit));
 	TestFalse(TEXT("Damage apply rejects invalid resolved hits"), UChunkWorldBlockDamageBlueprintLibrary::TryApplyBlockDamageForResolvedBlockHit(ResolvedHit, 5, DamageResult));
 	TestFalse(TEXT("Damage apply rejects zero damage"), UChunkWorldBlockDamageBlueprintLibrary::TryApplyBlockDamageForResolvedBlockHit(ResolvedHit, 0, DamageResult));
+	TestFalse(TEXT("Healing apply rejects invalid resolved hits"), UChunkWorldBlockDamageBlueprintLibrary::TryApplyBlockHealingForResolvedBlockHit(ResolvedHit, 5, DamageResult));
+	TestFalse(TEXT("Healing apply rejects zero healing"), UChunkWorldBlockDamageBlueprintLibrary::TryApplyBlockHealingForResolvedBlockHit(ResolvedHit, 0, DamageResult));
 
 	int32 CurrentHealth = 0;
 	int32 MaxHealth = 0;

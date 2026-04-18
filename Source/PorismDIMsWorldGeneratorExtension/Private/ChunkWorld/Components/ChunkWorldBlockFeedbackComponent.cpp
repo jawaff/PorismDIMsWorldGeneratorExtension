@@ -382,13 +382,13 @@ bool UChunkWorldBlockFeedbackComponent::TryResolveHitFeedbackAssets(const FChunk
 		return false;
 	}
 
-	FBlockDamageDefinition DamageDefinition;
-	if (!UBlockTypeSchemaBlueprintLibrary::TryGetBlockDamageDefinition(DefinitionStruct, DamageDefinition))
+	FBlockHealthDefinition HealthDefinition;
+	if (!UBlockTypeSchemaBlueprintLibrary::TryGetBlockHealthDefinition(DefinitionStruct, HealthDefinition))
 	{
 		return false;
 	}
 
-	OutSound = DamageDefinition.HitSound;
+	OutSound = HealthDefinition.HitSound;
 	return OutSound != nullptr;
 }
 

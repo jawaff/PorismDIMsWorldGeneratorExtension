@@ -63,13 +63,25 @@ public:
 	 * Applies one local-only predicted damage request and updates tracked prediction state.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld|Prediction")
-	bool ApplyPredictedDamageRequest(const FChunkWorldBlockDamageRequest& DamageRequest, FChunkWorldBlockDamageRequestResult& OutResult);
+	bool ApplyPredictedDamageRequest(const FChunkWorldBlockHealthDeltaRequest& DamageRequest, FChunkWorldBlockHealthDeltaRequestResult& OutResult);
 
 	/**
 	 * Applies one authoritative server-side damage request through the shared block damage library.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld|Prediction")
-	bool ApplyAuthoritativeDamageRequest(const FChunkWorldBlockDamageRequest& DamageRequest, FChunkWorldBlockDamageRequestResult& OutResult);
+	bool ApplyAuthoritativeDamageRequest(const FChunkWorldBlockHealthDeltaRequest& DamageRequest, FChunkWorldBlockHealthDeltaRequestResult& OutResult);
+
+	/**
+	 * Applies one local-only predicted healing request and updates tracked prediction state.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld|Prediction")
+	bool ApplyPredictedHealingRequest(const FChunkWorldBlockHealthDeltaRequest& HealingRequest, FChunkWorldBlockHealthDeltaRequestResult& OutResult);
+
+	/**
+	 * Applies one authoritative server-side healing request through the shared block damage library.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld|Prediction")
+	bool ApplyAuthoritativeHealingRequest(const FChunkWorldBlockHealthDeltaRequest& HealingRequest, FChunkWorldBlockHealthDeltaRequestResult& OutResult);
 
 	/**
 	 * Clears a stored prediction because authoritative state for the same block has arrived.
@@ -97,20 +109,23 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Prediction", meta = (ClampMin = "0.01", UIMin = "0.01", ToolTip = "How long one predicted block state stays alive without an authoritative update."))
 	float PredictionTimeoutSeconds = 2.0f;
 
-	/** If true, draws a persistent on-screen stats block for local prediction and authoritative damage activity. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Debug", meta = (ToolTip = "If true, draws a persistent on-screen stats block for local prediction and authoritative damage activity."))
+	/** If true, draws a persistent on-screen stats block for local prediction and authoritative health activity. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Debug", meta = (ToolTip = "If true, draws a persistent on-screen stats block for local prediction and authoritative health activity."))
 	bool bShowDebugStats = false;
 
 private:
-	/** Lightweight debug snapshot for the most recent predicted or authoritative damage request. */
-	struct FLastDamageRequestDebugState
+	/** Lightweight debug snapshot for the most recent predicted or authoritative health request. */
+	struct FLastHealthRequestDebugState
 	{
 		bool bHasRecord = false;
+		bool bIsHealing = false;
 		bool bCallSucceeded = false;
 		float WorldTimeSeconds = 0.0f;
 		FString PathName;
-		FChunkWorldBlockDamageRequest Request;
-		FChunkWorldBlockDamageRequestResult Result;
+		FChunkWorldResolvedBlockHit ResolvedHit;
+		int32 RequestedAmount = 0;
+		FName RequestContextTag = NAME_None;
+		FChunkWorldBlockHealthDeltaRequestResult Result;
 	};
 
 	struct FPredictedBlockKey
@@ -136,32 +151,39 @@ private:
 	void SchedulePredictionPrune();
 	void HandlePredictionPruneTimer();
 	bool ShouldRegisterPredictionNotifications() const;
-	bool ValidateDamageRequest(const FChunkWorldBlockDamageRequest& DamageRequest) const;
-	bool TryBuildPredictedDamageResult(const FChunkWorldBlockDamageRequest& DamageRequest, float PredictionTimeSeconds, FChunkWorldBlockDamageResult& OutResult) const;
-	bool DidTrackedHealthStateChange(const FChunkWorldBlockDamageResult* PreviousResult, const FChunkWorldBlockDamageResult& NewResult) const;
-	bool TryApplyImmediateLocalFeedback(const FChunkWorldBlockDamageRequest& DamageRequest, const FChunkWorldBlockDamageResult& DamageResult) const;
-	void StorePredictedDamageResult(const FChunkWorldBlockDamageRequest& DamageRequest, const FChunkWorldBlockDamageResult& DamageResult);
+	bool ValidateHealthRequest(const FChunkWorldResolvedBlockHit& ResolvedHit, int32 Amount, bool bIsHealing) const;
+	bool TryBuildPredictedHealthChangeResult(const FChunkWorldResolvedBlockHit& ResolvedHit, int32 Amount, bool bIsHealing, float PredictionTimeSeconds, FChunkWorldBlockHealthDeltaResult& OutResult) const;
+	bool DidTrackedHealthStateChange(const FChunkWorldBlockHealthDeltaResult* PreviousResult, const FChunkWorldBlockHealthDeltaResult& NewResult) const;
+	bool TryApplyImmediateLocalDamageFeedback(const FChunkWorldResolvedBlockHit& ResolvedHit, const FChunkWorldBlockHealthDeltaResult& DamageResult) const;
+	void StorePredictedHealthChangeResult(const FChunkWorldResolvedBlockHit& ResolvedHit, const FChunkWorldBlockHealthDeltaResult& DamageResult);
 	void BroadcastTrackedBlockStateChanged(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos);
 	void BindObservedChunkWorld(AChunkWorld* ChunkWorld);
 	void BindObservedChunkWorlds();
 	void UnbindObservedChunkWorlds();
 	void HandleActorSpawned(AActor* SpawnedActor);
-	void UpdateLastDamageRequestDebugState(const TCHAR* PathName, const FChunkWorldBlockDamageRequest& DamageRequest, const FChunkWorldBlockDamageRequestResult& RequestResult, bool bCallSucceeded);
+	void UpdateLastHealthRequestDebugState(
+		const TCHAR* PathName,
+		const FChunkWorldResolvedBlockHit& ResolvedHit,
+		int32 RequestedAmount,
+		FName RequestContextTag,
+		bool bIsHealing,
+		const FChunkWorldBlockHealthDeltaRequestResult& RequestResult,
+		bool bCallSucceeded);
 	void DrawDebugStats(class UCanvas* Canvas, class APlayerController* DebugOwner);
 	bool ShouldDrawDebugStatsForPlayer(const class APlayerController* DebugOwner) const;
 	void MaybeLogDebugStats(const FString& Snapshot);
 	static FPredictedBlockKey MakeKey(const FChunkWorldResolvedBlockHit& ResolvedHit);
 	static FPredictedBlockKey MakeKey(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos);
 
-	TMap<FPredictedBlockKey, FChunkWorldBlockDamageResult> PredictedBlockStates;
-	TMap<FPredictedBlockKey, TArray<FChunkWorldBlockDamageRequest>> PendingPredictedDamageRequestsByBlock;
+	TMap<FPredictedBlockKey, FChunkWorldBlockHealthDeltaResult> PredictedBlockStates;
+	TMap<FPredictedBlockKey, int32> PendingPredictedRequestCountsByBlock;
 	FPorismTrackedBlockStateChangedSignature TrackedBlockStateChangedEvent;
 	TArray<TWeakObjectPtr<class AChunkWorldExtended>> ObservedChunkWorlds;
 	FDelegateHandle ActorSpawnedHandle;
 	FDelegateHandle DebugDrawDelegateHandle;
 	FTimerHandle PredictionPruneTimerHandle;
-	FLastDamageRequestDebugState LastPredictedDamageRequestDebugState;
-	FLastDamageRequestDebugState LastAuthoritativeDamageRequestDebugState;
+	FLastHealthRequestDebugState LastPredictedHealthRequestDebugState;
+	FLastHealthRequestDebugState LastAuthoritativeHealthRequestDebugState;
 	float LastDebugStatsLogTimeSeconds = -1000.0f;
 	FString LastDebugStatsLogSnapshot;
 };

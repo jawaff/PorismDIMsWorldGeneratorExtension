@@ -10,10 +10,10 @@
 class AChunkWorld;
 
 /**
- * Reusable block-damage result shared by chunk-world gameplay that applies integer damage to one resolved block.
+ * Reusable block-health result shared by chunk-world gameplay that applies integer damage or healing to one resolved block.
  */
 USTRUCT(BlueprintType)
-struct FChunkWorldBlockDamageResult
+struct FChunkWorldBlockHealthDeltaResult
 {
 	GENERATED_BODY()
 
@@ -21,9 +21,17 @@ struct FChunkWorldBlockDamageResult
 	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")
 	bool bHitWasRepresentedBlock = false;
 
-	/** True when the request changed block health or removed the block. */
+	/** True when the request applied damage and reduced block health or removed the block. */
 	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")
 	bool bAppliedDamage = false;
+
+	/** True when the request changed block health by either damage or healing. */
+	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")
+	bool bAppliedHealthChange = false;
+
+	/** True when the request restored health without destroying the block. */
+	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")
+	bool bAppliedHealing = false;
 
 	/** True when the block was invincible and the request exited without mutating health. */
 	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")
@@ -41,7 +49,7 @@ struct FChunkWorldBlockDamageResult
 	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")
 	FIntVector BlockWorldPos = FIntVector::ZeroValue;
 
-	/** Canonical block type tag for the damaged block. */
+	/** Canonical block type tag for the affected block. */
 	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")
 	FGameplayTag BlockTypeName;
 
@@ -49,19 +57,19 @@ struct FChunkWorldBlockDamageResult
 	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")
 	TObjectPtr<AChunkWorld> ChunkWorld = nullptr;
 
-	/** Runtime material index for the damaged block. */
+	/** Runtime material index for the affected block. */
 	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")
 	int32 MaterialIndex = 0;
 
-	/** Runtime mesh index for the damaged block. */
+	/** Runtime mesh index for the affected block. */
 	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")
 	int32 MeshIndex = 0;
 
-	/** Health before this damage request. */
+	/** Health before this request. */
 	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")
 	int32 PreviousHealth = 0;
 
-	/** Health after this damage request. */
+	/** Health after this request. */
 	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")
 	int32 NewHealth = 0;
 
@@ -69,9 +77,13 @@ struct FChunkWorldBlockDamageResult
 	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")
 	int32 DamageApplied = 0;
 
-	/** True when the shared damage schema family was available and block health could be resolved. */
+	/** Actual healing consumed by this request. */
 	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")
-	bool bHasDamageSchema = false;
+	int32 HealingApplied = 0;
+
+	/** True when the shared health schema family was available and block health could be resolved. */
+	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")
+	bool bHasHealthSchema = false;
 
 	/** Timestamp in world seconds for local-only predicted writes. */
 	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")
@@ -79,32 +91,31 @@ struct FChunkWorldBlockDamageResult
 };
 
 /**
- * Shared block-damage request used after higher-level gameplay has already computed final damage.
+ * Shared block-health request used after higher-level gameplay has already computed a final health delta.
  */
 USTRUCT(BlueprintType)
-struct FChunkWorldBlockDamageRequest
+struct FChunkWorldBlockHealthDeltaRequest
 {
 	GENERATED_BODY()
 
-	/** Resolved block identity for the damage request. */
+	/** Resolved block identity for the health-delta request. */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Block|ChunkWorld|Damage")
 	FChunkWorldResolvedBlockHit ResolvedHit;
 
-	/** Final integer damage amount to apply. */
+	/** Final positive integer amount to apply through the caller's selected damage or healing path. */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Block|ChunkWorld|Damage", meta = (ClampMin = "0", UIMin = "0"))
-	int32 DamageAmount = 0;
+	int32 Amount = 0;
 
 	/** Optional caller-owned context tag that can be used for audit or future routing. */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Block|ChunkWorld|Damage")
 	FName RequestContextTag = NAME_None;
-
 };
 
 /**
- * Shared block-damage request result describing which prediction and authority paths ran.
+ * Shared block-health request result describing which prediction and authority paths ran.
  */
 USTRUCT(BlueprintType)
-struct FChunkWorldBlockDamageRequestResult
+struct FChunkWorldBlockHealthDeltaRequestResult
 {
 	GENERATED_BODY()
 
@@ -120,11 +131,15 @@ struct FChunkWorldBlockDamageRequestResult
 	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")
 	bool bAuthoritativeDamageApplied = false;
 
-	/** True when immediate local feedback played for the initiating process. */
+	/** True when authoritative healing was applied immediately on this process. */
+	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")
+	bool bAuthoritativeHealingApplied = false;
+
+	/** True when immediate local feedback played for the initiating process. Damage uses this for hit feedback; healing leaves it false. */
 	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")
 	bool bPlayedImmediateLocalFeedback = false;
 
-	/** Final shared damage result produced by either prediction or authoritative mutation. */
+	/** Final shared health result produced by either prediction or authoritative mutation. */
 	UPROPERTY(BlueprintReadOnly, Category = "Block|ChunkWorld|Damage")
-	FChunkWorldBlockDamageResult DamageResult;
+	FChunkWorldBlockHealthDeltaResult HealthDeltaResult;
 };

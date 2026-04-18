@@ -13,17 +13,17 @@
 
 namespace
 {
-	bool TryResolveDamageDefinitionForResolvedBlockHit(
+	bool TryResolveHealthDefinitionForResolvedBlockHit(
 		const FChunkWorldResolvedBlockHit& ResolvedHit,
 		FGameplayTag& OutBlockTypeName,
-		FBlockDamageDefinition& OutDefinition,
+		FBlockHealthDefinition& OutDefinition,
 		FInstancedStruct& OutDefaultCustomDataPayload,
-		FBlockDamageCustomData& OutDefaultCustomData)
+		FBlockHealthCustomData& OutDefaultCustomData)
 	{
 		OutBlockTypeName = FGameplayTag();
-		OutDefinition = FBlockDamageDefinition();
+		OutDefinition = FBlockHealthDefinition();
 		OutDefaultCustomDataPayload.Reset();
-		OutDefaultCustomData = FBlockDamageCustomData();
+		OutDefaultCustomData = FBlockHealthCustomData();
 
 		if (!ResolvedHit.bHasBlock || !IsValid(ResolvedHit.ChunkWorld) || !IsValid(ResolvedHit.BlockTypeSchemaComponent))
 		{
@@ -36,7 +36,7 @@ namespace
 			return false;
 		}
 
-		if (!UBlockTypeSchemaBlueprintLibrary::TryGetBlockDamageDefinition(DefinitionStruct, OutDefinition))
+		if (!UBlockTypeSchemaBlueprintLibrary::TryGetBlockHealthDefinition(DefinitionStruct, OutDefinition))
 		{
 			return false;
 		}
@@ -47,7 +47,7 @@ namespace
 			return false;
 		}
 
-		if (!UBlockTypeSchemaBlueprintLibrary::TryGetBlockDamageCustomData(DefaultCustomData, OutDefaultCustomData))
+		if (!UBlockTypeSchemaBlueprintLibrary::TryGetBlockHealthCustomData(DefaultCustomData, OutDefaultCustomData))
 		{
 			return false;
 		}
@@ -56,19 +56,19 @@ namespace
 		return true;
 	}
 
-	FBlockDamageCustomData* GetMutableBlockDamageCustomData(FInstancedStruct& Payload)
+	FBlockHealthCustomData* GetMutableBlockHealthCustomData(FInstancedStruct& Payload)
 	{
 		const UScriptStruct* PayloadStruct = Payload.GetScriptStruct();
-		if (PayloadStruct == nullptr || !PayloadStruct->IsChildOf(FBlockDamageCustomData::StaticStruct()))
+		if (PayloadStruct == nullptr || !PayloadStruct->IsChildOf(FBlockHealthCustomData::StaticStruct()))
 		{
 			return nullptr;
 		}
 
 		void* PayloadMemory = Payload.GetMutableMemory();
-		return PayloadMemory != nullptr ? static_cast<FBlockDamageCustomData*>(PayloadMemory) : nullptr;
+		return PayloadMemory != nullptr ? static_cast<FBlockHealthCustomData*>(PayloadMemory) : nullptr;
 	}
 
-	void RequestDestructionActorPreload(const FBlockDamageDefinition& Definition)
+	void RequestDestructionActorPreload(const FBlockHealthDefinition& Definition)
 	{
 		if (Definition.DestructionActorClass.IsNull() || Definition.DestructionActorClass.IsValid())
 		{
@@ -81,24 +81,24 @@ namespace
 			return;
 		}
 
-		// Best-effort preload: destruction actors are one-shot presenters, so the shared damage path only needs to
+		// Best-effort preload: destruction actors are one-shot presenters, so the shared health path only needs to
 		// start the load early. The lethal destroy path still falls back to synchronous load if this has not finished.
 		UAssetManager::GetStreamableManager().RequestAsyncLoad(DestructionClassPath, FStreamableDelegate());
 	}
 }
 
-bool UChunkWorldBlockDamageBlueprintLibrary::TryResolveDamageSchemaForResolvedBlockHit(
+bool UChunkWorldBlockDamageBlueprintLibrary::TryResolveHealthSchemaForResolvedBlockHit(
 	const FChunkWorldResolvedBlockHit& ResolvedHit,
 	bool bAllowInitialization,
 	FGameplayTag& OutBlockTypeName,
-	FBlockDamageDefinition& OutDefinition,
+	FBlockHealthDefinition& OutDefinition,
 	FInstancedStruct& OutCustomDataPayload,
-	FBlockDamageCustomData& OutCustomData)
+	FBlockHealthCustomData& OutCustomData)
 {
 	OutBlockTypeName = FGameplayTag();
-	OutDefinition = FBlockDamageDefinition();
+	OutDefinition = FBlockHealthDefinition();
 	OutCustomDataPayload.Reset();
-	OutCustomData = FBlockDamageCustomData();
+	OutCustomData = FBlockHealthCustomData();
 
 	if (!ResolvedHit.bHasBlock || !IsValid(ResolvedHit.BlockTypeSchemaComponent))
 	{
@@ -133,7 +133,7 @@ bool UChunkWorldBlockDamageBlueprintLibrary::TryResolveDamageSchemaForResolvedBl
 		}
 	}
 
-	if (!UBlockTypeSchemaBlueprintLibrary::TryGetBlockDamageCustomData(OutCustomDataPayload, OutCustomData))
+	if (!UBlockTypeSchemaBlueprintLibrary::TryGetBlockHealthCustomData(OutCustomDataPayload, OutCustomData))
 	{
 		return false;
 	}
@@ -149,7 +149,7 @@ bool UChunkWorldBlockDamageBlueprintLibrary::TryResolveDamageSchemaForResolvedBl
 		return false;
 	}
 
-	return UBlockTypeSchemaBlueprintLibrary::TryGetBlockDamageDefinition(DefinitionStruct, OutDefinition);
+	return UBlockTypeSchemaBlueprintLibrary::TryGetBlockHealthDefinition(DefinitionStruct, OutDefinition);
 }
 
 bool UChunkWorldBlockDamageBlueprintLibrary::TryBuildAuthorityPayloadFromResolvedBlockHit(
@@ -202,10 +202,24 @@ bool UChunkWorldBlockDamageBlueprintLibrary::TryBroadcastHitFeedbackForResolvedB
 	return FeedbackComponent->BroadcastAuthoritativeHitFeedback(ResolvedHit);
 }
 
-bool UChunkWorldBlockDamageBlueprintLibrary::TryApplyBlockDamageForResolvedBlockHit(const FChunkWorldResolvedBlockHit& ResolvedHit, int32 DamageAmount, FChunkWorldBlockDamageResult& OutResult)
+bool UChunkWorldBlockDamageBlueprintLibrary::TryApplyBlockDamageForResolvedBlockHit(const FChunkWorldResolvedBlockHit& ResolvedHit, int32 DamageAmount, FChunkWorldBlockHealthDeltaResult& OutResult)
 {
-	OutResult = FChunkWorldBlockDamageResult();
-	if (DamageAmount <= 0 || !ResolvedHit.bHasBlock || !IsValid(ResolvedHit.ChunkWorld))
+	return TryApplyBlockHealthDeltaForResolvedBlockHit(ResolvedHit, DamageAmount, false, OutResult);
+}
+
+bool UChunkWorldBlockDamageBlueprintLibrary::TryApplyBlockHealingForResolvedBlockHit(const FChunkWorldResolvedBlockHit& ResolvedHit, int32 HealingAmount, FChunkWorldBlockHealthDeltaResult& OutResult)
+{
+	return TryApplyBlockHealthDeltaForResolvedBlockHit(ResolvedHit, HealingAmount, true, OutResult);
+}
+
+bool UChunkWorldBlockDamageBlueprintLibrary::TryApplyBlockHealthDeltaForResolvedBlockHit(
+	const FChunkWorldResolvedBlockHit& ResolvedHit,
+	const int32 Amount,
+	const bool bIsHealing,
+	FChunkWorldBlockHealthDeltaResult& OutResult)
+{
+	OutResult = FChunkWorldBlockHealthDeltaResult();
+	if (Amount <= 0 || !ResolvedHit.bHasBlock || !IsValid(ResolvedHit.ChunkWorld))
 	{
 		return false;
 	}
@@ -217,16 +231,16 @@ bool UChunkWorldBlockDamageBlueprintLibrary::TryApplyBlockDamageForResolvedBlock
 	OutResult.MeshIndex = ResolvedHit.MeshIndex;
 
 	FGameplayTag BlockTypeName;
-	FBlockDamageDefinition Definition;
+	FBlockHealthDefinition Definition;
 	FInstancedStruct CustomDataPayload;
-	FBlockDamageCustomData CustomData;
-	if (!TryResolveDamageSchemaForResolvedBlockHit(ResolvedHit, false, BlockTypeName, Definition, CustomDataPayload, CustomData))
+	FBlockHealthCustomData CustomData;
+	if (!TryResolveHealthSchemaForResolvedBlockHit(ResolvedHit, false, BlockTypeName, Definition, CustomDataPayload, CustomData))
 	{
 		return false;
 	}
 
-	// Project-side fix: treat uninitialized damage custom data as authored full health and fold initialization plus
-	// damage into one schema write so one hit does not generate a separate initialization commit first.
+	// Project-specific change: treat uninitialized health custom data as authored full health and fold the first
+	// health mutation into one schema write so initialization does not commit separately from the real change.
 	const bool bHasInitializedCustomData = ResolvedHit.BlockTypeSchemaComponent != nullptr
 		&& ResolvedHit.BlockTypeSchemaComponent->IsBlockCustomDataInitialized(ResolvedHit.BlockWorldPos);
 	if (!bHasInitializedCustomData)
@@ -234,41 +248,60 @@ bool UChunkWorldBlockDamageBlueprintLibrary::TryApplyBlockDamageForResolvedBlock
 		CustomData.Health = Definition.MaxHealth;
 	}
 
-	OutResult.bHasDamageSchema = true;
+	OutResult.bHasHealthSchema = true;
 	OutResult.BlockTypeName = BlockTypeName;
 	OutResult.bWasInvincible = Definition.bInvincible;
 	OutResult.PreviousHealth = CustomData.Health;
-	OutResult.DamageApplied = DamageAmount;
-	RequestDestructionActorPreload(Definition);
-
-	if (Definition.bInvincible)
+	int32 NewHealth = CustomData.Health;
+	if (bIsHealing)
 	{
-		OutResult.NewHealth = CustomData.Health;
+		const int32 ClampedHealth = FMath::Clamp(CustomData.Health, 0, Definition.MaxHealth);
+		NewHealth = FMath::Min(Definition.MaxHealth, ClampedHealth + Amount);
+		OutResult.NewHealth = NewHealth;
+		OutResult.HealingApplied = NewHealth - ClampedHealth;
+		OutResult.bAppliedHealing = OutResult.HealingApplied > 0;
+		OutResult.bAppliedHealthChange = OutResult.bAppliedHealing;
+	}
+	else
+	{
+		OutResult.DamageApplied = Amount;
+		RequestDestructionActorPreload(Definition);
+
+		if (Definition.bInvincible)
+		{
+			OutResult.NewHealth = CustomData.Health;
+			return true;
+		}
+
+		const int32 ClampedHealth = FMath::Max(0, CustomData.Health);
+		NewHealth = FMath::Max(0, ClampedHealth - Amount);
+		OutResult.NewHealth = NewHealth;
+		OutResult.bAppliedDamage = NewHealth != ClampedHealth;
+		OutResult.bAppliedHealthChange = OutResult.bAppliedDamage;
+		OutResult.bDestroyed = NewHealth <= 0 && ClampedHealth > 0;
+
+		if (!OutResult.bAppliedDamage)
+		{
+			// Reject repeated authoritative damage once the current runtime state is already settled at zero.
+			// That avoids replaying destruction presentation when debug or stale interaction requests target a
+			// block that has already been destroyed through the real authoritative path.
+			OutResult.bDestroyed = false;
+			return true;
+		}
+	}
+
+	if (!OutResult.bAppliedHealthChange)
+	{
 		return true;
 	}
 
-	const int32 ClampedHealth = FMath::Max(0, CustomData.Health);
-	const int32 NewHealth = FMath::Max(0, ClampedHealth - DamageAmount);
-	OutResult.NewHealth = NewHealth;
-	OutResult.bAppliedDamage = NewHealth != ClampedHealth;
-	OutResult.bDestroyed = NewHealth <= 0 && ClampedHealth > 0;
-
-	if (!OutResult.bAppliedDamage)
-	{
-		// Reject repeated authoritative damage once the current runtime state is already settled at zero.
-		// That avoids replaying destruction presentation when debug or stale interaction requests target a
-		// block that has already been destroyed through the real authoritative path.
-		OutResult.bDestroyed = false;
-		return true;
-	}
-
-	FBlockDamageCustomData* MutableDamageCustomData = GetMutableBlockDamageCustomData(CustomDataPayload);
-	if (MutableDamageCustomData == nullptr)
+	FBlockHealthCustomData* MutableHealthCustomData = GetMutableBlockHealthCustomData(CustomDataPayload);
+	if (MutableHealthCustomData == nullptr)
 	{
 		return false;
 	}
 
-	MutableDamageCustomData->Health = NewHealth;
+	MutableHealthCustomData->Health = NewHealth;
 	if (!ResolvedHit.BlockTypeSchemaComponent->SetBlockCustomDataForBlockWorldPos(ResolvedHit.BlockWorldPos, CustomDataPayload))
 	{
 		return false;
@@ -314,10 +347,10 @@ bool UChunkWorldBlockDamageBlueprintLibrary::TryGetBlockHealthStateForBlockWorld
 
 	FGameplayTag RuntimeBlockTypeName;
 	FInstancedStruct RuntimeCustomDataPayload;
-	FBlockDamageCustomData RuntimeCustomData;
+	FBlockHealthCustomData RuntimeCustomData;
 	bOutHasStoredHealth = ResolvedHit.BlockTypeSchemaComponent != nullptr
 		&& ResolvedHit.BlockTypeSchemaComponent->GetBlockCustomDataForBlockWorldPos(BlockWorldPos, RuntimeBlockTypeName, RuntimeCustomDataPayload)
-		&& UBlockTypeSchemaBlueprintLibrary::TryGetBlockDamageCustomData(RuntimeCustomDataPayload, RuntimeCustomData);
+		&& UBlockTypeSchemaBlueprintLibrary::TryGetBlockHealthCustomData(RuntimeCustomDataPayload, RuntimeCustomData);
 	return true;
 }
 
@@ -335,10 +368,10 @@ bool UChunkWorldBlockDamageBlueprintLibrary::TryGetRuntimeBlockHealthStateForRes
 	bOutHasRuntimeHealth = false;
 	OutBlockTypeName = FGameplayTag();
 
-	FBlockDamageDefinition Definition;
+	FBlockHealthDefinition Definition;
 	FInstancedStruct DefaultCustomDataPayload;
-	FBlockDamageCustomData DefaultCustomData;
-	if (!TryResolveDamageDefinitionForResolvedBlockHit(ResolvedHit, OutBlockTypeName, Definition, DefaultCustomDataPayload, DefaultCustomData))
+	FBlockHealthCustomData DefaultCustomData;
+	if (!TryResolveHealthDefinitionForResolvedBlockHit(ResolvedHit, OutBlockTypeName, Definition, DefaultCustomDataPayload, DefaultCustomData))
 	{
 		return false;
 	}
@@ -359,13 +392,13 @@ bool UChunkWorldBlockDamageBlueprintLibrary::TryGetRuntimeBlockHealthStateForRes
 		RuntimeBlockTypeName,
 		RuntimeCustomDataPayload);
 
-	FBlockDamageCustomData RuntimeCustomData;
-	const bool bResolvedRuntimeDamageCustomData = bHasInitializedCustomData
-		&& UBlockTypeSchemaBlueprintLibrary::TryGetBlockDamageCustomData(RuntimeCustomDataPayload, RuntimeCustomData);
+	FBlockHealthCustomData RuntimeCustomData;
+	const bool bResolvedRuntimeHealthCustomData = bHasInitializedCustomData
+		&& UBlockTypeSchemaBlueprintLibrary::TryGetBlockHealthCustomData(RuntimeCustomDataPayload, RuntimeCustomData);
 
-	bOutHasRuntimeHealth = bResolvedRuntimeDamageCustomData;
-	OutHealth = bResolvedRuntimeDamageCustomData ? RuntimeCustomData.Health : Definition.MaxHealth;
-	if (bResolvedRuntimeDamageCustomData && RuntimeBlockTypeName.IsValid())
+	bOutHasRuntimeHealth = bResolvedRuntimeHealthCustomData;
+	OutHealth = bResolvedRuntimeHealthCustomData ? RuntimeCustomData.Health : Definition.MaxHealth;
+	if (bResolvedRuntimeHealthCustomData && RuntimeBlockTypeName.IsValid())
 	{
 		OutBlockTypeName = RuntimeBlockTypeName;
 	}

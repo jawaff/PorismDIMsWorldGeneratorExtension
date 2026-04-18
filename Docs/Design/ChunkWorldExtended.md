@@ -22,6 +22,7 @@ It provides:
 - Emits `OnBlockCustomDataChanged` after authoritative custom-data writes have settled for a block
 - Coalesces slot-level replicated writes into one block-level notification on the next tick so listeners refresh against a settled block view
 - Uses committed health writes to drive server-authoritative lethal block cleanup
+- Uses `WriteCustomDataValuesAndUpdate(...)` to surface settled replicated health increases and decreases to client-side observers after the local apply finishes
 - Routes authoritative destroy feedback through `UChunkWorldBlockFeedbackComponent`
 - Resolves schema-authored swap actor classes and distances through `UBlockTypeSchemaComponent` instead of requiring a separate integer swap-id table
 - Exposes `GetBlockSwapScannerComponent()` so callers can reach the shared scanner when they need diagnostics or direct bindings
@@ -36,6 +37,7 @@ That means:
 - client prediction does not write real chunk-world custom data
 - authority-owned writes commit through the chunk world and then notify observers with `OnBlockCustomDataChanged`
 - `UPorismPredictedBlockStateComponent` listens to that event to retire stale prediction and refresh focused UI
+- the settled transition payload distinguishes health decreases from health increases so feedback/UI can react differently
 
 When authoritative health writes leave a shared damage-family block at zero or lower, the chunk world destroys the block through its authoritative destroy path instead of leaving lethal-state cleanup to callers.
 

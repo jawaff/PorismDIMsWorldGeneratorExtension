@@ -8,11 +8,11 @@
 #include "Engine/Canvas.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
-DEFINE_LOG_CATEGORY_STATIC(LogPorismDamageTraceInteraction, Log, All);
+DEFINE_LOG_CATEGORY_STATIC(LogPorismHealthTraceInteraction, Log, All);
 
 namespace
 {
-	void DrawDamageTraceInteractionDebugStatsLine(UCanvas* Canvas, float& InOutY, const FString& Message, const FColor& Color)
+	void DrawHealthTraceInteractionDebugStatsLine(UCanvas* Canvas, float& InOutY, const FString& Message, const FColor& Color)
 	{
 		if (Canvas == nullptr)
 		{
@@ -29,9 +29,9 @@ UPorismHealthInteractionComponent::UPorismHealthInteractionComponent()
 {
 }
 
-FChunkWorldDamageBlockInteractionResult UPorismHealthInteractionComponent::GetLastDamageBlockInteractionResult() const
+FChunkWorldHealthBlockInteractionResult UPorismHealthInteractionComponent::GetLastHealthBlockInteractionResult() const
 {
-	return FocusedDamageState.Payload;
+	return FocusedHealthState.Payload;
 }
 
 void UPorismHealthInteractionComponent::BeginPlay()
@@ -48,7 +48,7 @@ void UPorismHealthInteractionComponent::BeginPlay()
 	OnBlockInteractionUpdated.AddDynamic(this, &UPorismHealthInteractionComponent::HandleBlockInteractionUpdated);
 	OnBlockCustomDataInitialized.AddDynamic(this, &UPorismHealthInteractionComponent::HandleBlockCustomDataInitialized);
 	BindPredictedBlockStateComponent();
-	RefreshFocusedDamageState();
+	RefreshFocusedHealthState();
 }
 
 void UPorismHealthInteractionComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -65,11 +65,11 @@ void UPorismHealthInteractionComponent::EndPlay(const EEndPlayReason::Type EndPl
 	OnBlockCustomDataInitialized.RemoveAll(this);
 	UnbindPredictedBlockStateComponent();
 
-	const FFocusedDamageBlockState PreviousState = FocusedDamageState;
-	ResetFocusedDamageState();
+	const FFocusedHealthBlockState PreviousState = FocusedHealthState;
+	ResetFocusedHealthState();
 	if (PreviousState.bIsActive)
 	{
-		OnDamageBlockInteractionEnded.Broadcast(PreviousState.Payload);
+		OnHealthBlockInteractionEnded.Broadcast(PreviousState.Payload);
 	}
 
 	Super::EndPlay(EndPlayReason);
@@ -91,87 +91,87 @@ bool UPorismHealthInteractionComponent::DidBlockInteractionResultChange(
 
 void UPorismHealthInteractionComponent::HandleBlockInteractionStarted(const FChunkWorldBlockInteractionResult& Result)
 {
-	RefreshFocusedDamageState();
+	RefreshFocusedHealthState();
 }
 
 void UPorismHealthInteractionComponent::HandleBlockInteractionEnded(const FChunkWorldBlockInteractionResult& Result)
 {
-	RefreshFocusedDamageState();
+	RefreshFocusedHealthState();
 }
 
 void UPorismHealthInteractionComponent::HandleBlockInteractionUpdated(const FChunkWorldBlockInteractionResult& Result)
 {
-	RefreshFocusedDamageState();
+	RefreshFocusedHealthState();
 }
 
 void UPorismHealthInteractionComponent::HandleBlockCustomDataInitialized(const FChunkWorldBlockInteractionResult& Result)
 {
-	RefreshFocusedDamageState();
+	RefreshFocusedHealthState();
 }
 
 void UPorismHealthInteractionComponent::HandleTrackedBlockStateChanged(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos)
 {
 	const FChunkWorldBlockInteractionResult CurrentBlockResult = GetLastBlockInteractionResult();
 	const bool bHasActiveInteraction = HasActiveBlockInteraction();
-	const bool bMatchesFocusedDamageState = IsSameFocusedBlock(FocusedDamageState, ChunkWorld, BlockWorldPos);
+	const bool bMatchesFocusedHealthState = IsSameFocusedBlock(FocusedHealthState, ChunkWorld, BlockWorldPos);
 	const bool bAccepted = (bHasActiveInteraction
 		&& CurrentBlockResult.bHasBlock
 		&& CurrentBlockResult.ResolvedBlockHit.ChunkWorld == ChunkWorld
 		&& CurrentBlockResult.ResolvedBlockHit.BlockWorldPos == BlockWorldPos)
-		|| bMatchesFocusedDamageState;
+		|| bMatchesFocusedHealthState;
 
 	if (!bAccepted)
 	{
 		return;
 	}
 
-	RefreshFocusedDamageState();
+	RefreshFocusedHealthState();
 }
 
-void UPorismHealthInteractionComponent::RefreshFocusedDamageState()
+void UPorismHealthInteractionComponent::RefreshFocusedHealthState()
 {
-	const FFocusedDamageBlockState PreviousState = FocusedDamageState;
-	FFocusedDamageBlockState NewState;
+	const FFocusedHealthBlockState PreviousState = FocusedHealthState;
+	FFocusedHealthBlockState NewState;
 
 	const FChunkWorldBlockInteractionResult BlockResult = GetLastBlockInteractionResult();
-	FChunkWorldDamageBlockInteractionResult DamagePayload;
-	const bool bBuiltDamagePayload = HasActiveBlockInteraction() && TryBuildDamageBlockInteractionResult(BlockResult, DamagePayload);
-	if (bBuiltDamagePayload)
+	FChunkWorldHealthBlockInteractionResult HealthPayload;
+	const bool bBuiltHealthPayload = HasActiveBlockInteraction() && TryBuildHealthBlockInteractionResult(BlockResult, HealthPayload);
+	if (bBuiltHealthPayload)
 	{
 		NewState.bIsActive = true;
-		NewState.ChunkWorld = DamagePayload.ResolvedBlockHit.ChunkWorld;
-		NewState.BlockWorldPos = DamagePayload.ResolvedBlockHit.BlockWorldPos;
-		NewState.Payload = DamagePayload;
+		NewState.ChunkWorld = HealthPayload.ResolvedBlockHit.ChunkWorld;
+		NewState.BlockWorldPos = HealthPayload.ResolvedBlockHit.BlockWorldPos;
+		NewState.Payload = HealthPayload;
 		NewState.bHasAnnouncedInitialized = PreviousState.bIsActive
-			&& IsSameFocusedBlock(PreviousState, DamagePayload.ResolvedBlockHit.ChunkWorld, DamagePayload.ResolvedBlockHit.BlockWorldPos)
+			&& IsSameFocusedBlock(PreviousState, HealthPayload.ResolvedBlockHit.ChunkWorld, HealthPayload.ResolvedBlockHit.BlockWorldPos)
 			&& PreviousState.bHasAnnouncedInitialized;
 	}
 
-	EmitDamageStateTransition(PreviousState, NewState);
-	FocusedDamageState = NewState;
+	EmitHealthStateTransition(PreviousState, NewState);
+	FocusedHealthState = NewState;
 }
 
-void UPorismHealthInteractionComponent::ResetFocusedDamageState()
+void UPorismHealthInteractionComponent::ResetFocusedHealthState()
 {
-	FocusedDamageState = FFocusedDamageBlockState();
+	FocusedHealthState = FFocusedHealthBlockState();
 }
 
 bool UPorismHealthInteractionComponent::IsSameFocusedBlock(
-	const FFocusedDamageBlockState& State,
+	const FFocusedHealthBlockState& State,
 	AChunkWorld* ChunkWorld,
 	const FIntVector& BlockWorldPos) const
 {
 	return State.bIsActive && State.ChunkWorld.Get() == ChunkWorld && State.BlockWorldPos == BlockWorldPos;
 }
 
-bool UPorismHealthInteractionComponent::HasInitializedDisplayData(const FChunkWorldDamageBlockInteractionResult& Result) const
+bool UPorismHealthInteractionComponent::HasInitializedDisplayData(const FChunkWorldHealthBlockInteractionResult& Result) const
 {
 	return Result.bHasCustomData;
 }
 
-bool UPorismHealthInteractionComponent::DidDamagePayloadChange(
-	const FChunkWorldDamageBlockInteractionResult& PreviousResult,
-	const FChunkWorldDamageBlockInteractionResult& NewResult) const
+bool UPorismHealthInteractionComponent::DidHealthPayloadChange(
+	const FChunkWorldHealthBlockInteractionResult& PreviousResult,
+	const FChunkWorldHealthBlockInteractionResult& NewResult) const
 {
 	return PreviousResult.ResolvedBlockHit.ChunkWorld != NewResult.ResolvedBlockHit.ChunkWorld
 		|| PreviousResult.ResolvedBlockHit.BlockWorldPos != NewResult.ResolvedBlockHit.BlockWorldPos
@@ -185,9 +185,9 @@ bool UPorismHealthInteractionComponent::DidDamagePayloadChange(
 		|| PreviousResult.BlockTypeName != NewResult.BlockTypeName;
 }
 
-void UPorismHealthInteractionComponent::EmitDamageStateTransition(
-	const FFocusedDamageBlockState& PreviousState,
-	FFocusedDamageBlockState& NewState)
+void UPorismHealthInteractionComponent::EmitHealthStateTransition(
+	const FFocusedHealthBlockState& PreviousState,
+	FFocusedHealthBlockState& NewState)
 {
 	const bool bHadPrevious = PreviousState.bIsActive;
 	const bool bHasNew = NewState.bIsActive;
@@ -198,7 +198,7 @@ void UPorismHealthInteractionComponent::EmitDamageStateTransition(
 
 	if (bHadPrevious && (!bHasNew || !bSameBlock))
 	{
-		OnDamageBlockInteractionEnded.Broadcast(PreviousState.Payload);
+		OnHealthBlockInteractionEnded.Broadcast(PreviousState.Payload);
 	}
 
 	if (!bHasNew)
@@ -208,23 +208,23 @@ void UPorismHealthInteractionComponent::EmitDamageStateTransition(
 
 	if (!bHadPrevious || !bSameBlock)
 	{
-		OnDamageBlockInteractionStarted.Broadcast(NewState.Payload);
+		OnHealthBlockInteractionStarted.Broadcast(NewState.Payload);
 		if (!NewState.bHasAnnouncedInitialized && HasInitializedDisplayData(NewState.Payload))
 		{
-			OnDamageBlockCustomDataInitialized.Broadcast(NewState.Payload);
+			OnHealthBlockCustomDataInitialized.Broadcast(NewState.Payload);
 			NewState.bHasAnnouncedInitialized = true;
 		}
 		return;
 	}
 
-	if (DidDamagePayloadChange(PreviousState.Payload, NewState.Payload))
+	if (DidHealthPayloadChange(PreviousState.Payload, NewState.Payload))
 	{
-		OnDamageBlockInteractionUpdated.Broadcast(NewState.Payload);
+		OnHealthBlockInteractionUpdated.Broadcast(NewState.Payload);
 	}
 
 	if (!PreviousState.bHasAnnouncedInitialized && HasInitializedDisplayData(NewState.Payload))
 	{
-		OnDamageBlockCustomDataInitialized.Broadcast(NewState.Payload);
+		OnHealthBlockCustomDataInitialized.Broadcast(NewState.Payload);
 		NewState.bHasAnnouncedInitialized = true;
 	}
 }
@@ -275,7 +275,7 @@ void UPorismHealthInteractionComponent::MaybeLogDebugStats(const FString& Snapsh
 
 	LastDebugStatsLogSnapshot = Snapshot;
 	LastDebugStatsLogTimeSeconds = Now;
-	UE_LOG(LogPorismDamageTraceInteraction, Log, TEXT("%s"), *Snapshot);
+	UE_LOG(LogPorismHealthTraceInteraction, Log, TEXT("%s"), *Snapshot);
 }
 
 void UPorismHealthInteractionComponent::DrawDebugStats(UCanvas* Canvas, APlayerController* DebugOwner)
@@ -287,63 +287,63 @@ void UPorismHealthInteractionComponent::DrawDebugStats(UCanvas* Canvas, APlayerC
 
 	const FPorismTraceInteractionResult& TraceResult = GetLastTraceResult();
 	const FChunkWorldBlockInteractionResult BlockResult = GetLastBlockInteractionResult();
-	const FChunkWorldDamageBlockInteractionResult DamageResult = GetLastDamageBlockInteractionResult();
+	const FChunkWorldHealthBlockInteractionResult HealthResult = GetLastHealthBlockInteractionResult();
 	FString Snapshot = FString::Printf(
-		TEXT("Porism Damage Trace Interaction [%s] Owner=%s TargetType=%d HasTarget=%d HasBlock=%d HasDamageBlock=%d BoundPrediction=%d"),
+		TEXT("Porism Health Trace Interaction [%s] Owner=%s TargetType=%d HasTarget=%d HasBlock=%d HasHealthBlock=%d BoundPrediction=%d"),
 		*GetNameSafe(this),
 		*GetNameSafe(GetOwner()),
 		static_cast<int32>(TraceResult.TargetType),
 		HasValidInteractionTarget(),
 		HasActiveBlockInteraction(),
-		HasActiveDamageBlockInteraction(),
+		HasActiveHealthBlockInteraction(),
 		GetPredictedBlockStateComponent() != nullptr);
 
 	float Y = 164.0f;
-	DrawDamageTraceInteractionDebugStatsLine(Canvas, Y, FString::Printf(TEXT("Porism Damage Trace Interaction [%s]"), *GetNameSafe(this)), FColor::Cyan);
-	DrawDamageTraceInteractionDebugStatsLine(
+	DrawHealthTraceInteractionDebugStatsLine(Canvas, Y, FString::Printf(TEXT("Porism Health Trace Interaction [%s]"), *GetNameSafe(this)), FColor::Cyan);
+	DrawHealthTraceInteractionDebugStatsLine(
 		Canvas,
 		Y,
 		FString::Printf(
-			TEXT("Owner=%s TargetType=%d HasTarget=%d HasBlock=%d HasDamageBlock=%d BoundPrediction=%d"),
+			TEXT("Owner=%s TargetType=%d HasTarget=%d HasBlock=%d HasHealthBlock=%d BoundPrediction=%d"),
 			*GetNameSafe(GetOwner()),
 			static_cast<int32>(TraceResult.TargetType),
 			HasValidInteractionTarget(),
-				HasActiveBlockInteraction(),
-				HasActiveDamageBlockInteraction(),
+			HasActiveBlockInteraction(),
+			HasActiveHealthBlockInteraction(),
 			GetPredictedBlockStateComponent() != nullptr),
 		FColor::White);
 
-	if (!HasActiveDamageBlockInteraction())
+	if (!HasActiveHealthBlockInteraction())
 	{
-		DrawDamageTraceInteractionDebugStatsLine(Canvas, Y, TEXT("No active damage-capable block interaction."), FColor::Silver);
-		Snapshot += TEXT(" NoActiveDamageBlockInteraction");
+		DrawHealthTraceInteractionDebugStatsLine(Canvas, Y, TEXT("No active health-aware block interaction."), FColor::Silver);
+		Snapshot += TEXT(" NoActiveHealthBlockInteraction");
 		MaybeLogDebugStats(Snapshot);
 		return;
 	}
 
-	DrawDamageTraceInteractionDebugStatsLine(
+	DrawHealthTraceInteractionDebugStatsLine(
 		Canvas,
 		Y,
 		FString::Printf(
 			TEXT("Block=%s Type=%s ResolveSource=%d"),
-			*DamageResult.ResolvedBlockHit.BlockWorldPos.ToString(),
-			*DamageResult.BlockTypeName.ToString(),
-			static_cast<int32>(DamageResult.ResolvedBlockHit.ResolveSource)),
+			*HealthResult.ResolvedBlockHit.BlockWorldPos.ToString(),
+			*HealthResult.BlockTypeName.ToString(),
+			static_cast<int32>(HealthResult.ResolvedBlockHit.ResolveSource)),
 		FColor::White);
-	DrawDamageTraceInteractionDebugStatsLine(
+	DrawHealthTraceInteractionDebugStatsLine(
 		Canvas,
 		Y,
 		FString::Printf(
 			TEXT("Health=%d/%d UsingPredictedHealth=%d HasAuthoritativeHealth=%d HasCustomData=%d Destructible=%d Invincible=%d"),
-			DamageResult.CurrentHealth,
-			DamageResult.MaxHealth,
-			DamageResult.bUsingPredictedHealth,
-			DamageResult.bHasAuthoritativeHealth,
-			DamageResult.bHasCustomData,
-			DamageResult.bIsDestructible,
-			DamageResult.bIsInvincible),
+			HealthResult.CurrentHealth,
+			HealthResult.MaxHealth,
+			HealthResult.bUsingPredictedHealth,
+			HealthResult.bHasAuthoritativeHealth,
+			HealthResult.bHasCustomData,
+			HealthResult.bIsDestructible,
+			HealthResult.bIsInvincible),
 		FColor::White);
-	DrawDamageTraceInteractionDebugStatsLine(
+	DrawHealthTraceInteractionDebugStatsLine(
 		Canvas,
 		Y,
 		FString::Printf(
@@ -354,26 +354,26 @@ void UPorismHealthInteractionComponent::DrawDebugStats(UCanvas* Canvas, APlayerC
 		FColor::White);
 	Snapshot += FString::Printf(
 		TEXT(" Block=%s Type=%s ResolveSource=%d Health=%d/%d UsingPredictedHealth=%d HasAuthoritativeHealth=%d HasCustomData=%d Destructible=%d Invincible=%d HitActor=%s HitComponent=%s"),
-		*DamageResult.ResolvedBlockHit.BlockWorldPos.ToString(),
-		*DamageResult.BlockTypeName.ToString(),
-		static_cast<int32>(DamageResult.ResolvedBlockHit.ResolveSource),
-		DamageResult.CurrentHealth,
-		DamageResult.MaxHealth,
-		DamageResult.bUsingPredictedHealth,
-		DamageResult.bHasAuthoritativeHealth,
-		DamageResult.bHasCustomData,
-		DamageResult.bIsDestructible,
-		DamageResult.bIsInvincible,
+		*HealthResult.ResolvedBlockHit.BlockWorldPos.ToString(),
+		*HealthResult.BlockTypeName.ToString(),
+		static_cast<int32>(HealthResult.ResolvedBlockHit.ResolveSource),
+		HealthResult.CurrentHealth,
+		HealthResult.MaxHealth,
+		HealthResult.bUsingPredictedHealth,
+		HealthResult.bHasAuthoritativeHealth,
+		HealthResult.bHasCustomData,
+		HealthResult.bIsDestructible,
+		HealthResult.bIsInvincible,
 		*GetNameSafe(BlockResult.Hit.GetActor()),
 		*GetNameSafe(BlockResult.Hit.GetComponent()));
 	MaybeLogDebugStats(Snapshot);
 }
 
-bool UPorismHealthInteractionComponent::TryBuildDamageBlockInteractionResult(
+bool UPorismHealthInteractionComponent::TryBuildHealthBlockInteractionResult(
 	const FChunkWorldBlockInteractionResult& BlockResult,
-	FChunkWorldDamageBlockInteractionResult& OutResult) const
+	FChunkWorldHealthBlockInteractionResult& OutResult) const
 {
-	OutResult = FChunkWorldDamageBlockInteractionResult();
+	OutResult = FChunkWorldHealthBlockInteractionResult();
 	if (!BlockResult.bHasBlock || !BlockResult.ResolvedBlockHit.bHasBlock || !IsValid(BlockResult.ResolvedBlockHit.BlockTypeSchemaComponent.Get()))
 	{
 		return false;
@@ -401,7 +401,7 @@ bool UPorismHealthInteractionComponent::TryBuildDamageBlockInteractionResult(
 	// keep targeting stale destruction windows while representation removal catches up on clients.
 	if (!OutResult.bUsingPredictedHealth && OutResult.bHasAuthoritativeHealth && OutResult.CurrentHealth <= 0)
 	{
-		OutResult = FChunkWorldDamageBlockInteractionResult();
+		OutResult = FChunkWorldHealthBlockInteractionResult();
 		return false;
 	}
 

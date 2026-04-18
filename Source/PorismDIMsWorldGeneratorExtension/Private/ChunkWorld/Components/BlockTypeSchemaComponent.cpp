@@ -41,7 +41,7 @@ UBlockTypeSchemaComponent::UBlockTypeSchemaComponent()
 	PrimaryComponentTick.bCanEverTick = false;
 }
 
-int32 UBlockTypeSchemaComponent::GetBlockDamageHealthCustomDataIndex() const
+int32 UBlockTypeSchemaComponent::GetBlockHealthCustomDataIndex() const
 {
 	static const int32 CachedHealthSlotIndex = []()
 	{

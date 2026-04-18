@@ -11,7 +11,7 @@
 class AChunkWorld;
 
 /**
- * Compact destruction presentation request used when a damage-capable block is authoritatively removed.
+ * Compact destruction presentation request used when a health-tracked block is authoritatively removed.
  */
 USTRUCT(BlueprintType)
 struct PORISMDIMSWORLDGENERATOREXTENSION_API FChunkWorldBlockDestructionRequest

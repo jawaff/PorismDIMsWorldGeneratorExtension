@@ -42,7 +42,7 @@ public:
 	 * Returns the shared runtime slot index used by the `Health` field in the canonical `FBlockHealthCustomData` family.
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld")
-	int32 GetBlockDamageHealthCustomDataIndex() const;
+	int32 GetBlockHealthCustomDataIndex() const;
 
 	/**
 	 * Sets the schema registry used by this component's runtime lookup maps.

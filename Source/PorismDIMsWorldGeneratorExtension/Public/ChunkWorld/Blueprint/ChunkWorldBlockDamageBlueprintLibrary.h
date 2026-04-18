@@ -12,7 +12,7 @@
 class UBlockTypeSchemaComponent;
 
 /**
- * Shared helper library for schema-aligned chunk-world block damage.
+ * Shared helper library for schema-aligned chunk-world health deltas.
  */
 UCLASS()
 class PORISMDIMSWORLDGENERATOREXTENSION_API UChunkWorldBlockDamageBlueprintLibrary : public UBlueprintFunctionLibrary
@@ -39,13 +39,19 @@ public:
 	static bool TryBroadcastHitFeedbackForResolvedBlockHit(const FChunkWorldResolvedBlockHit& ResolvedHit);
 
 	/**
-	 * Applies authoritative damage to one resolved block hit using the shared damage schema family.
+	 * Applies authoritative damage to one resolved block hit using the shared health schema family.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld|Damage")
-	static bool TryApplyBlockDamageForResolvedBlockHit(const FChunkWorldResolvedBlockHit& ResolvedHit, int32 DamageAmount, FChunkWorldBlockDamageResult& OutResult);
+	static bool TryApplyBlockDamageForResolvedBlockHit(const FChunkWorldResolvedBlockHit& ResolvedHit, int32 DamageAmount, FChunkWorldBlockHealthDeltaResult& OutResult);
 
 	/**
-	 * Reads current health and invincibility state for one resolved block using the shared damage schema family.
+	 * Applies authoritative healing to one resolved block hit using the shared health schema family.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld|Damage")
+	static bool TryApplyBlockHealingForResolvedBlockHit(const FChunkWorldResolvedBlockHit& ResolvedHit, int32 HealingAmount, FChunkWorldBlockHealthDeltaResult& OutResult);
+
+	/**
+	 * Reads current health and invincibility state for one resolved block using the shared health schema family.
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld|Damage")
 	static bool TryGetCurrentBlockHealthStateForResolvedBlockHit(const FChunkWorldResolvedBlockHit& ResolvedHit, int32& OutHealth, bool& bOutInvincible, FGameplayTag& OutBlockTypeName);
@@ -83,11 +89,17 @@ public:
 		FGameplayTag& OutBlockTypeName);
 
 private:
-	static bool TryResolveDamageSchemaForResolvedBlockHit(
+	static bool TryResolveHealthSchemaForResolvedBlockHit(
 		const FChunkWorldResolvedBlockHit& ResolvedHit,
 		bool bAllowInitialization,
 		FGameplayTag& OutBlockTypeName,
-		FBlockDamageDefinition& OutDefinition,
+		FBlockHealthDefinition& OutDefinition,
 		FInstancedStruct& OutCustomDataPayload,
-		FBlockDamageCustomData& OutCustomData);
+		FBlockHealthCustomData& OutCustomData);
+
+	static bool TryApplyBlockHealthDeltaForResolvedBlockHit(
+		const FChunkWorldResolvedBlockHit& ResolvedHit,
+		int32 Amount,
+		bool bIsHealing,
+		FChunkWorldBlockHealthDeltaResult& OutResult);
 };
