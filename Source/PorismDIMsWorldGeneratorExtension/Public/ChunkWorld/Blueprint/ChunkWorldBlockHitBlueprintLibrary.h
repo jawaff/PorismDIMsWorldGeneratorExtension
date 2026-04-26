@@ -46,7 +46,8 @@ public:
 	static bool TryResolveBlockHitContextFromHitResult(const FHitResult& Hit, const FVector& TraceDirection, FChunkWorldResolvedBlockHit& OutResolvedHit);
 
 	/**
-	 * Resolves one block world position on a known chunk world into the shared block-hit context when the block is represented gameplay data.
+	 * Resolves one block world position on a known chunk world into the shared block-hit context,
+	 * including the same above-block mesh promotion used by hit-based block resolution.
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Porism|ChunkWorld|Block")
 	static bool TryResolveBlockHitContextFromBlockWorldPos(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos, FChunkWorldResolvedBlockHit& OutResolvedHit);

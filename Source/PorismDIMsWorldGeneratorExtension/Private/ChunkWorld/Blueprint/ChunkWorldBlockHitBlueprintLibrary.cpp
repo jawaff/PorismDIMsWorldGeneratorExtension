@@ -206,6 +206,16 @@ bool UChunkWorldBlockHitBlueprintLibrary::TryResolveBlockHitContextFromHitResult
 			EChunkWorldBlockHitResolveSource::ChunkWorldHit,
 			RevalidatedHit))
 		{
+			if (!IsMeshBackedBlockHitVoxel(RevalidatedHit.MeshIndex))
+			{
+				FChunkWorldResolvedBlockHit OverlayHit;
+				if (TryPromoteOverlayVoxel(ChunkWorld, SchemaComponent, RevalidatedHit.BlockWorldPos, RevalidatedHit.RepresentativeWorldPos, OverlayHit))
+				{
+					OutResolvedHit = OverlayHit;
+					return true;
+				}
+			}
+
 			OutResolvedHit = RevalidatedHit;
 			return true;
 		}
@@ -258,10 +268,7 @@ bool UChunkWorldBlockHitBlueprintLibrary::TryResolveBlockHitContextFromHitResult
 			continue;
 		}
 
-		const bool bTerrainOverlayCandidate = !bHitInstancedMesh
-			&& !IsMeshBackedBlockHitVoxel(CandidateHit.MeshIndex)
-			&& SafeImpactNormal.Z >= 0.6f;
-		if (bTerrainOverlayCandidate)
+		if (!IsMeshBackedBlockHitVoxel(CandidateHit.MeshIndex))
 		{
 			FChunkWorldResolvedBlockHit OverlayHit;
 			const bool bPromotedOverlay = TryPromoteOverlayVoxel(ChunkWorld, SchemaComponent, CandidateHit.BlockWorldPos, CandidateProbeLocation, OverlayHit);
@@ -286,9 +293,7 @@ bool UChunkWorldBlockHitBlueprintLibrary::TryResolveBlockHitContextFromHitResult
 		{
 			return false;
 		}
-		if (!bHitInstancedMesh
-			&& !IsMeshBackedBlockHitVoxel(OutResolvedHit.MeshIndex)
-			&& SafeImpactNormal.Z >= 0.6f)
+		if (!IsMeshBackedBlockHitVoxel(OutResolvedHit.MeshIndex))
 		{
 			FChunkWorldResolvedBlockHit OverlayHit;
 			const bool bPromotedOverlay = TryPromoteOverlayVoxel(ChunkWorld, SchemaComponent, OutResolvedHit.BlockWorldPos, OutResolvedHit.RepresentativeWorldPos, OverlayHit);
@@ -318,21 +323,41 @@ bool UChunkWorldBlockHitBlueprintLibrary::TryResolveBlockHitContextFromBlockWorl
 	UBlockTypeSchemaComponent* SchemaComponent = nullptr;
 	(void)GetBlockTypeSchemaComponentFromChunkWorld(ChunkWorld, SchemaComponent);
 
+	const FVector RepresentativeWorldPos = ChunkWorld->BlockWorldPosToUEWorldPos(BlockWorldPos);
 	FChunkWorldResolvedBlockHit CandidateHit;
-	if (!TryResolveRepresentedBlock(
+	const bool bHasCandidateHit = TryResolveRepresentedBlock(
 		ChunkWorld,
 		BlockWorldPos,
-		ChunkWorld->BlockWorldPosToUEWorldPos(BlockWorldPos),
+		RepresentativeWorldPos,
 		EChunkWorldBlockHitResolveSource::LocalProbe,
-		CandidateHit))
+		CandidateHit);
+
+	if (bHasCandidateHit)
 	{
-		return false;
+		if (!IsMeshBackedBlockHitVoxel(CandidateHit.MeshIndex))
+		{
+			FChunkWorldResolvedBlockHit OverlayHit;
+			if (TryPromoteOverlayVoxel(ChunkWorld, SchemaComponent, BlockWorldPos, RepresentativeWorldPos, OverlayHit))
+			{
+				OutResolvedHit = OverlayHit;
+				return true;
+			}
+		}
+
+		CandidateHit.ChunkWorld = ChunkWorld;
+		CandidateHit.BlockTypeSchemaComponent = SchemaComponent;
+		OutResolvedHit = CandidateHit;
+		return true;
 	}
 
-	CandidateHit.ChunkWorld = ChunkWorld;
-	CandidateHit.BlockTypeSchemaComponent = SchemaComponent;
-	OutResolvedHit = CandidateHit;
-	return true;
+	FChunkWorldResolvedBlockHit OverlayHit;
+	if (TryPromoteOverlayVoxel(ChunkWorld, SchemaComponent, BlockWorldPos, RepresentativeWorldPos, OverlayHit))
+	{
+		OutResolvedHit = OverlayHit;
+		return true;
+	}
+
+	return false;
 }
 
 bool UChunkWorldBlockHitBlueprintLibrary::TryGetBlockCustomDataForResolvedBlockHit(const FChunkWorldResolvedBlockHit& ResolvedHit, FGameplayTag& OutBlockTypeName, FInstancedStruct& OutCustomData)

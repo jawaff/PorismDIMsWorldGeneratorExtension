@@ -144,7 +144,7 @@ private:
 	UPROPERTY(EditAnywhere, Category = "Block|ChunkWorld|Swap", meta = (ClampMin = "1", UIMin = "1", DisplayPriority = "2", ToolTip = "Maximum number of query-resolved mesh-backed voxel candidates processed during one server-side swap scan tick."))
 	int32 MaxBlocksPerScan = 5000;
 
-	/** Local project change: keep expensive swap actors warm and reusable so proximity-driven swaps avoid repeated spawn hitches. */
+	/** Keeps expensive swap actors warm and reusable so proximity-driven swaps avoid repeated spawn hitches. */
 	UPROPERTY(EditAnywhere, Category = "Block|ChunkWorld|Swap|Pooling", meta = (DisplayPriority = "3", ToolTip = "If true, loaded swap actor classes keep a small reusable actor pool so repeated proximity swaps can reuse existing actors instead of respawning every time."))
 	bool bEnableSwapActorPooling = true;
 

@@ -675,14 +675,7 @@ bool UPorismPredictedBlockStateComponent::ApplyAuthoritativeDamageRequest(
 	}
 
 	OutResult.bAuthoritativeDamageApplied = DamageResult.bAppliedDamage;
-	if (DamageResult.bDestroyed)
-	{
-		if (AChunkWorldExtended* ChunkWorld = Cast<AChunkWorldExtended>(DamageRequest.ResolvedHit.ChunkWorld))
-		{
-			(void)ChunkWorld->DestroyBlock(DamageRequest.ResolvedHit.BlockWorldPos, true);
-		}
-	}
-	else
+	if (!DamageResult.bDestroyed)
 	{
 		UChunkWorldBlockFeedbackComponent* FeedbackComponent = nullptr;
 		if (UChunkWorldBlockHitBlueprintLibrary::GetBlockFeedbackComponentFromChunkWorld(DamageRequest.ResolvedHit.ChunkWorld, FeedbackComponent)
@@ -691,6 +684,10 @@ bool UPorismPredictedBlockStateComponent::ApplyAuthoritativeDamageRequest(
 			(void)FeedbackComponent->BroadcastAuthoritativeHitFeedback(DamageRequest.ResolvedHit);
 		}
 	}
+	// Lethal damage already writes committed health custom data, and that settled
+	// health callback owns the authoritative DestroyBlock() transition. Calling
+	// DestroyBlock() here as well would double-fire destruction presentation for
+	// the same block on authority.
 
 	return FinishRequest(true);
 }

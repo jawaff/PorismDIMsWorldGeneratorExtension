@@ -203,7 +203,7 @@ public:
 
 protected:
 	/** Retires local predicted block state and emits a shared update event after authoritative custom-data replication is applied. */
-	virtual void WriteCustomDataValuesAndUpdate(const TArray<SCustomDataChangeCall>& NetCustomDataChangeCalls) override;
+	virtual void WriteCustomDataAndUpdate(const TArray<SCustomDataChangeCall>& NetCustomDataChangeCalls) override;
 
 	/** Observes replicated material changes so reusable settled-transition subscribers can react after local apply. */
 	virtual void WriteBlockValuesAndUpdate(const TArray<SBlockChangeCall>& NetBlockChangeCalls, bool bRefreshChunks) override;
@@ -272,10 +272,16 @@ private:
 	void TrySpawnDestructionActorForDestroyedBlock(const FIntVector& BlockWorldPos, const FChunkWorldResolvedBlockHit* DestroyedFeedbackHit, const FGameplayTag& BlockTypeName);
 
 	/** Spawns one destruction presentation actor from an already resolved class/request pair, forcing the authored network delivery policy. */
-	void SpawnResolvedDestructionActor(
+	bool SpawnResolvedDestructionActor(
 		UClass* DestructionActorClass,
 		const FChunkWorldBlockDestructionRequest& Request,
 		EBlockDestructionPresentationNetMode PresentationNetMode);
+
+	/** Returns false and emits a warning when this block already reserved a destruction presentation very recently. */
+	bool TryReserveDestructionPresentation(const FIntVector& BlockWorldPos);
+
+	/** Releases one short-lived destruction presentation reservation. */
+	void ReleaseDestructionPresentationReservation(const FIntVector& BlockWorldPos);
 
 	/** Merges one observed settled replicated health transition into the next deferred transition flush. */
 	void QueueObservedReplicatedHealthTransition(const FIntVector& BlockWorldPos, int32 PreviousHealth, int32 CurrentHealth);
@@ -338,6 +344,9 @@ private:
 
 	/** Deferred block custom-data notifications coalesced until the next tick so reads see settled runtime state. */
 	TMap<FIntVector, FDeferredBlockCustomDataChange> DeferredBlockCustomDataChanges;
+
+	/** Short-lived guard against double destruction presentation for one logical block position. */
+	TSet<FIntVector> ReservedDestructionPresentationBlocks;
 
 	/** True while one next-tick flush has already been scheduled for deferred block custom-data notifications. */
 	bool bHasDeferredBlockCustomDataFlushQueued = false;

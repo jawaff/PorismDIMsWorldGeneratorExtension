@@ -438,7 +438,9 @@ void AChunkWorldExtended::EnsureBlockSwapReplicationProxy()
 	}
 }
 
-void AChunkWorldExtended::WriteCustomDataValuesAndUpdate(const TArray<SCustomDataChangeCall>& NetCustomDataChangeCalls)
+// Keep the settled block-transition hook attached to Porism's
+// renamed replicated custom-data apply path so client prediction/UI still observe the final batch.
+void AChunkWorldExtended::WriteCustomDataAndUpdate(const TArray<SCustomDataChangeCall>& NetCustomDataChangeCalls)
 {
 	const int32 HealthCustomDataIndex = BlockTypeSchemaComponent != nullptr
 		? BlockTypeSchemaComponent->GetBlockHealthCustomDataIndex()
@@ -478,7 +480,7 @@ void AChunkWorldExtended::WriteCustomDataValuesAndUpdate(const TArray<SCustomDat
 		}
 	}
 
-	Super::WriteCustomDataValuesAndUpdate(NetCustomDataChangeCalls);
+	Super::WriteCustomDataAndUpdate(NetCustomDataChangeCalls);
 
 	// Coalesce slot-level replicated writes into one block notification so
 	// prediction/UI refresh runs against the settled block view for that apply batch.
@@ -678,22 +680,6 @@ bool AChunkWorldExtended::DestroyBlock(const FIntVector& BlockWorldPos, bool bRe
 				(void)BlockFeedbackComponent->BroadcastAuthoritativeDestroyFeedback(DestroyedFeedbackHit);
 			}
 			SetMeshDataByBlockWorldPos(BlockWorldPos, EmptyMeshData, bRefreshChunks);
-
-			// This is a fix for Porism seemingly causing there to be multiple instanced meshes, which impacts us removing them.
-			// Hopefully this can eventually be removed.
-			if (UWorld* World = GetWorld())
-			{
-				FTimerDelegate DelayedCleanup;
-				DelayedCleanup.BindLambda([this, BlockWorldPos]()
-				{
-					if (BlockSwapComponent != nullptr)
-					{
-						BlockSwapComponent->PurgeStaleRepresentedMeshInstances(BlockWorldPos);
-					}
-				});
-				FTimerHandle DelayedCleanupHandle;
-				World->GetTimerManager().SetTimer(DelayedCleanupHandle, DelayedCleanup, 0.20f, false);
-			}
 		    return true;
 		}
 
@@ -764,6 +750,11 @@ void AChunkWorldExtended::TrySpawnDestructionActorForDestroyedBlock(
 		return;
 	}
 
+	if (!TryReserveDestructionPresentation(BlockWorldPos))
+	{
+		return;
+	}
+
 	UClass* DestructionActorClass = HealthDefinition.DestructionActorClass.Get();
 	if (DestructionActorClass == nullptr)
 	{
@@ -771,6 +762,7 @@ void AChunkWorldExtended::TrySpawnDestructionActorForDestroyedBlock(
 		DestructionActorClass = HealthDefinition.DestructionActorClass.LoadSynchronous();
 		if (DestructionActorClass == nullptr)
 		{
+			ReleaseDestructionPresentationReservation(BlockWorldPos);
 			return;
 		}
 	}
@@ -794,6 +786,7 @@ void AChunkWorldExtended::TrySpawnDestructionActorForDestroyedBlock(
 	UWorld* World = GetWorld();
 	if (World == nullptr)
 	{
+		ReleaseDestructionPresentationReservation(BlockWorldPos);
 		return;
 	}
 
@@ -805,6 +798,7 @@ void AChunkWorldExtended::TrySpawnDestructionActorForDestroyedBlock(
 			TEXT("DestroyBlock skipped destruction presentation for block %s because destruction actor class '%s' does not implement UChunkWorldDestructionActorInterface."),
 			*BlockWorldPos.ToString(),
 			*GetNameSafe(DestructionActorClass));
+		ReleaseDestructionPresentationReservation(BlockWorldPos);
 		return;
 	}
 
@@ -820,32 +814,39 @@ void AChunkWorldExtended::TrySpawnDestructionActorForDestroyedBlock(
 	const EBlockDestructionPresentationNetMode PresentationNetMode = HealthDefinition.DestructionPresentationNetMode;
 	if (HasAuthority())
 	{
-		SpawnResolvedDestructionActor(DestructionActorClass, Request, PresentationNetMode);
+		if (!SpawnResolvedDestructionActor(DestructionActorClass, Request, PresentationNetMode))
+		{
+			ReleaseDestructionPresentationReservation(BlockWorldPos);
+		}
 		return;
 	}
 
 	if (PresentationNetMode == EBlockDestructionPresentationNetMode::ReplicatedActor)
 	{
+		ReleaseDestructionPresentationReservation(BlockWorldPos);
 		return;
 	}
 
-	SpawnResolvedDestructionActor(DestructionActorClass, Request, PresentationNetMode);
+	if (!SpawnResolvedDestructionActor(DestructionActorClass, Request, PresentationNetMode))
+	{
+		ReleaseDestructionPresentationReservation(BlockWorldPos);
+	}
 }
 
-void AChunkWorldExtended::SpawnResolvedDestructionActor(
+bool AChunkWorldExtended::SpawnResolvedDestructionActor(
 	UClass* DestructionActorClass,
 	const FChunkWorldBlockDestructionRequest& Request,
 	const EBlockDestructionPresentationNetMode PresentationNetMode)
 {
 	if (DestructionActorClass == nullptr)
 	{
-		return;
+		return false;
 	}
 
 	UWorld* World = GetWorld();
 	if (World == nullptr)
 	{
-		return;
+		return false;
 	}
 
 	AActor* DestructionActor = World->SpawnActorDeferred<AActor>(
@@ -856,7 +857,7 @@ void AChunkWorldExtended::SpawnResolvedDestructionActor(
 		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
 	if (DestructionActor == nullptr)
 	{
-		return;
+		return false;
 	}
 
 	const bool bShouldReplicateActor = PresentationNetMode == EBlockDestructionPresentationNetMode::ReplicatedActor;
@@ -870,6 +871,41 @@ void AChunkWorldExtended::SpawnResolvedDestructionActor(
 
 	UGameplayStatics::FinishSpawningActor(DestructionActor, Request.SpawnTransform);
 	IChunkWorldDestructionActorInterface::Execute_TriggerBlockDestruction(DestructionActor, Request);
+	return true;
+}
+
+bool AChunkWorldExtended::TryReserveDestructionPresentation(const FIntVector& BlockWorldPos)
+{
+	if (ReservedDestructionPresentationBlocks.Contains(BlockWorldPos))
+	{
+		UE_LOG(
+			LogChunkWorldExtended,
+			Warning,
+			TEXT("DestroyBlock suppressed duplicate destruction presentation for block %s on chunk world '%s'."),
+			*BlockWorldPos.ToString(),
+			*GetNameSafe(this));
+		return false;
+	}
+
+	ReservedDestructionPresentationBlocks.Add(BlockWorldPos);
+	if (UWorld* World = GetWorld())
+	{
+		FTimerDelegate releaseReservation;
+		releaseReservation.BindLambda([this, BlockWorldPos]()
+		{
+			ReleaseDestructionPresentationReservation(BlockWorldPos);
+		});
+
+		FTimerHandle releaseHandle;
+		World->GetTimerManager().SetTimer(releaseHandle, releaseReservation, 0.25f, false);
+	}
+
+	return true;
+}
+
+void AChunkWorldExtended::ReleaseDestructionPresentationReservation(const FIntVector& BlockWorldPos)
+{
+	ReservedDestructionPresentationBlocks.Remove(BlockWorldPos);
 }
 
 void AChunkWorldExtended::HandleCommittedBlockCustomData(const FIntVector& BlockWorldPos, const TArray<int32>& PackedValues)
