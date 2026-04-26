@@ -28,6 +28,12 @@ public:
 	/** Framework-owned trigger entry point for one block-destruction presentation request; Blueprint overrides must call parent. */
 	virtual void TriggerBlockDestruction_Implementation(const FChunkWorldBlockDestructionRequest& Request) override;
 
+	/**
+	 * Framework-owned trigger entry point used by the shared chunk-world destruction pipeline.
+	 * This always runs the reusable base startup path even when a Blueprint subclass also implements the interface event.
+	 */
+	void ExecuteFrameworkDestructionTrigger(const FChunkWorldBlockDestructionRequest& Request);
+
 	/** Returns the most recent destruction request accepted by this actor. */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld|Destruction")
 	const FChunkWorldBlockDestructionRequest& GetLastDestructionRequest() const { return LastDestructionRequest; }

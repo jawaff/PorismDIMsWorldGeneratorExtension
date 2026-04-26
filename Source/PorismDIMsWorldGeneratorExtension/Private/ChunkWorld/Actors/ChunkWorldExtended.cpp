@@ -4,8 +4,10 @@
 
 #include "Block/BlockTypeSchemaRegistry.h"
 #include "Block/BlockTypeSchemaBlueprintLibrary.h"
+#include "ChunkWorld/Actors/ChunkWorldChaosDestructionPresentationActor.h"
 #include "ChunkWorld/Actors/ChunkWorldBlockSwapReplicationProxy.h"
 #include "ChunkWorld/Actors/ChunkWorldDestructionActorInterface.h"
+#include "ChunkWorld/Actors/ChunkWorldTimedCleanupDestructionActor.h"
 #include "ChunkWorld/Blueprint/ChunkWorldBlockHitBlueprintLibrary.h"
 #include "ChunkWorld/Components/BlockTypeSchemaComponent.h"
 #include "ChunkWorld/Blueprint/ChunkWorldBlockDamageBlueprintLibrary.h"
@@ -16,6 +18,7 @@
 #include "ChunkWorldStructs/ChunkWorldStructs.h"
 #include "Kismet/GameplayStatics.h"
 #include "PorismDIMsWorldGeneratorExtension.h"
+#include "TimerManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogChunkWorldExtended, Log, All);
 
@@ -42,6 +45,23 @@ namespace
 		{
 			CustomFeatureDefaultData.SetNumZeroed(RequiredChannelCount);
 		}
+	}
+
+	bool TryExecuteReusableDestructionActorTrigger(AActor* DestructionActor, const FChunkWorldBlockDestructionRequest& Request)
+	{
+		if (AChunkWorldChaosDestructionPresentationActor* ChaosDestructionActor = Cast<AChunkWorldChaosDestructionPresentationActor>(DestructionActor))
+		{
+			ChaosDestructionActor->ExecuteFrameworkDestructionTrigger(Request);
+			return true;
+		}
+
+		if (AChunkWorldTimedCleanupDestructionActor* TimedCleanupActor = Cast<AChunkWorldTimedCleanupDestructionActor>(DestructionActor))
+		{
+			TimedCleanupActor->ExecuteFrameworkDestructionTrigger(Request);
+			return true;
+		}
+
+		return false;
 	}
 
 }
@@ -664,8 +684,6 @@ bool AChunkWorldExtended::DestroyBlock(const FIntVector& BlockWorldPos, bool bRe
 	FBlockDefinitionBase Definition;
 	if (BlockTypeSchemaComponent != nullptr && BlockTypeSchemaComponent->GetBlockDefinitionForBlockWorldPos(BlockWorldPos, BlockTypeName, Definition))
 	{
-		TrySpawnDestructionActorForDestroyedBlock(BlockWorldPos, bHasDestroyedFeedbackHit ? &DestroyedFeedbackHit : nullptr, BlockTypeName);
-
 		if (BlockSwapScannerComponent != nullptr)
 		{
 			(void)BlockSwapScannerComponent->ForceRemoveSwapForDestroyedBlock(BlockWorldPos);
@@ -673,6 +691,8 @@ bool AChunkWorldExtended::DestroyBlock(const FIntVector& BlockWorldPos, bool bRe
 
 		if (!Definition.MeshAsset.IsNull())
 		{
+			const int32 ExistingMaterialIndex = GetBlockValueByBlockWorldPos(BlockWorldPos, ERessourceType::MaterialIndex, 0);
+			const int32 ExistingMeshIndex = GetMeshDataByBlockWorldPos(BlockWorldPos).MeshId;
 			FMeshData EmptyMeshData;
 			EmptyMeshData.MeshId = EmptyMesh;
 			if (bHasDestroyedFeedbackHit && BlockFeedbackComponent != nullptr)
@@ -680,6 +700,7 @@ bool AChunkWorldExtended::DestroyBlock(const FIntVector& BlockWorldPos, bool bRe
 				(void)BlockFeedbackComponent->BroadcastAuthoritativeDestroyFeedback(DestroyedFeedbackHit);
 			}
 			SetMeshDataByBlockWorldPos(BlockWorldPos, EmptyMeshData, bRefreshChunks);
+			TrySpawnDestructionActorForDestroyedBlock(BlockWorldPos, bHasDestroyedFeedbackHit ? &DestroyedFeedbackHit : nullptr, BlockTypeName);
 		    return true;
 		}
 
@@ -690,6 +711,7 @@ bool AChunkWorldExtended::DestroyBlock(const FIntVector& BlockWorldPos, bool bRe
 				(void)BlockFeedbackComponent->BroadcastAuthoritativeDestroyFeedback(DestroyedFeedbackHit);
 			}
 			SetBlockValueByBlockWorldPos(BlockWorldPos, EmptyMaterial, bRefreshChunks);
+			TrySpawnDestructionActorForDestroyedBlock(BlockWorldPos, bHasDestroyedFeedbackHit ? &DestroyedFeedbackHit : nullptr, BlockTypeName);
 		    return true;
 		}
 	}
@@ -814,10 +836,31 @@ void AChunkWorldExtended::TrySpawnDestructionActorForDestroyedBlock(
 	const EBlockDestructionPresentationNetMode PresentationNetMode = HealthDefinition.DestructionPresentationNetMode;
 	if (HasAuthority())
 	{
+		if (UWorld* TimerWorld = GetWorld())
+		{
+			FTimerDelegate DeferredSpawnDelegate = FTimerDelegate::CreateWeakLambda(
+				this,
+				[this, DestructionActorClass, Request, PresentationNetMode, BlockWorldPos]()
+				{
+					if (!SpawnResolvedDestructionActor(DestructionActorClass, Request, PresentationNetMode))
+					{
+						ReleaseDestructionPresentationReservation(BlockWorldPos);
+						return;
+					}
+
+					ReleaseDestructionPresentationReservation(BlockWorldPos);
+				});
+			TimerWorld->GetTimerManager().SetTimerForNextTick(DeferredSpawnDelegate);
+			return;
+		}
+
 		if (!SpawnResolvedDestructionActor(DestructionActorClass, Request, PresentationNetMode))
 		{
 			ReleaseDestructionPresentationReservation(BlockWorldPos);
+			return;
 		}
+
+		ReleaseDestructionPresentationReservation(BlockWorldPos);
 		return;
 	}
 
@@ -830,7 +873,10 @@ void AChunkWorldExtended::TrySpawnDestructionActorForDestroyedBlock(
 	if (!SpawnResolvedDestructionActor(DestructionActorClass, Request, PresentationNetMode))
 	{
 		ReleaseDestructionPresentationReservation(BlockWorldPos);
+		return;
 	}
+
+	ReleaseDestructionPresentationReservation(BlockWorldPos);
 }
 
 bool AChunkWorldExtended::SpawnResolvedDestructionActor(
@@ -870,7 +916,10 @@ bool AChunkWorldExtended::SpawnResolvedDestructionActor(
 	}
 
 	UGameplayStatics::FinishSpawningActor(DestructionActor, Request.SpawnTransform);
-	IChunkWorldDestructionActorInterface::Execute_TriggerBlockDestruction(DestructionActor, Request);
+	if (!TryExecuteReusableDestructionActorTrigger(DestructionActor, Request))
+	{
+		IChunkWorldDestructionActorInterface::Execute_TriggerBlockDestruction(DestructionActor, Request);
+	}
 	return true;
 }
 

@@ -53,6 +53,29 @@ public:
 	static bool TryResolveBlockHitContextFromBlockWorldPos(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos, FChunkWorldResolvedBlockHit& OutResolvedHit);
 
 	/**
+	 * Resolves one instanced-mesh candidate block position using the same support-block fallback
+	 * that runtime ISM hit resolution uses after a mesh cell has already been cleared.
+	 */
+	static bool TryResolveInstancedMeshBlockHitContextFromBlockWorldPos(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos, FChunkWorldResolvedBlockHit& OutResolvedHit);
+
+	/**
+	 * Resolves exactly the represented block at the supplied position without promoting to any overlay block above it.
+	 * This is used by local prediction code when a cached or promoted overlay target is known to be dead.
+	 */
+	static bool TryResolveDirectBlockHitContextFromBlockWorldPos(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos, FChunkWorldResolvedBlockHit& OutResolvedHit);
+
+	/**
+	 * Returns whether one gameplay hit should redirect from the support block to a mesh block above it.
+	 * Uses an upper-region heuristic instead of requiring a mathematically flat top face.
+	 */
+	static bool ShouldPromoteOverlayBlockFromHit(
+		AChunkWorld* ChunkWorld,
+		const FIntVector& BaseBlockWorldPos,
+		const FVector& ImpactPoint,
+		const FVector& ImpactNormal,
+		const FVector& TraceDirection);
+
+	/**
 	 * Reads the custom data for a resolved block hit and returns the authored block type tag that owns it.
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Porism|ChunkWorld|Block")

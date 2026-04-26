@@ -56,6 +56,11 @@ void AChunkWorldChaosDestructionPresentationActor::GetLifetimeReplicatedProps(TA
 
 void AChunkWorldChaosDestructionPresentationActor::TriggerBlockDestruction_Implementation(const FChunkWorldBlockDestructionRequest& Request)
 {
+	ExecuteFrameworkDestructionTrigger(Request);
+}
+
+void AChunkWorldChaosDestructionPresentationActor::ExecuteFrameworkDestructionTrigger(const FChunkWorldBlockDestructionRequest& Request)
+{
 	AcceptDestructionTrigger(Request, HasAuthority());
 }
 
@@ -80,6 +85,7 @@ void AChunkWorldChaosDestructionPresentationActor::AcceptDestructionTrigger(cons
 	RefreshGeometryCollectionPresentation();
 	ApplyPreFractureCollisionStaging();
 	ApplyTemporaryBottomAnchor();
+	ApplyPendingPresentationState();
 	HandleDestructionTriggered(Request);
 
 	if (DestructionTuning.LifeSpanAfterTriggerSeconds > 0.0f)
@@ -99,6 +105,9 @@ void AChunkWorldChaosDestructionPresentationActor::AcceptDestructionTrigger(cons
 				false);
 			return;
 		}
+
+		World->GetTimerManager().SetTimerForNextTick(this, &AChunkWorldChaosDestructionPresentationActor::HandleDelayedDestructionExecution);
+		return;
 	}
 
 	ExecuteDestructionPresentation();
@@ -116,6 +125,8 @@ void AChunkWorldChaosDestructionPresentationActor::OnRep_ReplicatedTriggerState(
 
 void AChunkWorldChaosDestructionPresentationActor::ExecuteDestructionPresentation()
 {
+	RevealPresentationForExecution();
+
 	const FVector FieldOrigin = ResolveFieldOrigin(LastDestructionRequest);
 	const float ExternalStrainRadius = ResolveExternalStrainRadius();
 	const float SeparationImpulseRadius = ResolveSeparationImpulseRadius();
@@ -134,6 +145,10 @@ void AChunkWorldChaosDestructionPresentationActor::ExecuteDestructionPresentatio
 	}
 
 	ApplyExternalStrainField(FieldOrigin);
+	if (GeometryCollectionComponent != nullptr)
+	{
+		GeometryCollectionComponent->WakeAllRigidBodies();
+	}
 
 	if (DestructionTuning.bUseTemporaryBottomAnchor && DestructionTuning.bReleaseTemporaryBottomAnchor)
 	{
@@ -170,7 +185,7 @@ void AChunkWorldChaosDestructionPresentationActor::ExecuteDestructionPresentatio
 			}
 			else
 			{
-				RestorePostFractureCollisionResponses();
+				World->GetTimerManager().SetTimerForNextTick(this, &AChunkWorldChaosDestructionPresentationActor::HandleDelayedCollisionEnable);
 			}
 		}
 	}
@@ -312,14 +327,15 @@ void AChunkWorldChaosDestructionPresentationActor::ApplyPreFractureCollisionStag
 		return;
 	}
 
-	GeometryCollectionComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-
 	if (!DestructionTuning.bDelayCollisionUntilAfterFracture)
 	{
 		RestorePostFractureCollisionResponses();
 		return;
 	}
 
+	// Keep Chaos physics active while temporarily ignoring world contacts so overlap kickout
+	// from the source presentation does not dominate the initial fracture step.
+	GeometryCollectionComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	GeometryCollectionComponent->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Ignore);
 	GeometryCollectionComponent->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Ignore);
 }
@@ -391,6 +407,7 @@ void AChunkWorldChaosDestructionPresentationActor::ReleaseTemporaryBottomAnchor(
 
 void AChunkWorldChaosDestructionPresentationActor::HandleDestructionTriggered(const FChunkWorldBlockDestructionRequest& Request)
 {
+	ReceiveDestructionTriggered(Request);
 }
 
 void AChunkWorldChaosDestructionPresentationActor::StartRuntimeDiagnostics()
@@ -606,6 +623,41 @@ void AChunkWorldChaosDestructionPresentationActor::RefreshGeometryCollectionPres
 
 	GeometryCollectionComponent->SetRelativeLocation(DestructionTuning.GeometryCollectionRelativeOffset);
 	GeometryCollectionComponent->SetRestCollection(DestructionTuning.GeometryCollectionAsset);
+}
+
+void AChunkWorldChaosDestructionPresentationActor::ApplyPendingPresentationState()
+{
+	SetActorHiddenInGame(true);
+
+	if (GeometryCollectionComponent == nullptr)
+	{
+		return;
+	}
+
+	GeometryCollectionComponent->SetVisibility(false, true);
+	GeometryCollectionComponent->SetHiddenInGame(true, true);
+}
+
+void AChunkWorldChaosDestructionPresentationActor::RevealPresentationForExecution()
+{
+	SetActorHiddenInGame(false);
+
+	if (GeometryCollectionComponent == nullptr)
+	{
+		return;
+	}
+
+	GeometryCollectionComponent->SetHiddenInGame(false, true);
+	GeometryCollectionComponent->SetVisibility(true, true);
+	GeometryCollectionComponent->SetSimulatePhysics(true);
+	GeometryCollectionComponent->WakeAllRigidBodies();
+
+	if (DestructionTuning.bDelayCollisionUntilAfterFracture)
+	{
+		GeometryCollectionComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+		GeometryCollectionComponent->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Ignore);
+		GeometryCollectionComponent->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Ignore);
+	}
 }
 
 void AChunkWorldChaosDestructionPresentationActor::HandleDelayedDestructionExecution()

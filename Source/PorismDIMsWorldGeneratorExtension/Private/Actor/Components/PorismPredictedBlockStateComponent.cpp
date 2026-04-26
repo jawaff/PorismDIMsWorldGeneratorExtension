@@ -238,6 +238,25 @@ void UPorismPredictedBlockStateComponent::HandleObservedChunkWorldSettledTransit
 		SchedulePredictionPrune();
 	}
 
+	// Project-specific destruction targeting fix: once health has settled to zero or representation has
+	// been removed, keep local targeting off that block even if Porism presentation data lingers briefly.
+	// Only a real positive-health recovery should clear suppression again; lingering representation alone
+	// must not make a destroyed overlay targetable.
+	const bool bShouldSuppressTarget = Transition.bObservedRepresentationRemoved
+		|| (Transition.bHasCurrentHealth && Transition.CurrentHealth <= 0);
+	const bool bShouldClearSuppression = !bShouldSuppressTarget
+		&& Transition.bHasCurrentHealth
+		&& Transition.CurrentHealth > 0
+		&& (Transition.bObservedHealthIncrease || Transition.bTouchedHealth);
+	if (bShouldSuppressTarget)
+	{
+		SetBlockTargetSuppressed(ChunkWorld, Transition.BlockWorldPos, true);
+	}
+	else if (bShouldClearSuppression)
+	{
+		SetBlockTargetSuppressed(ChunkWorld, Transition.BlockWorldPos, false);
+	}
+
 	BroadcastTrackedBlockStateChanged(ChunkWorld, Transition.BlockWorldPos);
 }
 
@@ -406,6 +425,10 @@ void UPorismPredictedBlockStateComponent::StorePredictedHealthChangeResult(
 
 	PredictedBlockStates.Add(Key, DamageResult);
 	SchedulePredictionPrune();
+	if (DamageResult.NewHealth <= 0)
+	{
+		SetBlockTargetSuppressed(ResolvedHit.ChunkWorld, ResolvedHit.BlockWorldPos, true);
+	}
 	BroadcastTrackedBlockStateChanged(ResolvedHit.ChunkWorld, ResolvedHit.BlockWorldPos);
 }
 
@@ -628,6 +651,45 @@ bool UPorismPredictedBlockStateComponent::TryGetPredictedHealthState(
 	return false;
 }
 
+bool UPorismPredictedBlockStateComponent::IsBlockTargetSuppressed(const FChunkWorldResolvedBlockHit& ResolvedHit) const
+{
+	if (!ResolvedHit.bHasBlock || !IsValid(ResolvedHit.ChunkWorld))
+	{
+		return false;
+	}
+
+	return SuppressedTargetBlocks.Contains(MakeKey(ResolvedHit));
+}
+
+bool UPorismPredictedBlockStateComponent::TryResolveTargetableBlockHit(
+	const FChunkWorldResolvedBlockHit& CandidateHit,
+	FChunkWorldResolvedBlockHit& OutResolvedHit) const
+{
+	OutResolvedHit = CandidateHit;
+	if (!CandidateHit.bHasBlock || !IsValid(CandidateHit.ChunkWorld) || !IsBlockTargetSuppressed(CandidateHit))
+	{
+		return CandidateHit.bHasBlock;
+	}
+
+	const FIntVector SupportBlockWorldPos = CandidateHit.BlockWorldPos - FIntVector(0, 0, 1);
+	if (!UChunkWorldBlockHitBlueprintLibrary::TryResolveDirectBlockHitContextFromBlockWorldPos(
+		CandidateHit.ChunkWorld,
+		SupportBlockWorldPos,
+		OutResolvedHit))
+	{
+		OutResolvedHit = FChunkWorldResolvedBlockHit();
+		return false;
+	}
+
+	if (IsBlockTargetSuppressed(OutResolvedHit))
+	{
+		OutResolvedHit = FChunkWorldResolvedBlockHit();
+		return false;
+	}
+
+	return true;
+}
+
 bool UPorismPredictedBlockStateComponent::ApplyAuthoritativeDamageRequest(
 	const FChunkWorldBlockHealthDeltaRequest& DamageRequest,
 	FChunkWorldBlockHealthDeltaRequestResult& OutResult)
@@ -675,6 +737,10 @@ bool UPorismPredictedBlockStateComponent::ApplyAuthoritativeDamageRequest(
 	}
 
 	OutResult.bAuthoritativeDamageApplied = DamageResult.bAppliedDamage;
+	if (DamageResult.NewHealth <= 0)
+	{
+		SetBlockTargetSuppressed(DamageRequest.ResolvedHit.ChunkWorld, DamageRequest.ResolvedHit.BlockWorldPos, true);
+	}
 	if (!DamageResult.bDestroyed)
 	{
 		UChunkWorldBlockFeedbackComponent* FeedbackComponent = nullptr;
@@ -739,7 +805,28 @@ bool UPorismPredictedBlockStateComponent::ApplyAuthoritativeHealingRequest(
 	}
 
 	OutResult.bAuthoritativeHealingApplied = true;
+	if (HealingResult.NewHealth > 0)
+	{
+		SetBlockTargetSuppressed(HealingRequest.ResolvedHit.ChunkWorld, HealingRequest.ResolvedHit.BlockWorldPos, false);
+	}
 	return FinishRequest(true);
+}
+
+void UPorismPredictedBlockStateComponent::SetBlockTargetSuppressed(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos, const bool bSuppressed)
+{
+	if (!IsValid(ChunkWorld))
+	{
+		return;
+	}
+
+	const FPredictedBlockKey Key = MakeKey(ChunkWorld, BlockWorldPos);
+	if (bSuppressed)
+	{
+		SuppressedTargetBlocks.Add(Key);
+		return;
+	}
+
+	SuppressedTargetBlocks.Remove(Key);
 }
 
 void UPorismPredictedBlockStateComponent::BroadcastTrackedBlockStateChanged(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos)

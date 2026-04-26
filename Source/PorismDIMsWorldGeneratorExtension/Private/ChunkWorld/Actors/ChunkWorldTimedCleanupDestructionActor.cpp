@@ -26,6 +26,11 @@ void AChunkWorldTimedCleanupDestructionActor::GetLifetimeReplicatedProps(TArray<
 
 void AChunkWorldTimedCleanupDestructionActor::TriggerBlockDestruction_Implementation(const FChunkWorldBlockDestructionRequest& Request)
 {
+	ExecuteFrameworkDestructionTrigger(Request);
+}
+
+void AChunkWorldTimedCleanupDestructionActor::ExecuteFrameworkDestructionTrigger(const FChunkWorldBlockDestructionRequest& Request)
+{
 	AcceptDestructionTrigger(Request, HasAuthority());
 }
 

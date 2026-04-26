@@ -4,6 +4,7 @@
 
 #include "Actor/Interaction/PorismInteractableInterface.h"
 #include "Actor/Interaction/PorismInteractionTraceViewProviderInterface.h"
+#include "Actor/Components/PorismPredictedBlockStateComponent.h"
 #include "ChunkWorld/ChunkWorld.h"
 #include "ChunkWorld/Blueprint/ChunkWorldBlockHitBlueprintLibrary.h"
 #include "ChunkWorld/Components/BlockTypeSchemaComponent.h"
@@ -36,6 +37,7 @@ void UPorismTraceInteractionComponent::BeginPlay()
 	Super::BeginPlay();
 
 	RefreshActiveTraceDistance();
+	BindPredictedBlockStateComponent();
 	GetWorld()->GetTimerManager().SetTimer(TraceHandle, this, &UPorismTraceInteractionComponent::PerformTrace, TraceInterval, true);
 }
 
@@ -48,7 +50,9 @@ void UPorismTraceInteractionComponent::EndPlay(const EEndPlayReason::Type EndPla
 
 	bHasLastBlockDebugDraw = false;
 	LastBlockDebugDrawTimeSeconds = 0.0;
+	bHasQueuedTrackedBlockRefresh = false;
 	ResetTrackedBlockCustomDataInitialization();
+	UnbindPredictedBlockStateComponent();
 
 	if (LastTraceResult.TargetType != EPorismTraceInteractionTargetType::None)
 	{
@@ -335,6 +339,91 @@ void UPorismTraceInteractionComponent::PerformTrace()
 	}
 }
 
+bool UPorismTraceInteractionComponent::TryBuildBlockInteractionResultFromResolvedHit(
+	const FHitResult& Hit,
+	const FChunkWorldResolvedBlockHit& ResolvedHit,
+	FChunkWorldBlockInteractionResult& OutResult) const
+{
+	OutResult = FChunkWorldBlockInteractionResult();
+	if (!ResolvedHit.bHasBlock)
+	{
+		return false;
+	}
+
+	FGameplayTag BlockTypeName;
+	FInstancedStruct Definition;
+	if (!UChunkWorldBlockHitBlueprintLibrary::TryGetBlockDefinitionForResolvedBlockHit(ResolvedHit, BlockTypeName, Definition) || !BlockTypeName.IsValid())
+	{
+		DrawDebugBlockLookupCube(ResolvedHit.ChunkWorld, ResolvedHit.BlockWorldPos, FColor::Red);
+		return false;
+	}
+
+	OutResult.bHasBlock = true;
+	OutResult.Hit = Hit;
+	OutResult.ResolvedBlockHit = ResolvedHit;
+	OutResult.BlockTypeName = BlockTypeName;
+	return true;
+}
+
+void UPorismTraceInteractionComponent::ApplyUpdatedBlockInteractionResult(
+	const bool bHasNewBlockResult,
+	const FChunkWorldBlockInteractionResult& NewBlockResult)
+{
+	const FPorismTraceInteractionResult PreviousResult = LastTraceResult;
+	const FChunkWorldBlockInteractionResult PreviousBlockResult = LastBlockInteractionResult;
+	const bool bHadPreviousBlockResult = bHasActiveBlockInteraction;
+
+	if (bHasNewBlockResult)
+	{
+		LastTraceResult = FPorismTraceInteractionResult();
+		LastTraceResult.bHasHit = true;
+		LastTraceResult.Hit = NewBlockResult.Hit;
+		LastTraceResult.TargetType = EPorismTraceInteractionTargetType::Block;
+		LastBlockInteractionResult = NewBlockResult;
+		bHasActiveBlockInteraction = true;
+	}
+	else
+	{
+		if (LastTraceResult.TargetType == EPorismTraceInteractionTargetType::Block)
+		{
+			LastTraceResult = FPorismTraceInteractionResult();
+		}
+		LastBlockInteractionResult = FChunkWorldBlockInteractionResult();
+		bHasActiveBlockInteraction = false;
+	}
+
+	const bool bChanged = PreviousResult.TargetType != LastTraceResult.TargetType
+		|| PreviousResult.InteractableActor != LastTraceResult.InteractableActor
+		|| PreviousResult.bHasHit != LastTraceResult.bHasHit;
+	const bool bBlockChanged = DidBlockInteractionResultChange(
+		bHadPreviousBlockResult,
+		PreviousBlockResult,
+		bHasActiveBlockInteraction,
+		LastBlockInteractionResult);
+
+	if (bChanged || bBlockChanged)
+	{
+		BroadcastInteractionTransition(PreviousResult, LastTraceResult, bHadPreviousBlockResult, PreviousBlockResult, bHasActiveBlockInteraction, LastBlockInteractionResult);
+		if (bChanged)
+		{
+			OnTraceInteractionUpdated.Broadcast(LastTraceResult);
+		}
+		if (bBlockChanged && bHasActiveBlockInteraction)
+		{
+			OnBlockInteractionUpdated.Broadcast(LastBlockInteractionResult);
+		}
+	}
+
+	if (bHasActiveBlockInteraction)
+	{
+		EvaluateBlockCustomDataInitialization(LastBlockInteractionResult);
+	}
+	else
+	{
+		ResetTrackedBlockCustomDataInitialization();
+	}
+}
+
 bool UPorismTraceInteractionComponent::TryBuildActorResult(const FHitResult& Hit, FPorismTraceInteractionResult& InOutResult) const
 {
 	AActor* HitActor = Hit.GetActor();
@@ -365,18 +454,22 @@ bool UPorismTraceInteractionComponent::TryBuildBlockResult(const FVector& TraceD
 		return false;
 	}
 
-	FGameplayTag BlockTypeName;
-	FInstancedStruct Definition;
-	if (!UChunkWorldBlockHitBlueprintLibrary::TryGetBlockDefinitionForResolvedBlockHit(ResolvedHit, BlockTypeName, Definition) || !BlockTypeName.IsValid())
+	if (UPorismPredictedBlockStateComponent* PredictionComponent = PredictedBlockStateComponent.Get())
 	{
-		DrawDebugBlockLookupCube(ResolvedHit.ChunkWorld, ResolvedHit.BlockWorldPos, FColor::Red);
-		return false;
+		FChunkWorldResolvedBlockHit TargetableResolvedHit;
+		if (!PredictionComponent->TryResolveTargetableBlockHit(ResolvedHit, TargetableResolvedHit) || !TargetableResolvedHit.bHasBlock)
+		{
+			DrawDebugBlockLookupCube(ResolvedHit.ChunkWorld, ResolvedHit.BlockWorldPos, FColor::Red);
+			return false;
+		}
+
+		ResolvedHit = TargetableResolvedHit;
 	}
 
-	InOutResult.bHasBlock = true;
-	InOutResult.Hit = Hit;
-	InOutResult.ResolvedBlockHit = ResolvedHit;
-	InOutResult.BlockTypeName = BlockTypeName;
+	if (!TryBuildBlockInteractionResultFromResolvedHit(Hit, ResolvedHit, InOutResult))
+	{
+		return false;
+	}
 
 	DrawDebugBlockLookupCube(ResolvedHit.ChunkWorld, ResolvedHit.BlockWorldPos, FColor::Green);
 	return true;
@@ -544,6 +637,107 @@ void UPorismTraceInteractionComponent::ResetTrackedBlockCustomDataInitialization
 	bHasTrackedInitializedBlock = false;
 	bWasTrackedBlockCustomDataInitialized = false;
 	LastInitializedTrackedBlockWorldPos = FIntVector::ZeroValue;
+}
+
+void UPorismTraceInteractionComponent::BindPredictedBlockStateComponent()
+{
+	if (UPorismPredictedBlockStateComponent* CachedPredictedBlockStateComponent = PredictedBlockStateComponent.Get())
+	{
+		CachedPredictedBlockStateComponent->OnTrackedBlockStateChanged().RemoveAll(this);
+		CachedPredictedBlockStateComponent->OnTrackedBlockStateChanged().AddUObject(this, &UPorismTraceInteractionComponent::HandleTrackedBlockStateChanged);
+		return;
+	}
+
+	if (AActor* Owner = GetOwner())
+	{
+		if (UPorismPredictedBlockStateComponent* LocatedPredictedBlockStateComponent = Owner->FindComponentByClass<UPorismPredictedBlockStateComponent>())
+		{
+			PredictedBlockStateComponent = LocatedPredictedBlockStateComponent;
+			LocatedPredictedBlockStateComponent->OnTrackedBlockStateChanged().AddUObject(this, &UPorismTraceInteractionComponent::HandleTrackedBlockStateChanged);
+		}
+	}
+}
+
+void UPorismTraceInteractionComponent::UnbindPredictedBlockStateComponent()
+{
+	if (UPorismPredictedBlockStateComponent* CachedPredictedBlockStateComponent = PredictedBlockStateComponent.Get())
+	{
+		CachedPredictedBlockStateComponent->OnTrackedBlockStateChanged().RemoveAll(this);
+	}
+
+	PredictedBlockStateComponent.Reset();
+}
+
+void UPorismTraceInteractionComponent::HandleTrackedBlockStateChanged(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos)
+{
+	if (!ShouldRefreshForTrackedBlockStateChange(ChunkWorld, BlockWorldPos))
+	{
+		return;
+	}
+
+	if (UPorismPredictedBlockStateComponent* PredictionComponent = PredictedBlockStateComponent.Get())
+	{
+		const FChunkWorldBlockInteractionResult CurrentBlockResult = GetLastBlockInteractionResult();
+		if (CurrentBlockResult.bHasBlock && CurrentBlockResult.ResolvedBlockHit.bHasBlock)
+		{
+			FChunkWorldResolvedBlockHit TargetableResolvedHit;
+			if (PredictionComponent->TryResolveTargetableBlockHit(CurrentBlockResult.ResolvedBlockHit, TargetableResolvedHit)
+				&& TargetableResolvedHit.bHasBlock)
+			{
+				FChunkWorldBlockInteractionResult UpdatedBlockResult;
+				if (TryBuildBlockInteractionResultFromResolvedHit(CurrentBlockResult.Hit, TargetableResolvedHit, UpdatedBlockResult))
+				{
+					ApplyUpdatedBlockInteractionResult(true, UpdatedBlockResult);
+					QueueTrackedBlockRefreshTrace();
+					return;
+				}
+			}
+			else
+			{
+				ApplyUpdatedBlockInteractionResult(false, FChunkWorldBlockInteractionResult());
+				QueueTrackedBlockRefreshTrace();
+				return;
+			}
+		}
+	}
+
+	QueueTrackedBlockRefreshTrace();
+}
+
+bool UPorismTraceInteractionComponent::ShouldRefreshForTrackedBlockStateChange(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos) const
+{
+	if (!HasActiveBlockInteraction())
+	{
+		return false;
+	}
+
+	const FChunkWorldBlockInteractionResult CurrentBlockResult = GetLastBlockInteractionResult();
+	if (!CurrentBlockResult.bHasBlock || !CurrentBlockResult.ResolvedBlockHit.bHasBlock || CurrentBlockResult.ResolvedBlockHit.ChunkWorld != ChunkWorld)
+	{
+		return false;
+	}
+
+	const FIntVector CurrentBlockWorldPos = CurrentBlockResult.ResolvedBlockHit.BlockWorldPos;
+	return BlockWorldPos == CurrentBlockWorldPos
+		|| BlockWorldPos == CurrentBlockWorldPos + FIntVector(0, 0, 1)
+		|| BlockWorldPos == CurrentBlockWorldPos - FIntVector(0, 0, 1);
+}
+
+void UPorismTraceInteractionComponent::QueueTrackedBlockRefreshTrace()
+{
+	if (bHasQueuedTrackedBlockRefresh || GetWorld() == nullptr)
+	{
+		return;
+	}
+
+	bHasQueuedTrackedBlockRefresh = true;
+	GetWorld()->GetTimerManager().SetTimerForNextTick(this, &UPorismTraceInteractionComponent::ExecuteDeferredTrackedBlockRefreshTrace);
+}
+
+void UPorismTraceInteractionComponent::ExecuteDeferredTrackedBlockRefreshTrace()
+{
+	bHasQueuedTrackedBlockRefresh = false;
+	ForceTrace();
 }
 
 bool UPorismTraceInteractionComponent::IsResultCloser(const FVector& TraceStart, const FPorismTraceInteractionResult& CandidateResult, const FPorismTraceInteractionResult& CurrentBestResult) const

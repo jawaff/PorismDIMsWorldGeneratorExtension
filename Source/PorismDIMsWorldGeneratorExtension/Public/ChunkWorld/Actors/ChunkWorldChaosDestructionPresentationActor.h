@@ -167,12 +167,12 @@ struct PORISMDIMSWORLDGENERATOREXTENSION_API FChunkWorldChaosDestructionPresenta
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Destruction", meta = (ClampMin = "0.0", UIMin = "0.0", ToolTip = "Delay before the external strain field is applied after the actor receives its destruction request."))
 	float TriggerDelaySeconds = 0.0f;
 
-	/** If true, collision stays disabled until after the initial fracture has already started so overlap kickout does not dominate the motion. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Destruction", meta = (ToolTip = "If true, world collision responses are temporarily ignored until after the initial fracture has already started so overlap kickout does not dominate the motion."))
+	/** If true, collision stays fully disabled until after the initial fracture has already started so overlap kickout does not dominate the motion. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Destruction", meta = (ToolTip = "If true, collision stays fully disabled until after the initial fracture has already started so overlap kickout from the still-removing source mesh cannot dominate the motion."))
 	bool bDelayCollisionUntilAfterFracture = true;
 
-	/** Delay before world collision responses are restored when staged collision is active. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Destruction", meta = (ClampMin = "0.0", UIMin = "0.0", ToolTip = "Delay before world collision responses are restored when staged collision is active. Increase this if the collection still appears to launch from overlap resolution at spawn."))
+	/** Delay before full collision is restored when staged collision is active. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Destruction", meta = (ClampMin = "0.0", UIMin = "0.0", ToolTip = "Delay before full collision is restored when staged collision is active. Increase this if the collection still appears to launch from overlap resolution while the source mesh is being removed."))
 	float CollisionEnableDelaySeconds = 0.15f;
 
 	/** If true, temporarily anchors the bottom portion of the collection so fracture can begin with support before the base is released. */
@@ -265,6 +265,12 @@ public:
 	/** Starts one destruction presentation after the authoritative chunk-world block removal request is received. */
 	virtual void TriggerBlockDestruction_Implementation(const FChunkWorldBlockDestructionRequest& Request) override;
 
+	/**
+	 * Framework-owned trigger entry point used by the shared chunk-world destruction pipeline.
+	 * This always runs the reusable base startup path even when a Blueprint subclass also implements the interface event.
+	 */
+	void ExecuteFrameworkDestructionTrigger(const FChunkWorldBlockDestructionRequest& Request);
+
 	/** Returns the geometry collection component used for the destruction presentation. */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld|Destruction")
 	UGeometryCollectionComponent* GetGeometryCollectionComponent() const { return GeometryCollectionComponent; }
@@ -288,6 +294,10 @@ public:
 	/** Returns the most recent generated diagnostics suggestion text. */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld|Destruction|Diagnostics")
 	const FString& GetLastDiagnosticsSuggestionSummary() const { return LastDiagnosticsSuggestionSummary; }
+
+	/** Returns the most recent destruction request accepted by this actor. */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld|Destruction")
+	const FChunkWorldBlockDestructionRequest& GetLastDestructionRequest() const { return LastDestructionRequest; }
 
 protected:
 	/** Synchronizes the geometry collection component with the current tunable asset and local offset values. */
@@ -326,6 +336,10 @@ protected:
 
 	/** Allows subclasses to react immediately after the request is accepted and the actor transform is updated. */
 	virtual void HandleDestructionTriggered(const FChunkWorldBlockDestructionRequest& Request);
+
+	/** Local per-process presentation hook that fires after the reusable Chaos startup path accepts the request. */
+	UFUNCTION(BlueprintImplementableEvent, Category = "Block|ChunkWorld|Destruction")
+	void ReceiveDestructionTriggered(const FChunkWorldBlockDestructionRequest& Request);
 
 	/** Starts one short runtime diagnostics pass when enabled so the actor can recommend safer tuning values. */
 	virtual void StartRuntimeDiagnostics();
@@ -384,6 +398,12 @@ private:
 
 	/** Updates the geometry collection component from the current asset and local offset tuning. */
 	void RefreshGeometryCollectionPresentation();
+
+	/** Keeps the geometry collection hidden and non-colliding until the actual fracture execution step begins. */
+	void ApplyPendingPresentationState();
+
+	/** Reveals the geometry collection and refreshes its physics state immediately before fracture fields are applied. */
+	void RevealPresentationForExecution();
 
 	/** Replays the authoritative trigger request locally once the replicated trigger state arrives. */
 	UFUNCTION()

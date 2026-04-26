@@ -102,6 +102,20 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld|Prediction")
 	bool TryGetPredictedHealthState(const FChunkWorldResolvedBlockHit& ResolvedHit, int32& OutHealth, bool& bOutInvincible, FGameplayTag& OutBlockTypeName);
 
+	/**
+	 * Returns true when the local prediction/settled-state view says this block should not be targeted anymore.
+	 * This lets gameplay ignore overlays that still linger visually after destruction has already committed.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld|Prediction")
+	bool IsBlockTargetSuppressed(const FChunkWorldResolvedBlockHit& ResolvedHit) const;
+
+	/**
+	 * Retargets a suppressed block to a still-live support block below it when possible.
+	 * Used by interaction and damage paths so they do not keep hitting destroyed overlay cells.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld|Prediction")
+	bool TryResolveTargetableBlockHit(const FChunkWorldResolvedBlockHit& CandidateHit, FChunkWorldResolvedBlockHit& OutResolvedHit) const;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -156,6 +170,7 @@ private:
 	bool DidTrackedHealthStateChange(const FChunkWorldBlockHealthDeltaResult* PreviousResult, const FChunkWorldBlockHealthDeltaResult& NewResult) const;
 	bool TryApplyImmediateLocalDamageFeedback(const FChunkWorldResolvedBlockHit& ResolvedHit, const FChunkWorldBlockHealthDeltaResult& DamageResult) const;
 	void StorePredictedHealthChangeResult(const FChunkWorldResolvedBlockHit& ResolvedHit, const FChunkWorldBlockHealthDeltaResult& DamageResult);
+	void SetBlockTargetSuppressed(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos, bool bSuppressed);
 	void BroadcastTrackedBlockStateChanged(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos);
 	void BindObservedChunkWorld(AChunkWorld* ChunkWorld);
 	void BindObservedChunkWorlds();
@@ -177,6 +192,7 @@ private:
 
 	TMap<FPredictedBlockKey, FChunkWorldBlockHealthDeltaResult> PredictedBlockStates;
 	TMap<FPredictedBlockKey, int32> PendingPredictedRequestCountsByBlock;
+	TSet<FPredictedBlockKey> SuppressedTargetBlocks;
 	FPorismTrackedBlockStateChangedSignature TrackedBlockStateChangedEvent;
 	TArray<TWeakObjectPtr<class AChunkWorldExtended>> ObservedChunkWorlds;
 	FDelegateHandle ActorSpawnedHandle;

@@ -9,6 +9,7 @@
 #include "PorismTraceInteractionComponent.generated.h"
 
 class AChunkWorld;
+class UPorismPredictedBlockStateComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPorismTraceInteractionUpdated, const FPorismTraceInteractionResult&, Result);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPorismActorInteractionChanged, AActor*, Actor);
@@ -150,7 +151,7 @@ protected:
 	float DebugDrawDuration = 0.12f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Porism|Interaction|Debug", meta = (ClampMin = "0.0", UIMin = "0.0"))
-	float DebugDrawThickness = 1.5f;
+	float DebugDrawThickness = 0.2f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Debug", meta = (ToolTip = "If true, draws a block-sized debug cube around the resolved block target. Green means success, red means lookup failure."))
 	bool bDebugDrawBlockLookup = false;
@@ -182,6 +183,8 @@ private:
 	void DrawDebugBlockLookupCube(const AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos, const FColor& Color) const;
 	void BroadcastInteractionSuccess(const FPorismTraceInteractionResult& Result);
 	void BroadcastInteractionTransition(const FPorismTraceInteractionResult& PreviousResult, const FPorismTraceInteractionResult& NewResult, bool bHadPreviousBlockResult, const FChunkWorldBlockInteractionResult& PreviousBlockResult, bool bHasNewBlockResult, const FChunkWorldBlockInteractionResult& NewBlockResult);
+	bool TryBuildBlockInteractionResultFromResolvedHit(const FHitResult& Hit, const FChunkWorldResolvedBlockHit& ResolvedHit, FChunkWorldBlockInteractionResult& OutResult) const;
+	void ApplyUpdatedBlockInteractionResult(bool bHasNewBlockResult, const FChunkWorldBlockInteractionResult& NewBlockResult);
 	bool IsInteractableActor(AActor* Actor) const;
 	bool TryBuildActorResult(const FHitResult& Hit, FPorismTraceInteractionResult& InOutResult) const;
 	bool TryBuildBlockResult(const FVector& TraceDirection, const FHitResult& Hit, FChunkWorldBlockInteractionResult& InOutResult) const;
@@ -192,6 +195,12 @@ private:
 	void ExecuteActorInteraction(AActor* Actor, const FGameplayTag& InteractionTag);
 	void EvaluateBlockCustomDataInitialization(const FChunkWorldBlockInteractionResult& BlockResult);
 	void ResetTrackedBlockCustomDataInitialization();
+	void BindPredictedBlockStateComponent();
+	void UnbindPredictedBlockStateComponent();
+	void HandleTrackedBlockStateChanged(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos);
+	bool ShouldRefreshForTrackedBlockStateChange(AChunkWorld* ChunkWorld, const FIntVector& BlockWorldPos) const;
+	void QueueTrackedBlockRefreshTrace();
+	void ExecuteDeferredTrackedBlockRefreshTrace();
 
 	UFUNCTION(Server, Reliable)
 	void ServerInteractActor(FGameplayTag InteractionTag, AActor* TargetActor);
@@ -202,4 +211,6 @@ private:
 	FIntVector LastInitializedTrackedBlockWorldPos = FIntVector::ZeroValue;
 	bool bHasTrackedInitializedBlock = false;
 	bool bWasTrackedBlockCustomDataInitialized = false;
+	bool bHasQueuedTrackedBlockRefresh = false;
+	TWeakObjectPtr<UPorismPredictedBlockStateComponent> PredictedBlockStateComponent;
 };
