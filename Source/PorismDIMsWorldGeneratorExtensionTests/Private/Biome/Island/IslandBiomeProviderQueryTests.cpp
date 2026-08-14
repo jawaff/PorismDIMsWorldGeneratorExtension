@@ -137,6 +137,9 @@ bool FIslandBiomeFastNoiseQueriesTaggedReservationFieldsTest::RunTest(const FStr
 	TestTrue(TEXT("Spawn field carries authored capability-style tags"), SpawnField->FieldTags.HasTagExact(BiomeGameplayTags::Foundation.GetTag()));
 	TestTrue(TEXT("Reservation debug path includes reservation name"), ReservationField->DebugPath.Contains(TEXT("Reservations[Center]")));
 	TestTrue(TEXT("Reservation field bounds cover the anchor center"), ReservationField->AuthoredMinBlock.X <= 0.0 && ReservationField->AuthoredMaxBlock.X >= 0.0);
+	TestTrue(TEXT("Reservation field reports finite theoretical terrain surface"), FMath::IsFinite(ReservationField->TheoreticalSurfaceZBlock));
+	TestTrue(TEXT("Spawn field reports finite theoretical terrain surface"), FMath::IsFinite(SpawnField->TheoreticalSurfaceZBlock));
+	TestTrue(TEXT("Flat default spawn field theoretical surface matches reservation surface"), FMath::IsNearlyEqual(SpawnField->TheoreticalSurfaceZBlock, ReservationField->TheoreticalSurfaceZBlock, KINDA_SMALL_NUMBER));
 
 	TArray<FTaggedReservationField> FarFields;
 	Strategy->QueryTaggedReservationFields(GetTransientPackage(), FBox(FVector(1000.0, 1000.0, 1000.0), FVector(1100.0, 1100.0, 1100.0)), FarFields);

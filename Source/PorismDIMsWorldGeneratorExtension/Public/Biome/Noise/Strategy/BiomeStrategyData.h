@@ -592,6 +592,10 @@ struct PORISMDIMSWORLDGENERATOREXTENSION_API FTaggedReservationField
 	/** Maximum authored-block coordinate covered by this field. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Biome Strategy")
 	FVector AuthoredMaxBlock = FVector::ZeroVector;
+
+	/** Theoretical authored-block terrain surface used before generated chunks realize. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Biome Strategy")
+	double TheoreticalSurfaceZBlock = 0.0;
 };
 
 /** Shared strategy asset referenced by biome-slot FastNoiseEditor wrappers. */

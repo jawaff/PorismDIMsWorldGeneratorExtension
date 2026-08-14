@@ -1483,6 +1483,7 @@ namespace
 			: Reservation.FieldTags;
 		OutField.AuthoredMinBlock = FieldBounds.Min;
 		OutField.AuthoredMaxBlock = FieldBounds.Max;
+		OutField.TheoreticalSurfaceZBlock = FieldBounds.Min.Z + (FieldBounds.Max.Z - FieldBounds.Min.Z) * 0.5;
 	}
 
 	const TCHAR* LexToString(const ESurfaceAnchorHeightSolveMode Mode)
@@ -2223,6 +2224,7 @@ void UBiomeStrategyData::QueryTaggedReservationFields(
 			{
 				FTaggedReservationField& Field = OutFields.AddDefaulted_GetRef();
 				PopulateResolvedFieldFromBounds(ProviderInstance, Reservation, EReservationFieldKind::Reservation, ReservationBounds, Field);
+				Field.TheoreticalSurfaceZBlock = FoundationSurface.SurfaceZBlock + ResolvedPayload.SurfaceZLift + ResolvedPayload.SurfaceZOffset;
 			}
 
 			if (Reservation.bEnableSpawnReservation)
@@ -2232,6 +2234,7 @@ void UBiomeStrategyData::QueryTaggedReservationFields(
 				{
 					FTaggedReservationField& Field = OutFields.AddDefaulted_GetRef();
 					PopulateResolvedFieldFromBounds(ProviderInstance, Reservation, EReservationFieldKind::Spawn, SpawnBounds, Field);
+					Field.TheoreticalSurfaceZBlock = FoundationSurface.SurfaceZBlock + ResolvedPayload.SurfaceZLift + ResolvedPayload.SurfaceZOffset;
 				}
 			}
 		}

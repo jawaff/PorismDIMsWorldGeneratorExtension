@@ -10,6 +10,7 @@ This plugin-local documentation is the home for the block schema, chunk-world in
 - [Design/ChunkWorldBlockSwap.md](./Design/ChunkWorldBlockSwap.md)
 - [Design/ChunkWorldDamage.md](./Design/ChunkWorldDamage.md)
 - [Design/ChunkWorldExtended.md](./Design/ChunkWorldExtended.md)
+- [Design/ChunkWorldSpawn.md](./Design/ChunkWorldSpawn.md)
 - [Design/BiomeStrategy.md](./Design/BiomeStrategy.md)
 - [Design/BiomeStrategy/FoundationProviders.md](./Design/BiomeStrategy/FoundationProviders.md)
 - [Design/BiomeStrategy/ReservationProviders.md](./Design/BiomeStrategy/ReservationProviders.md)
@@ -27,6 +28,7 @@ This plugin-local documentation is the home for the block schema, chunk-world in
 - [Usage/HealthManagement.md](./Usage/HealthManagement.md)
 - [Usage/ServerAuthoritativeBlockDamage.md](./Usage/ServerAuthoritativeBlockDamage.md)
 - [Usage/StartupFreezeAndWorldReady.md](./Usage/StartupFreezeAndWorldReady.md)
+- [Usage/SpawnAndRuntimeReadiness.md](./Usage/SpawnAndRuntimeReadiness.md)
 
 The plugin docs focus on stable public behavior. Project-level rewrites and migration notes should be tracked in the main repository `Docs/InProgress/` area until the behavior is settled enough to promote back into these plugin-local pages.
 
@@ -41,6 +43,8 @@ The plugin docs focus on stable public behavior. Project-level rewrites and migr
   - chunk-world host actors for this feature set
 - `Source/PorismDIMsWorldGeneratorExtension/Public/ChunkWorld/Components/`
   - chunk-world runtime components
+- `Source/PorismDIMsWorldGeneratorExtension/Public/ChunkWorld/Spawn/`
+  - location-ticket types, bounded source/origin provider interfaces, and reservation-field provider
 - `Source/PorismDIMsWorldGeneratorExtension/Public/Biome/`
   - biome strategy assets, FastNoiseEditor wrappers, provider/reservation payloads, gameplay tags, and WorldGenDef binding helpers
 - `Source/PorismDIMsWorldGeneratorExtension/Public/Layout/`

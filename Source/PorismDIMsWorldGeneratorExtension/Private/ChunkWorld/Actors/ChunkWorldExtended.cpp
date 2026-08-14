@@ -14,6 +14,7 @@
 #include "ChunkWorld/Components/ChunkWorldBlockFeedbackComponent.h"
 #include "ChunkWorld/Components/ChunkWorldBlockSwapScannerComponent.h"
 #include "ChunkWorld/Components/ChunkWorldBlockSwapComponent.h"
+#include "ChunkWorld/Spawn/ChunkWorldSpawnComponent.h"
 #include "ChunkWorldStructs/ChunkWorldRuntimeStructs.h"
 #include "ChunkWorldStructs/ChunkWorldStructs.h"
 #include "Engine/DataTable.h"
@@ -257,6 +258,7 @@ AChunkWorldExtended::AChunkWorldExtended()
 	BlockSwapScannerComponent = CreateDefaultSubobject<UChunkWorldBlockSwapScannerComponent>(TEXT("BlockSwapScannerComponent"));
 	BlockSwapComponent = CreateDefaultSubobject<UChunkWorldBlockSwapComponent>(TEXT("BlockSwapComponent"));
 	LayoutRuntimeComponent = CreateDefaultSubobject<UChunkWorldLayoutRuntimeComponent>(TEXT("LayoutRuntimeComponent"));
+	SpawnComponent = CreateDefaultSubobject<UChunkWorldSpawnComponent>(TEXT("SpawnComponent"));
 	BlockFeedbackComponent->SetIsReplicated(true);
 	SyncBlockTypeSchemaRegistry();
 }
@@ -518,7 +520,8 @@ bool AChunkWorldExtended::TryGetEditorViewportCameraLocation(FVector& OutCameraL
 
 void AChunkWorldExtended::Tick(float DeltaTime)
 {
-	if (!bStartupWorldReadyTrackingActive)
+	const bool bNeedsWalkerReadyUpdates = bStartupWorldReadyTrackingActive || !RuntimeWalkerReadyStates.IsEmpty();
+	if (!bNeedsWalkerReadyUpdates)
 	{
 		Super::Tick(DeltaTime);
 		return;
@@ -543,8 +546,18 @@ void AChunkWorldExtended::Tick(float DeltaTime)
 	}
 
 	Super::Tick(DeltaTime);
-	PruneWalkerReadyStates();
-	RefreshWorldReadyState();
+	for (auto It = RuntimeWalkerReadyStates.CreateIterator(); It; ++It)
+	{
+		if (!It.Value().Walker.IsValid() || !HasRegisteredChunkWorldWalker(It.Value().Walker.Get()))
+		{
+			It.RemoveCurrent();
+		}
+	}
+	if (bStartupWorldReadyTrackingActive)
+	{
+		PruneWalkerReadyStates();
+		RefreshWorldReadyState();
+	}
 }
 
 void AChunkWorldExtended::BeginPlay()
@@ -562,6 +575,7 @@ void AChunkWorldExtended::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	}
 
 	ResetWorldReadyStateTracking();
+	RuntimeWalkerReadyStates.Reset();
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -633,6 +647,39 @@ void AChunkWorldExtended::SetChunkWorldWalkers(TArray<UObject*> NewWorldLoaders)
 	RefreshWorldReadyState();
 }
 
+bool AChunkWorldExtended::StartRuntimeReadinessTracking(UObject* Walker, const FGuid SessionId)
+{
+	if (!IsValid(Walker) || !SessionId.IsValid() || !HasRegisteredChunkWorldWalker(Walker))
+	{
+		return false;
+	}
+
+	FChunkWorldRuntimeWalkerReadyState& RuntimeState = RuntimeWalkerReadyStates.FindOrAdd(FObjectKey(Walker));
+	const bool bSessionChanged = RuntimeState.SessionId != SessionId;
+	RuntimeState.Walker = Walker;
+	RuntimeState.SessionId = SessionId;
+	if (bSessionChanged)
+	{
+		RuntimeState.bReadyBroadcast = false;
+	}
+	return true;
+}
+
+void AChunkWorldExtended::StopRuntimeReadinessTracking(UObject* Walker, const FGuid SessionId)
+{
+	if (!Walker)
+	{
+		return;
+	}
+
+	const FObjectKey WalkerKey(Walker);
+	const FChunkWorldRuntimeWalkerReadyState* RuntimeState = RuntimeWalkerReadyStates.Find(WalkerKey);
+	if (RuntimeState != nullptr && RuntimeState->SessionId == SessionId)
+	{
+		RuntimeWalkerReadyStates.Remove(WalkerKey);
+	}
+}
+
 void AChunkWorldExtended::EnsureSchemaCustomDataCapacity()
 {
 	if (BlockTypeSchemaComponent == nullptr)
@@ -676,6 +723,11 @@ UChunkWorldBlockSwapComponent* AChunkWorldExtended::GetBlockSwapComponent() cons
 UChunkWorldLayoutRuntimeComponent* AChunkWorldExtended::GetLayoutRuntimeComponent() const
 {
 	return LayoutRuntimeComponent;
+}
+
+UChunkWorldSpawnComponent* AChunkWorldExtended::GetSpawnComponent() const
+{
+	return SpawnComponent;
 }
 
 AChunkWorldBlockSwapReplicationProxy* AChunkWorldExtended::GetBlockSwapReplicationProxy() const
@@ -795,19 +847,45 @@ void AChunkWorldExtended::SyncBlockTypeSchemaRegistry()
 
 void AChunkWorldExtended::HandlePendingWalkerInfo(UObject* Walker, const FChunkWorldWalkerInfo& Info)
 {
-	if (!bStartupWorldReadyTrackingActive || !Walker)
+	if (!Walker)
 	{
 		return;
 	}
 
-	FChunkWorldWalkerReadyState& ReadyState = WalkerReadyStates.FindOrAdd(FObjectKey(Walker));
-	ReadyState.Walker = Walker;
-	ReadyState.bHasReceivedReadyInfo = true;
-	ReadyState.bIsReady = IsWalkerReadyForWorld(Info);
-	ReadyState.ReadyDetailLevel = Info.DetailLevel;
-	ReadyState.LastWalkerInfo = Info;
+	if (bStartupWorldReadyTrackingActive)
+	{
+		FChunkWorldWalkerReadyState& ReadyState = WalkerReadyStates.FindOrAdd(FObjectKey(Walker));
+		ReadyState.Walker = Walker;
+		ReadyState.bHasReceivedReadyInfo = true;
+		ReadyState.bIsReady = IsWalkerReadyForWorld(Info);
+		ReadyState.ReadyDetailLevel = Info.DetailLevel;
+		ReadyState.LastWalkerInfo = Info;
+		RefreshWorldReadyState();
+	}
 
-	RefreshWorldReadyState();
+	RefreshRuntimeWalkerReadyState(Walker, Info);
+}
+
+void AChunkWorldExtended::RefreshRuntimeWalkerReadyState(UObject* Walker, const FChunkWorldWalkerInfo& Info)
+{
+	const FObjectKey WalkerKey(Walker);
+	FChunkWorldRuntimeWalkerReadyState* RuntimeState = RuntimeWalkerReadyStates.Find(WalkerKey);
+	if (RuntimeState == nullptr)
+	{
+		return;
+	}
+
+	if (!RuntimeState->Walker.IsValid() || !HasRegisteredChunkWorldWalker(Walker))
+	{
+		RuntimeWalkerReadyStates.Remove(WalkerKey);
+		return;
+	}
+
+	if (!RuntimeState->bReadyBroadcast && IsWalkerReadyForWorld(Info))
+	{
+		RuntimeState->bReadyBroadcast = true;
+		OnRuntimeWalkerReady.Broadcast(this, Walker, RuntimeState->SessionId);
+	}
 }
 
 bool AChunkWorldExtended::IsWalkerReadyForWorld(const FChunkWorldWalkerInfo& Info) const

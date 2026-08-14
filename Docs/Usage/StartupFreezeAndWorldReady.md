@@ -22,12 +22,12 @@ This is intentionally a startup handshake, not a permanent world-streaming monit
 
 ## Intended Usage
 
-### 1. Use `UPorismStartupFreezeComponent` on actors that own chunk walkers
-The extension plugin now provides `UPorismStartupFreezeComponent` for actors that should stay pinned in place until their registered chunk walkers are truly startup-ready.
+### 1. Use `UChunkWorldReadinessFreezeComponent` on actors that own chunk walkers
+The extension plugin now provides `UChunkWorldReadinessFreezeComponent` for actors that should stay pinned in place until their registered chunk walkers are truly startup-ready.
 
 Recommended setup:
 - make sure the actor exposes a chunk walker
-- use `UPorismStartupFreezeComponent` on that actor
+- use `UChunkWorldReadinessFreezeComponent` on that actor
 - let the startup freeze component auto-apply during `BeginPlay`
 
 If you are using the plugin starter characters, the walker participation and startup freeze component are already part of the built-in setup.
@@ -46,7 +46,7 @@ The same startup-ready event is also the right hook for level-loading UI.
 Typical loading flow:
 - map startup begins
 - chunk walkers register with the chunk world
-- `UPorismStartupFreezeComponent` keeps actors frozen in place
+- `UChunkWorldReadinessFreezeComponent` keeps actors frozen in place
 - loading screen waits for `OnWorldReady`
 - `OnWorldReady` fires
 - startup freeze releases the frozen actors
@@ -77,7 +77,7 @@ Why this matters:
 - startup tracking stops after that first ready transition
 - late registration does not restart the startup handshake
 
-`UPorismStartupFreezeComponent` treats this as a startup ordering error, not as a successful ready state.
+`UChunkWorldReadinessFreezeComponent` treats this as a startup ordering error, not as a successful ready state.
 
 When it detects that one of the owner's walkers registered with a chunk world after that world had already reported startup ready:
 - it logs an error
@@ -92,13 +92,15 @@ If this happens in a project, the fix is to correct startup ordering so the acto
 - It should not be used as a general-purpose "the world is always currently ready" signal during ongoing gameplay streaming.
 - Late runtime walker registration after startup does not restart the startup-ready handshake.
 
-If a project later needs runtime re-freeze or streaming-safe reposition behavior, that should be implemented as a separate feature with its own contract.
+Use [SpawnAndRuntimeReadiness.md](./SpawnAndRuntimeReadiness.md) for runtime re-freeze or streaming-safe reposition behavior. Runtime readiness uses a separate session, one tracked walker, and server-authoritative terrain settlement; it does not restart startup readiness.
 
 ## Recommended Project Integration
-- Add `UPorismStartupFreezeComponent` to any actor that should remain immobilized until chunk-world startup is safe.
+- Add `UChunkWorldReadinessFreezeComponent` to any actor that should remain immobilized until chunk-world startup is safe.
 - Bind to `OnWorldReady` from the map startup/loading FSM when the loading screen should wait for chunk-world readiness.
 - Use the component's startup freeze delegates when project-specific visuals or input gating need to follow the same startup hold.
 
 ## Related Docs
 - [ChunkWorldGameplaySetup.md](./ChunkWorldGameplaySetup.md)
+- [SpawnAndRuntimeReadiness.md](./SpawnAndRuntimeReadiness.md)
 - [../Design/ChunkWorldExtended.md](../Design/ChunkWorldExtended.md)
+- [../Design/ChunkWorldSpawn.md](../Design/ChunkWorldSpawn.md)

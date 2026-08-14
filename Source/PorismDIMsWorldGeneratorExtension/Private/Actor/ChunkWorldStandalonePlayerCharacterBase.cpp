@@ -2,7 +2,7 @@
 
 #include "Actor/ChunkWorldStandalonePlayerCharacterBase.h"
 
-#include "Actor/Components/PorismStartupFreezeComponent.h"
+#include "Actor/Components/ChunkWorldReadinessFreezeComponent.h"
 #include "ChunkWorld/Actors/ChunkWorldExtended.h"
 #include "ChunkWorld/Actors/Components/ChunkWorldProximityComponent.h"
 #include "Components/CapsuleComponent.h"
@@ -20,7 +20,7 @@ AChunkWorldStandalonePlayerCharacterBase::AChunkWorldStandalonePlayerCharacterBa
 	GetCapsuleComponent()->InitCapsuleSize(42.0f, 96.0f);
 
 	ChunkWorldProximityComponent = CreateDefaultSubobject<UChunkWorldProximityComponent>(TEXT("ChunkWorldProximityComponent"));
-	StartupFreezeComponent = CreateDefaultSubobject<UPorismStartupFreezeComponent>(TEXT("StartupFreezeComponent"));
+	StartupFreezeComponent = CreateDefaultSubobject<UChunkWorldReadinessFreezeComponent>(TEXT("StartupFreezeComponent"));
 }
 
 FVector AChunkWorldStandalonePlayerCharacterBase::GetTracingLocation_Implementation() const

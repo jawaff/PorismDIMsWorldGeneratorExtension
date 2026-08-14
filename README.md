@@ -6,7 +6,7 @@ This plugin's purpose is to extend the existing [PorismDIMsWorldGenerator plugin
 
 ## Docs
 
-Check the [Docs/README.md](./Docs/README.md) direction for more implementation details and [Docs/Usage/](./Docs/Usage/) for helpful information on how to integrate and use this plugin.
+See [Docs/README.md](./Docs/README.md) for design references and [Docs/Usage/](./Docs/Usage/) for integration guides. Spawn and runtime readiness use [Docs/Usage/SpawnAndRuntimeReadiness.md](./Docs/Usage/SpawnAndRuntimeReadiness.md).
 
 ## Features
 
@@ -57,6 +57,12 @@ In `ChunkWorldExtended` class has functionality for informing when the chunks ar
 In addition to a means for checking world readiness, there is a component that can be placed on actors in the scene that will freeze them until their `ChunkWorldWalker` is registered and the chunks near the actor have loaded in. This is meant to prevent the player from falling through the map before the chunks are loaded in and have collisions.
 
 More information can be found in [StartupFreezeAndWorldReady.md](./Docs/Usage/StartupFreezeAndWorldReady.md). 
+
+### Spawn And Runtime Readiness
+
+`UChunkWorldSpawnComponent` resolves one bounded, deterministic provisional location on authority. Game code creates or reuses actor after `OnSpawnResolved`; `UChunkWorldReadinessFreezeComponent` later settles actor against realized terrain. The plugin does not create game actors, own respawn policy, or select fallback teleports.
+
+More information can be found in [SpawnAndRuntimeReadiness.md](./Docs/Usage/SpawnAndRuntimeReadiness.md).
 
 ### Biome Strategy WorldGen Setup
 

@@ -17,6 +17,7 @@ class UChunkWorldBlockFeedbackComponent;
 class UChunkWorldBlockSwapScannerComponent;
 class UChunkWorldBlockSwapComponent;
 class UChunkWorldLayoutRuntimeComponent;
+class UChunkWorldSpawnComponent;
 enum class EBlockDestructionPresentationNetMode : uint8;
 struct FChunkWorldBlockDestructionRequest;
 #if WITH_EDITOR
@@ -91,6 +92,7 @@ struct FChunkWorldSettledBlockTransition
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnChunkWorldSettledBlockTransition, AChunkWorldExtended*, ChunkWorld, const FChunkWorldSettledBlockTransition&, Transition);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnChunkWorldReady, AChunkWorldExtended*, ChunkWorld);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnChunkWorldRuntimeWalkerReady, AChunkWorldExtended*, ChunkWorld, UObject*, Walker, FGuid, SessionId);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnChunkWorldObservedChunkLifecycle, AChunkWorldExtended*, ChunkWorld, const FChunkWorldObservedChunkLifecycleEvent&, Event);
 
 /**
@@ -203,6 +205,10 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Layout|ChunkWorld")
 	UChunkWorldLayoutRuntimeComponent* GetLayoutRuntimeComponent() const;
 
+	/** Returns the optional generic spawn coordinator attached to this chunk world. */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "ChunkWorld|Spawn")
+	UChunkWorldSpawnComponent* GetSpawnComponent() const;
+
 	/** Returns the dedicated replicated courier that transports swap presentation events for this chunk world. */
 	AChunkWorldBlockSwapReplicationProxy* GetBlockSwapReplicationProxy() const;
 
@@ -226,6 +232,16 @@ public:
 
 	/** Replaces the active world-loader set and recomputes aggregate startup readiness. */
 	void SetChunkWorldWalkers(TArray<UObject*> NewWorldLoaders);
+
+	/** Starts explicit per-walker runtime readiness tracking without restarting startup readiness. */
+	bool StartRuntimeReadinessTracking(UObject* Walker, FGuid SessionId);
+
+	/** Stops explicit runtime readiness tracking for one matching walker/session pair. */
+	void StopRuntimeReadinessTracking(UObject* Walker, FGuid SessionId);
+
+	/** Broadcast once when an explicitly tracked walker reaches local finest detail for its runtime session. */
+	UPROPERTY(BlueprintAssignable, Category = "ChunkWorld|Runtime Readiness")
+	FOnChunkWorldRuntimeWalkerReady OnRuntimeWalkerReady;
 
 	/** Broadcast after one locally settled replicated block transition is observed on this chunk world. */
 	UPROPERTY(BlueprintAssignable, Category = "Block|ChunkWorld")
@@ -284,6 +300,13 @@ private:
 		bool bIsReady = false;
 		int32 ReadyDetailLevel = INDEX_NONE;
 		FChunkWorldWalkerInfo LastWalkerInfo;
+	};
+
+	struct FChunkWorldRuntimeWalkerReadyState
+	{
+		TWeakObjectPtr<UObject> Walker;
+		FGuid SessionId;
+		bool bReadyBroadcast = false;
 	};
 
 	struct FDeferredBlockCustomDataChange
@@ -367,6 +390,9 @@ private:
 	/** Recomputes aggregate startup readiness from the currently registered walker set. */
 	void RefreshWorldReadyState();
 
+	/** Emits one runtime-ready event for explicitly tracked walker/session pairs after a finest-detail update. */
+	void RefreshRuntimeWalkerReadyState(UObject* Walker, const FChunkWorldWalkerInfo& Info);
+
 	/** Drops stale walker entries that are no longer registered or no longer valid. */
 	void PruneWalkerReadyStates();
 
@@ -409,6 +435,10 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Layout|ChunkWorld", meta = (AllowPrivateAccess = "true", ToolTip = "Streamed layout runtime bridge that caches deterministic site records and realizes them after chunk load."))
 	TObjectPtr<UChunkWorldLayoutRuntimeComponent> LayoutRuntimeComponent = nullptr;
 
+	/** Optional generic spawn coordinator. Keeping its ticket and placement logic inside the component allows the feature to be removed cleanly from this actor. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ChunkWorld|Spawn", meta = (AllowPrivateAccess = "true", ToolTip = "Optional generic spawn coordinator. Its ticket and placement logic remains inside the component so this actor stays focused on chunk-world services."))
+	TObjectPtr<UChunkWorldSpawnComponent> SpawnComponent = nullptr;
+
 	/** Dedicated replicated courier used to transport live swap presentation events outside the Porism chunk-world actor path. */
 	UPROPERTY(Transient)
 	TObjectPtr<AChunkWorldBlockSwapReplicationProxy> BlockSwapReplicationProxy = nullptr;
@@ -433,4 +463,7 @@ private:
 
 	/** True only while the initial startup-ready handshake is still being observed. */
 	bool bStartupWorldReadyTrackingActive = false;
+
+	/** Explicit runtime walker/session pairs. These are independent from startup readiness and never restart it. */
+	TMap<FObjectKey, FChunkWorldRuntimeWalkerReadyState> RuntimeWalkerReadyStates;
 };

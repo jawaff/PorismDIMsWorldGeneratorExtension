@@ -29,6 +29,8 @@ It provides:
 - Exposes `GetBlockTypeSchemaComponent()` so callers can reach the reusable schema component
 - Exposes `GetBlockFeedbackComponent()` so callers can reuse the shared block hit and destroy feedback host
 - Exposes `GetBlockSwapComponent()` so callers can reuse the shared replicated swap host
+- Owns `UChunkWorldSpawnComponent` for server-authoritative bounded location tickets
+- Keeps startup `OnWorldReady` separate from explicit per-walker/session runtime-ready tracking
 
 ## Damage And Reconciliation Contract
 `AChunkWorldExtended` is the authority-side mutation host, not the prediction owner.
@@ -40,6 +42,14 @@ That means:
 - the settled transition payload distinguishes health decreases from health increases so feedback/UI can react differently
 
 When authoritative health writes leave a shared damage-family block at zero or lower, the chunk world destroys the block through its authoritative destroy path instead of leaving lethal-state cleanup to callers.
+
+## Spawn And Runtime Readiness
+
+Use `GetSpawnComponent()` for generic location tickets. Source providers supply finite candidates; game code consumes `OnSpawnResolved` and creates or reuses actor. The chunk world does not create game actors.
+
+`OnWorldReady` stays a one-time startup signal. Runtime subjects use `StartRuntimeReadinessTracking` through their `UChunkWorldReadinessFreezeComponent`; tracked walker finest-detail events publish `OnRuntimeWalkerReady` for that session only.
+
+See [ChunkWorldSpawn.md](./ChunkWorldSpawn.md) and [../Usage/SpawnAndRuntimeReadiness.md](../Usage/SpawnAndRuntimeReadiness.md).
 
 ## Intended Use
 Use this class when you want a chunk world that already carries the project-specific block-definition lookup component but do not want the lookup state baked directly into the actor itself.

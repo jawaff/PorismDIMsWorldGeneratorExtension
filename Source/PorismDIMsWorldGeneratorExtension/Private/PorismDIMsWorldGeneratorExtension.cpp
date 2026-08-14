@@ -4,6 +4,7 @@
 
 #include "Layout/Diagnostics/LayoutEditorMessageLog.h"
 #include "PorismDIMsWorldGenerator.h"
+#include "UObject/CoreRedirects.h"
 
 #if WITH_EDITOR
 #include "MessageLogModule.h"
@@ -14,6 +15,12 @@ DEFINE_LOG_CATEGORY(LogPorismDIMsWorldGeneratorExtension);
 void FPorismDIMsWorldGeneratorExtensionModule::StartupModule()
 {
 	FModuleManager::LoadModuleChecked<FPorismDIMsWorldGeneratorModule>("PorismDIMsWorldGenerator");
+	// Register local migration at module startup so serialized legacy references survive test and packaged config layering.
+	const FCoreRedirect ReadinessFreezeRedirect(
+		ECoreRedirectFlags::Type_Class,
+		TEXT("/Script/PorismDIMsWorldGeneratorExtension.PorismStartupFreezeComponent"),
+		TEXT("/Script/PorismDIMsWorldGeneratorExtension.ChunkWorldReadinessFreezeComponent"));
+	FCoreRedirects::AddRedirectList(MakeArrayView(&ReadinessFreezeRedirect, 1), TEXT("PorismDIMsWorldGeneratorExtension"));
 #if WITH_EDITOR
 	FMessageLogModule& MessageLogModule = FModuleManager::LoadModuleChecked<FMessageLogModule>("MessageLog");
 	FMessageLogInitializationOptions InitOptions;

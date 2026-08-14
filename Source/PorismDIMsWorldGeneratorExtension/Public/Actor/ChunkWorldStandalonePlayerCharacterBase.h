@@ -9,7 +9,7 @@
 
 class AChunkWorldExtended;
 class UChunkWorldProximityComponent;
-class UPorismStartupFreezeComponent;
+class UChunkWorldReadinessFreezeComponent;
 
 /**
  * Shared standalone player-character base that owns chunk-world walker registration, client binding, and startup freeze.
@@ -29,7 +29,7 @@ public:
 
 	/** Returns the plugin-owned startup freeze component used to hold this actor in place until chunk-world startup is safe. */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld|Character")
-	UPorismStartupFreezeComponent* GetStartupFreezeComponent() const { return StartupFreezeComponent; }
+	UChunkWorldReadinessFreezeComponent* GetStartupFreezeComponent() const { return StartupFreezeComponent; }
 
 	/** Returns the most recent chunk-world walker info reported by Porism for this actor. */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld|Character")
@@ -87,7 +87,7 @@ protected:
 
 	/** Plugin-owned startup freeze component used to keep this actor pinned until relevant chunk worlds are ready. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Block|ChunkWorld|Character", meta = (AllowPrivateAccess = "true", ToolTip = "Plugin-owned startup freeze component used to keep this actor pinned until relevant chunk worlds are ready."))
-	TObjectPtr<UPorismStartupFreezeComponent> StartupFreezeComponent = nullptr;
+	TObjectPtr<UChunkWorldReadinessFreezeComponent> StartupFreezeComponent = nullptr;
 
 	/** Optional offset applied to the actor location before Porism evaluates startup loading around this walker. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|ChunkWorld|Character", meta = (ToolTip = "Optional offset applied to the actor location before Porism evaluates startup loading around this walker."))

@@ -41,7 +41,7 @@ Starter character class:
   - includes `UChunkWorldProximityComponent`
   - implements the chunk-world walker contract directly on the actor
   - binds the owning player controller to available chunk worlds on the authority side
-  - includes `UPorismStartupFreezeComponent`
+  - includes `UChunkWorldReadinessFreezeComponent`
 
 ### Required Setup
 - use damage-oriented schema families in the registry
@@ -88,7 +88,7 @@ Starter character class:
   - includes `UChunkWorldProximityComponent`
   - implements the chunk-world walker contract directly on the actor
   - binds the owning player controller to available chunk worlds on the authority side
-  - includes `UPorismStartupFreezeComponent`
+  - includes `UChunkWorldReadinessFreezeComponent`
 
 ### Required Setup
 - use the base struct families in the registry
@@ -138,5 +138,5 @@ What they do include now:
 - direct `IChunkWorldWalker` participation on the actor
 - automatic registration with available `AChunkWorldExtended` instances
 - automatic authority-side `BindNewClientGenerator(...)` setup for owning player controllers
-- plugin-owned startup freeze through `UPorismStartupFreezeComponent`
+- plugin-owned startup freeze through `UChunkWorldReadinessFreezeComponent`
 - the interaction and prediction components expected for their respective route
