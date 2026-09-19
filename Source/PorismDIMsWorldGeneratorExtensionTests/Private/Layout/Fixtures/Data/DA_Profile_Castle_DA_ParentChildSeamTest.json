@@ -1,0 +1,4610 @@
+{
+	"schema_version": 4,
+	"root":
+	{
+		"profile_id": "DA_Profile_Castle",
+		"content_set_id": "DA_ContentSet_Castle"
+	},
+	"libraries":
+	{
+		"profiles": [
+			{
+				"id": "DA_Profile_Castle",
+				"name": "DA_Profile_Castle",
+				"region_solve_mode": "RootOrChild",
+				"minimum_footprint_in_cells":
+				{
+					"x": 5,
+					"y": 5
+				},
+				"maximum_footprint_in_cells":
+				{
+					"x": 5,
+					"y": 5
+				},
+				"planner_mode": "FootprintFill",
+				"level_count": 2,
+				"entry_count_mode": "Exact",
+				"entry_count": 1,
+				"min_entry_count": 1,
+				"max_entry_count": 1,
+				"restrict_entry_modules_to_entry_cells": true,
+				"vertical_access_count_mode": "Exact",
+				"vertical_access_count": 1,
+				"min_vertical_access_count": 1,
+				"max_vertical_access_count": 2,
+				"restrict_vertical_access_modules_to_vertical_access_cells": true,
+				"content_set_id": "DA_ContentSet_Castle",
+				"upper_levels_use_boundary_only": false,
+				"closure_requirements": [],
+				"closure_provider_intents": [],
+				"zone_feature_requirements": [
+					{
+						"requirement_id": "Room",
+						"zone": "Interior",
+						"required_features": [
+							"Layout.Feature.Room"
+						],
+						"match_mode": "Any",
+						"min_count": 2,
+						"max_count": 2
+					}
+				],
+				"sparse_placement_rules": [],
+				"allow_empty_interior_cells": false,
+				"max_empty_cell_count": 0,
+				"max_solver_candidate_attempts": 50000,
+				"max_solver_duration_seconds": 10,
+				"max_solver_failure_details": 30,
+				"solver_trace_mode": "Always",
+				"max_solver_trace_events": 512,
+				"include_solver_trace_candidate_details": true,
+				"require_all_traversal_channels_reachable": true
+			},
+			{
+				"id": "DA_Profile_Room",
+				"name": "DA_Profile_Room",
+				"region_solve_mode": "RootOrChild",
+				"minimum_footprint_in_cells":
+				{
+					"x": 3,
+					"y": 3
+				},
+				"maximum_footprint_in_cells":
+				{
+					"x": 3,
+					"y": 3
+				},
+				"planner_mode": "FootprintFill",
+				"level_count": 1,
+				"entry_count_mode": "Exact",
+				"entry_count": 1,
+				"min_entry_count": 1,
+				"max_entry_count": 1,
+				"restrict_entry_modules_to_entry_cells": true,
+				"vertical_access_count_mode": "None",
+				"vertical_access_count": 1,
+				"min_vertical_access_count": 1,
+				"max_vertical_access_count": 2,
+				"restrict_vertical_access_modules_to_vertical_access_cells": true,
+				"content_set_id": "DA_ContentSet_Room",
+				"upper_levels_use_boundary_only": false,
+				"closure_requirements": [],
+				"closure_provider_intents": [],
+				"zone_feature_requirements": [],
+				"sparse_placement_rules": [],
+				"allow_empty_interior_cells": false,
+				"max_empty_cell_count": 0,
+				"max_solver_candidate_attempts": 50000,
+				"max_solver_duration_seconds": 10,
+				"max_solver_failure_details": 30,
+				"solver_trace_mode": "Always",
+				"max_solver_trace_events": 512,
+				"include_solver_trace_candidate_details": true,
+				"require_all_traversal_channels_reachable": true
+			}
+		],
+		"content_sets": [
+			{
+				"id": "DA_ContentSet_Castle",
+				"name": "DA_ContentSet_Castle",
+				"entries": [
+					{
+						"entry_id": "Battlement",
+						"content_kind": "Module",
+						"weight": 1,
+						"provided_zone_features": [],
+						"closure_provider_intents": [],
+						"seam_provider_intents": [],
+						"module_id": "DA_Module_Blocks_Ext_Battlement_+X",
+						"module_placement_zone": "Edge",
+						"module_optional": false
+					},
+					{
+						"entry_id": "BattlementCorner",
+						"content_kind": "Module",
+						"weight": 1,
+						"provided_zone_features": [],
+						"closure_provider_intents": [],
+						"seam_provider_intents": [],
+						"module_id": "DA_Module_Blocks_Ext_Battlement_Corner_+Y+X",
+						"module_placement_zone": "Corner",
+						"module_optional": false
+					},
+					{
+						"entry_id": "ExteriorDoor",
+						"content_kind": "Module",
+						"weight": 1,
+						"provided_zone_features": [],
+						"closure_provider_intents": [],
+						"seam_provider_intents": [],
+						"module_id": "DA_Module_Blocks_Ext_Door_+X",
+						"module_placement_zone": "Perimeter",
+						"module_optional": false
+					},
+					{
+						"entry_id": "ExteriorPillarCorner",
+						"content_kind": "Module",
+						"weight": 1,
+						"provided_zone_features": [],
+						"closure_provider_intents": [],
+						"seam_provider_intents": [
+							{
+								"seam_intent_id": "SharedExtCorner",
+								"zone": "Perimeter",
+								"interface_family": "Layout.Interface.Partition.Solid",
+								"can_own_seam": true,
+								"can_accept_seam": false
+							}
+						],
+						"module_id": "DA_Module_Blocks_Ext_Pillar_Corner_+Y+X",
+						"module_placement_zone": "Corner",
+						"module_optional": false
+					},
+					{
+						"entry_id": "ExteriorWall",
+						"content_kind": "Module",
+						"weight": 1,
+						"provided_zone_features": [],
+						"closure_provider_intents": [],
+						"seam_provider_intents": [
+							{
+								"seam_intent_id": "SharedExtWall",
+								"zone": "Perimeter",
+								"interface_family": "Layout.Interface.Partition.Solid",
+								"can_own_seam": true,
+								"can_accept_seam": false
+							}
+						],
+						"module_id": "DA_Module_Blocks_Ext_Wall_+X",
+						"module_placement_zone": "Edge",
+						"module_optional": false
+					},
+					{
+						"entry_id": "Floor",
+						"content_kind": "Module",
+						"weight": 1,
+						"provided_zone_features": [],
+						"closure_provider_intents": [],
+						"seam_provider_intents": [],
+						"module_id": "DA_Module_Blocks_Floor",
+						"module_placement_zone": "Interior",
+						"module_optional": false
+					},
+					{
+						"entry_id": "Stairs",
+						"content_kind": "Module",
+						"weight": 1,
+						"provided_zone_features": [],
+						"closure_provider_intents": [],
+						"seam_provider_intents": [],
+						"module_id": "DA_Module_Blocks_Floor_Stairs_-YTo-Y",
+						"module_placement_zone": "Interior",
+						"module_optional": false
+					},
+					{
+						"entry_id": "StairHole",
+						"content_kind": "Module",
+						"weight": 1,
+						"provided_zone_features": [],
+						"closure_provider_intents": [],
+						"seam_provider_intents": [],
+						"module_id": "DA_Module_Blocks_Floor_StairHole_-Y",
+						"module_placement_zone": "Interior",
+						"module_optional": false
+					},
+					{
+						"entry_id": "Room",
+						"content_kind": "ChildRegion",
+						"weight": 1,
+						"provided_zone_features": [
+							"Layout.Feature.Room"
+						],
+						"closure_provider_intents": [],
+						"seam_provider_intents": [],
+						"child_profile_id": "DA_Profile_Room",
+						"child_placement_zone": "Interior",
+						"child_optional": false
+					}
+				]
+			},
+			{
+				"id": "DA_ContentSet_Room",
+				"name": "DA_ContentSet_Room",
+				"entries": [
+					{
+						"entry_id": "Floor",
+						"content_kind": "Module",
+						"weight": 1,
+						"provided_zone_features": [],
+						"closure_provider_intents": [],
+						"seam_provider_intents": [],
+						"module_id": "DA_Module_Blocks_Floor",
+						"module_placement_zone": "Interior",
+						"module_optional": false
+					},
+					{
+						"entry_id": "Wall",
+						"content_kind": "Module",
+						"weight": 1,
+						"provided_zone_features": [],
+						"closure_provider_intents": [],
+						"seam_provider_intents": [
+							{
+								"seam_intent_id": "SharedWall",
+								"zone": "Perimeter",
+								"interface_family": "Layout.Interface.Partition.Solid",
+								"can_own_seam": true,
+								"can_accept_seam": true
+							},
+							{
+								"seam_intent_id": "SharedDoorWall",
+								"zone": "Perimeter",
+								"interface_family": "Layout.Interface.Partition.Door",
+								"can_own_seam": true,
+								"can_accept_seam": true
+							}
+						],
+						"module_id": "DA_Module_Blocks_Ext_Floor_Wall_+Y",
+						"module_placement_zone": "Edge",
+						"module_optional": false
+					},
+					{
+						"entry_id": "Corner",
+						"content_kind": "Module",
+						"weight": 1,
+						"provided_zone_features": [],
+						"closure_provider_intents": [],
+						"seam_provider_intents": [
+							{
+								"seam_intent_id": "SharedCorner",
+								"zone": "Perimeter",
+								"interface_family": "Layout.Interface.Partition.Solid",
+								"can_own_seam": true,
+								"can_accept_seam": true
+							},
+							{
+								"seam_intent_id": "SharedDoorCorner",
+								"zone": "Perimeter",
+								"interface_family": "Layout.Interface.Partition.Door",
+								"can_own_seam": true,
+								"can_accept_seam": true
+							}
+						],
+						"module_id": "DA_Module_Blocks_Ext_Floor_Wall_+Y+X",
+						"module_placement_zone": "Corner",
+						"module_optional": false
+					},
+					{
+						"entry_id": "Door",
+						"content_kind": "Module",
+						"weight": 1,
+						"provided_zone_features": [],
+						"closure_provider_intents": [],
+						"seam_provider_intents": [
+							{
+								"seam_intent_id": "SharedDoor",
+								"zone": "Perimeter",
+								"interface_family": "Layout.Interface.Partition.Door",
+								"can_own_seam": true,
+								"can_accept_seam": true
+							}
+						],
+						"module_id": "DA_Module_Blocks_Ext_Floor_Door_+Y",
+						"module_placement_zone": "Edge",
+						"module_optional": false
+					}
+				]
+			}
+		],
+		"modules": [
+			{
+				"id": "DA_Module_Blocks_Ext_Battlement_+X",
+				"name": "DA_Module_Blocks_Ext_Battlement_+X",
+				"template_name": "MedievalBlocks_Battlement_Side_+X",
+				"cell_size_in_blocks":
+				{
+					"x": 5,
+					"y": 5,
+					"z": 5
+				},
+				"roles": [
+					"Boundary"
+				],
+				"yaw_rotation_mode": "AllFour",
+				"custom_yaw_rotation_steps": [],
+				"face_symmetry_mode": "MirrorYFromPosY",
+				"min_walkable_faces": 0,
+				"face_rules": [
+					{
+						"direction": "PosX",
+						"connection_tag": "Layout.Face.Solid",
+						"allowed_connection_tags": [
+							"Layout.Face.Open"
+						],
+						"occupancy_policy": "RequiresFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "NegX",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": true,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "PosY",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "RequiresFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "NegY",
+						"connection_tag": "",
+						"allowed_connection_tags": [],
+						"occupancy_policy": "RequiresFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "PosZ",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [],
+						"occupancy_policy": "RequiresEmptyNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "NegZ",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "RequiresFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					}
+				],
+				"internal_access_links": []
+			},
+			{
+				"id": "DA_Module_Blocks_Ext_Battlement_Corner_+Y+X",
+				"name": "DA_Module_Blocks_Ext_Battlement_Corner_+Y+X",
+				"template_name": "MedievalBlocks_Battlement_Corner_+Y+X",
+				"cell_size_in_blocks":
+				{
+					"x": 5,
+					"y": 5,
+					"z": 5
+				},
+				"roles": [
+					"Boundary"
+				],
+				"yaw_rotation_mode": "AllFour",
+				"custom_yaw_rotation_steps": [],
+				"face_symmetry_mode": "Independent",
+				"min_walkable_faces": 0,
+				"face_rules": [
+					{
+						"direction": "PosX",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "RequiresFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "NegX",
+						"connection_tag": "Layout.Face.Solid",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": true,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "PosY",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "RequiresFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "NegY",
+						"connection_tag": "Layout.Face.Solid",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": true,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "PosZ",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [],
+						"occupancy_policy": "RequiresEmptyNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "NegZ",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "RequiresFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					}
+				],
+				"internal_access_links": []
+			},
+			{
+				"id": "DA_Module_Blocks_Ext_Door_+X",
+				"name": "DA_Module_Blocks_Ext_Door_+X",
+				"template_name": "MedievalBlocks_Door_+X",
+				"cell_size_in_blocks":
+				{
+					"x": 5,
+					"y": 5,
+					"z": 5
+				},
+				"roles": [
+					"Entry"
+				],
+				"yaw_rotation_mode": "AllFour",
+				"custom_yaw_rotation_steps": [],
+				"face_symmetry_mode": "MirrorYFromPosY",
+				"min_walkable_faces": 0,
+				"face_rules": [
+					{
+						"direction": "PosX",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open"
+						],
+						"occupancy_policy": "RequiresWalkableFilledNeighbor",
+						"connected_traversal_channels": [
+							"Layout.Traversal.Primary"
+						],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "NegX",
+						"connection_tag": "Layout.Face.Entry",
+						"allowed_connection_tags": [
+							"Layout.Face.Open"
+						],
+						"occupancy_policy": "AllowsEmptyOrWalkableFilledNeighbor",
+						"connected_traversal_channels": [
+							"Layout.Traversal.Primary"
+						],
+						"can_face_region_boundary": true,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "PosY",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "NegY",
+						"connection_tag": "",
+						"allowed_connection_tags": [],
+						"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "PosZ",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "RequiresFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "NegZ",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [],
+						"occupancy_policy": "RequiresEmptyNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					}
+				],
+				"internal_access_links": []
+			},
+			{
+				"id": "DA_Module_Blocks_Ext_Floor_Door_+Y",
+				"name": "DA_Module_Blocks_Ext_Floor_Door_+Y",
+				"template_name": "MedievalBlocks_Floor_Door_+Y",
+				"cell_size_in_blocks":
+				{
+					"x": 5,
+					"y": 5,
+					"z": 5
+				},
+				"roles": [
+					"Entry"
+				],
+				"yaw_rotation_mode": "AllFour",
+				"custom_yaw_rotation_steps": [],
+				"face_symmetry_mode": "MirrorXFromPosX",
+				"min_walkable_faces": 2,
+				"face_rules": [
+					{
+						"direction": "PosX",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "RequiresFilledNeighbor",
+						"connected_traversal_channels": [
+							"Layout.Traversal.Primary"
+						],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "NegX",
+						"connection_tag": "",
+						"allowed_connection_tags": [],
+						"occupancy_policy": "RequiresFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "PosY",
+						"connection_tag": "Layout.Face.Entry",
+						"allowed_connection_tags": [
+							"Layout.Face.Open"
+						],
+						"occupancy_policy": "AllowsEmptyOrWalkableFilledNeighbor",
+						"connected_traversal_channels": [
+							"Layout.Traversal.Primary"
+						],
+						"can_face_region_boundary": true,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "NegY",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "RequiresFilledNeighbor",
+						"connected_traversal_channels": [
+							"Layout.Traversal.Primary"
+						],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "PosZ",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "NegZ",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					}
+				],
+				"internal_access_links": []
+			},
+			{
+				"id": "DA_Module_Blocks_Ext_Floor_Wall_+Y",
+				"name": "DA_Module_Blocks_Ext_Floor_Wall_+Y",
+				"template_name": "MedievalBlocks_Floor_Wall_+Y",
+				"cell_size_in_blocks":
+				{
+					"x": 5,
+					"y": 5,
+					"z": 5
+				},
+				"roles": [
+					"Boundary"
+				],
+				"yaw_rotation_mode": "AllFour",
+				"custom_yaw_rotation_steps": [],
+				"face_symmetry_mode": "MirrorXFromPosX",
+				"min_walkable_faces": 0,
+				"face_rules": [
+					{
+						"direction": "PosX",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "RequiresFilledNeighbor",
+						"connected_traversal_channels": [
+							"Layout.Traversal.Primary"
+						],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "NegX",
+						"connection_tag": "",
+						"allowed_connection_tags": [],
+						"occupancy_policy": "RequiresFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "PosY",
+						"connection_tag": "Layout.Face.Solid",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": true,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "NegY",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "RequiresFilledNeighbor",
+						"connected_traversal_channels": [
+							"Layout.Traversal.Primary"
+						],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "PosZ",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "NegZ",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					}
+				],
+				"internal_access_links": []
+			},
+			{
+				"id": "DA_Module_Blocks_Ext_Floor_Wall_+Y+X",
+				"name": "DA_Module_Blocks_Ext_Floor_Wall_+Y+X",
+				"template_name": "MedievalBlocks_Floor_Wall_+Y+X",
+				"cell_size_in_blocks":
+				{
+					"x": 5,
+					"y": 5,
+					"z": 5
+				},
+				"roles": [
+					"Boundary"
+				],
+				"yaw_rotation_mode": "AllFour",
+				"custom_yaw_rotation_steps": [],
+				"face_symmetry_mode": "Independent",
+				"min_walkable_faces": 0,
+				"face_rules": [
+					{
+						"direction": "PosX",
+						"connection_tag": "Layout.Face.Solid",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": true,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "NegX",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "RequiresFilledNeighbor",
+						"connected_traversal_channels": [
+							"Layout.Traversal.Primary"
+						],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "PosY",
+						"connection_tag": "Layout.Face.Solid",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": true,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "NegY",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "RequiresFilledNeighbor",
+						"connected_traversal_channels": [
+							"Layout.Traversal.Primary"
+						],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "PosZ",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "NegZ",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					}
+				],
+				"internal_access_links": []
+			},
+			{
+				"id": "DA_Module_Blocks_Ext_Pillar_Corner_+Y+X",
+				"name": "DA_Module_Blocks_Ext_Pillar_Corner_+Y+X",
+				"template_name": "MedievalBlocks_Pillar_Corner_+Y+X",
+				"cell_size_in_blocks":
+				{
+					"x": 5,
+					"y": 5,
+					"z": 5
+				},
+				"roles": [
+					"Boundary"
+				],
+				"yaw_rotation_mode": "AllFour",
+				"custom_yaw_rotation_steps": [],
+				"face_symmetry_mode": "Independent",
+				"min_walkable_faces": 0,
+				"face_rules": [
+					{
+						"direction": "PosX",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "RequiresFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "NegX",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": true,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "PosY",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "RequiresFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "NegY",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": true,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "PosZ",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "RequiresFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "NegZ",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					}
+				],
+				"internal_access_links": []
+			},
+			{
+				"id": "DA_Module_Blocks_Ext_Wall_+X",
+				"name": "DA_Module_Blocks_Ext_Wall_+X",
+				"template_name": "MedievalBlocks_Wall_+X",
+				"cell_size_in_blocks":
+				{
+					"x": 5,
+					"y": 5,
+					"z": 5
+				},
+				"roles": [
+					"Boundary"
+				],
+				"yaw_rotation_mode": "AllFour",
+				"custom_yaw_rotation_steps": [],
+				"face_symmetry_mode": "MirrorYFromPosY",
+				"min_walkable_faces": 0,
+				"face_rules": [
+					{
+						"direction": "PosX",
+						"connection_tag": "Layout.Face.Solid",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "RequiresFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "NegX",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": true,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "PosY",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "RequiresFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "NegY",
+						"connection_tag": "",
+						"allowed_connection_tags": [],
+						"occupancy_policy": "RequiresFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "PosZ",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "RequiresFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "NegZ",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					}
+				],
+				"internal_access_links": []
+			},
+			{
+				"id": "DA_Module_Blocks_Floor",
+				"name": "DA_Module_Blocks_Floor",
+				"template_name": "MedievalBlocks_Floor",
+				"cell_size_in_blocks":
+				{
+					"x": 5,
+					"y": 5,
+					"z": 5
+				},
+				"roles": [
+					"Interior"
+				],
+				"yaw_rotation_mode": "AllFour",
+				"custom_yaw_rotation_steps": [],
+				"face_symmetry_mode": "RadialHorizontalFromPosX",
+				"min_walkable_faces": 0,
+				"face_rules": [
+					{
+						"direction": "PosX",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Entry",
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "RequiresFilledNeighbor",
+						"connected_traversal_channels": [
+							"Layout.Traversal.Primary"
+						],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "NegX",
+						"connection_tag": "",
+						"allowed_connection_tags": [],
+						"occupancy_policy": "AllowsAnyNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "PosY",
+						"connection_tag": "",
+						"allowed_connection_tags": [],
+						"occupancy_policy": "AllowsAnyNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "NegY",
+						"connection_tag": "",
+						"allowed_connection_tags": [],
+						"occupancy_policy": "AllowsAnyNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "PosZ",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "NegZ",
+						"connection_tag": "Layout.Face.Solid",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					}
+				],
+				"internal_access_links": []
+			},
+			{
+				"id": "DA_Module_Blocks_Floor_StairHole_-Y",
+				"name": "DA_Module_Blocks_Floor_StairHole_-Y",
+				"template_name": "MedievalBlocks_Floor_StairHole_-Y",
+				"cell_size_in_blocks":
+				{
+					"x": 5,
+					"y": 5,
+					"z": 5
+				},
+				"roles": [
+					"Interior"
+				],
+				"yaw_rotation_mode": "AllFour",
+				"custom_yaw_rotation_steps": [],
+				"face_symmetry_mode": "MirrorXFromPosX",
+				"min_walkable_faces": 1,
+				"face_rules": [
+					{
+						"direction": "PosX",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Entry",
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "RequiresFilledNeighbor",
+						"connected_traversal_channels": [
+							"Layout.Traversal.Primary"
+						],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "NegX",
+						"connection_tag": "",
+						"allowed_connection_tags": [],
+						"occupancy_policy": "AllowsAnyNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "PosY",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Entry",
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "RequiresFilledNeighbor",
+						"connected_traversal_channels": [
+							"Layout.Traversal.Primary"
+						],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "NegY",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Entry",
+							"Layout.Face.Open"
+						],
+						"occupancy_policy": "RequiresWalkableFilledNeighbor",
+						"connected_traversal_channels": [
+							"Layout.Traversal.Primary"
+						],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "PosZ",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "NegZ",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open"
+						],
+						"occupancy_policy": "RequiresWalkableFilledNeighbor",
+						"connected_traversal_channels": [
+							"Layout.Traversal.Primary"
+						],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": true
+					}
+				],
+				"internal_access_links": []
+			},
+			{
+				"id": "DA_Module_Blocks_Floor_Stairs_-YTo-Y",
+				"name": "DA_Module_Blocks_Floor_Stairs_-YTo-Y",
+				"template_name": "MedievalBlocks_Floor_Stairs_-Yto-Y",
+				"cell_size_in_blocks":
+				{
+					"x": 5,
+					"y": 5,
+					"z": 5
+				},
+				"roles": [
+					"VerticalAccess"
+				],
+				"yaw_rotation_mode": "AllFour",
+				"custom_yaw_rotation_steps": [],
+				"face_symmetry_mode": "MirrorXFromPosX",
+				"min_walkable_faces": 1,
+				"face_rules": [
+					{
+						"direction": "PosX",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "RequiresFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "NegX",
+						"connection_tag": "",
+						"allowed_connection_tags": [],
+						"occupancy_policy": "AllowsAnyNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "PosY",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "RequiresFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "NegY",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Entry",
+							"Layout.Face.Open"
+						],
+						"occupancy_policy": "RequiresWalkableFilledNeighbor",
+						"connected_traversal_channels": [
+							"Layout.Traversal.Primary"
+						],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "PosZ",
+						"connection_tag": "Layout.Face.Open",
+						"allowed_connection_tags": [
+							"Layout.Face.Open"
+						],
+						"occupancy_policy": "RequiresWalkableFilledNeighbor",
+						"connected_traversal_channels": [
+							"Layout.Traversal.Primary"
+						],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					},
+					{
+						"direction": "NegZ",
+						"connection_tag": "Layout.Face.Solid",
+						"allowed_connection_tags": [
+							"Layout.Face.Open",
+							"Layout.Face.Solid"
+						],
+						"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+						"connected_traversal_channels": [],
+						"can_face_region_boundary": false,
+						"require_matching_yaw_with_filled_neighbor": false
+					}
+				],
+				"internal_access_links": []
+			}
+		]
+	},
+	"compiled_snapshot":
+	{
+		"content_set_snapshot":
+		{
+			"snapshot_id": "DA_ContentSet_Castle",
+			"snapshot_schema_version": 1,
+			"debug_name": "DA_ContentSet_Castle",
+			"shared_cell_size_in_blocks":
+			{
+				"x": 5,
+				"y": 5,
+				"z": 5
+			},
+			"validation_messages": [],
+			"proof_records": [
+				{
+					"proof_id": "ContentSetSnapshot.Entry.Battlement",
+					"proof_kind": "SnapshotCopy",
+					"target_id": "Battlement",
+					"source_ids": [
+						"DA_ContentSet_Castle"
+					],
+					"proof_summary": "Copied content entry 'Battlement' into immutable content-set snapshot 'DA_ContentSet_Castle'."
+				},
+				{
+					"proof_id": "ContentSetSnapshot.Entry.BattlementCorner",
+					"proof_kind": "SnapshotCopy",
+					"target_id": "BattlementCorner",
+					"source_ids": [
+						"DA_ContentSet_Castle"
+					],
+					"proof_summary": "Copied content entry 'BattlementCorner' into immutable content-set snapshot 'DA_ContentSet_Castle'."
+				},
+				{
+					"proof_id": "ContentSetSnapshot.Entry.ExteriorDoor",
+					"proof_kind": "SnapshotCopy",
+					"target_id": "ExteriorDoor",
+					"source_ids": [
+						"DA_ContentSet_Castle"
+					],
+					"proof_summary": "Copied content entry 'ExteriorDoor' into immutable content-set snapshot 'DA_ContentSet_Castle'."
+				},
+				{
+					"proof_id": "ContentSetSnapshot.Entry.ExteriorPillarCorner",
+					"proof_kind": "SnapshotCopy",
+					"target_id": "ExteriorPillarCorner",
+					"source_ids": [
+						"DA_ContentSet_Castle"
+					],
+					"proof_summary": "Copied content entry 'ExteriorPillarCorner' into immutable content-set snapshot 'DA_ContentSet_Castle'."
+				},
+				{
+					"proof_id": "ContentSetSnapshot.Entry.ExteriorWall",
+					"proof_kind": "SnapshotCopy",
+					"target_id": "ExteriorWall",
+					"source_ids": [
+						"DA_ContentSet_Castle"
+					],
+					"proof_summary": "Copied content entry 'ExteriorWall' into immutable content-set snapshot 'DA_ContentSet_Castle'."
+				},
+				{
+					"proof_id": "ContentSetSnapshot.Entry.Floor",
+					"proof_kind": "SnapshotCopy",
+					"target_id": "Floor",
+					"source_ids": [
+						"DA_ContentSet_Castle"
+					],
+					"proof_summary": "Copied content entry 'Floor' into immutable content-set snapshot 'DA_ContentSet_Castle'."
+				},
+				{
+					"proof_id": "ContentSetSnapshot.Entry.Stairs",
+					"proof_kind": "SnapshotCopy",
+					"target_id": "Stairs",
+					"source_ids": [
+						"DA_ContentSet_Castle"
+					],
+					"proof_summary": "Copied content entry 'Stairs' into immutable content-set snapshot 'DA_ContentSet_Castle'."
+				},
+				{
+					"proof_id": "ContentSetSnapshot.Entry.StairHole",
+					"proof_kind": "SnapshotCopy",
+					"target_id": "StairHole",
+					"source_ids": [
+						"DA_ContentSet_Castle"
+					],
+					"proof_summary": "Copied content entry 'StairHole' into immutable content-set snapshot 'DA_ContentSet_Castle'."
+				},
+				{
+					"proof_id": "ContentSetSnapshot.Entry.Room",
+					"proof_kind": "SnapshotCopy",
+					"target_id": "Room",
+					"source_ids": [
+						"DA_ContentSet_Castle"
+					],
+					"proof_summary": "Copied content entry 'Room' into immutable content-set snapshot 'DA_ContentSet_Castle'."
+				},
+				{
+					"proof_id": "ContentSetSnapshot.Copy",
+					"proof_kind": "SnapshotCopy",
+					"target_id": "DA_ContentSet_Castle",
+					"source_ids": [
+						"DA_ContentSet_Castle"
+					],
+					"proof_summary": "Copied region content-set contract into immutable solver snapshot."
+				}
+			],
+			"validation_assertions": [
+				{
+					"assertion_id": "ContentSetSnapshot.SourcePresent",
+					"assertion_kind": "SnapshotSourcePresent",
+					"passed": true,
+					"related_ids": [
+						"DA_ContentSet_Castle"
+					],
+					"failure_reason": ""
+				},
+				{
+					"assertion_id": "ContentSetSnapshot.AssetValidationPassed",
+					"assertion_kind": "AssetValidationPassed",
+					"passed": true,
+					"related_ids": [
+						"DA_ContentSet_Castle"
+					],
+					"failure_reason": ""
+				}
+			],
+			"entries": [
+				{
+					"entry_id": "Battlement",
+					"content_kind": "Module",
+					"weight": 1,
+					"provided_zone_features": [],
+					"closure_provider_intents": [],
+					"seam_provider_intents": [],
+					"module_snapshot_index": 0,
+					"module_placement_zone": "Edge",
+					"module_optional": false,
+					"child_profile_snapshot_id": "None",
+					"child_placement_zone": "Any",
+					"child_optional": false
+				},
+				{
+					"entry_id": "BattlementCorner",
+					"content_kind": "Module",
+					"weight": 1,
+					"provided_zone_features": [],
+					"closure_provider_intents": [],
+					"seam_provider_intents": [],
+					"module_snapshot_index": 1,
+					"module_placement_zone": "Corner",
+					"module_optional": false,
+					"child_profile_snapshot_id": "None",
+					"child_placement_zone": "Any",
+					"child_optional": false
+				},
+				{
+					"entry_id": "ExteriorDoor",
+					"content_kind": "Module",
+					"weight": 1,
+					"provided_zone_features": [],
+					"closure_provider_intents": [],
+					"seam_provider_intents": [],
+					"module_snapshot_index": 2,
+					"module_placement_zone": "Perimeter",
+					"module_optional": false,
+					"child_profile_snapshot_id": "None",
+					"child_placement_zone": "Any",
+					"child_optional": false
+				},
+				{
+					"entry_id": "ExteriorPillarCorner",
+					"content_kind": "Module",
+					"weight": 1,
+					"provided_zone_features": [],
+					"closure_provider_intents": [],
+					"seam_provider_intents": [
+						{
+							"seam_intent_id": "SharedExtCorner",
+							"zone": "Perimeter",
+							"interface_family": "Layout.Interface.Partition.Solid",
+							"can_own_seam": true,
+							"can_accept_seam": false
+						}
+					],
+					"module_snapshot_index": 3,
+					"module_placement_zone": "Corner",
+					"module_optional": false,
+					"child_profile_snapshot_id": "None",
+					"child_placement_zone": "Any",
+					"child_optional": false
+				},
+				{
+					"entry_id": "ExteriorWall",
+					"content_kind": "Module",
+					"weight": 1,
+					"provided_zone_features": [],
+					"closure_provider_intents": [],
+					"seam_provider_intents": [
+						{
+							"seam_intent_id": "SharedExtWall",
+							"zone": "Perimeter",
+							"interface_family": "Layout.Interface.Partition.Solid",
+							"can_own_seam": true,
+							"can_accept_seam": false
+						}
+					],
+					"module_snapshot_index": 4,
+					"module_placement_zone": "Edge",
+					"module_optional": false,
+					"child_profile_snapshot_id": "None",
+					"child_placement_zone": "Any",
+					"child_optional": false
+				},
+				{
+					"entry_id": "Floor",
+					"content_kind": "Module",
+					"weight": 1,
+					"provided_zone_features": [],
+					"closure_provider_intents": [],
+					"seam_provider_intents": [],
+					"module_snapshot_index": 5,
+					"module_placement_zone": "Interior",
+					"module_optional": false,
+					"child_profile_snapshot_id": "None",
+					"child_placement_zone": "Any",
+					"child_optional": false
+				},
+				{
+					"entry_id": "Stairs",
+					"content_kind": "Module",
+					"weight": 1,
+					"provided_zone_features": [],
+					"closure_provider_intents": [],
+					"seam_provider_intents": [],
+					"module_snapshot_index": 6,
+					"module_placement_zone": "Interior",
+					"module_optional": false,
+					"child_profile_snapshot_id": "None",
+					"child_placement_zone": "Any",
+					"child_optional": false
+				},
+				{
+					"entry_id": "StairHole",
+					"content_kind": "Module",
+					"weight": 1,
+					"provided_zone_features": [],
+					"closure_provider_intents": [],
+					"seam_provider_intents": [],
+					"module_snapshot_index": 7,
+					"module_placement_zone": "Interior",
+					"module_optional": false,
+					"child_profile_snapshot_id": "None",
+					"child_placement_zone": "Any",
+					"child_optional": false
+				},
+				{
+					"entry_id": "Room",
+					"content_kind": "ChildRegion",
+					"weight": 1,
+					"provided_zone_features": [
+						"Layout.Feature.Room"
+					],
+					"closure_provider_intents": [],
+					"seam_provider_intents": [],
+					"module_snapshot_index": -1,
+					"module_placement_zone": "Any",
+					"module_optional": false,
+					"child_profile_snapshot_id": "DA_Profile_Room",
+					"child_placement_zone": "Interior",
+					"child_optional": false
+				}
+			]
+		},
+		"module_set_snapshot":
+		{
+			"snapshot_id": "DA_ContentSet_Castle",
+			"snapshot_schema_version": 1,
+			"debug_name": "DA_ContentSet_Castle",
+			"shared_cell_size_in_blocks":
+			{
+				"x": 5,
+				"y": 5,
+				"z": 5
+			},
+			"validation_messages": [],
+			"proof_records": [
+				{
+					"proof_id": "ModuleSetSnapshot.FromContentSet",
+					"proof_kind": "SnapshotCopy",
+					"target_id": "DA_ContentSet_Castle",
+					"source_ids": [
+						"DA_ContentSet_Castle"
+					],
+					"proof_summary": "Compiled module-backed content entries from the unified content set into the current module-solve snapshot path."
+				}
+			],
+			"validation_assertions": [
+				{
+					"assertion_id": "ModuleSetSnapshot.ContentSetSourcePresent",
+					"assertion_kind": "SnapshotSourcePresent",
+					"passed": true,
+					"related_ids": [
+						"DA_ContentSet_Castle"
+					],
+					"failure_reason": ""
+				},
+				{
+					"assertion_id": "ModuleSetSnapshot.ContentSetValidationPassed",
+					"assertion_kind": "AssetValidationPassed",
+					"passed": true,
+					"related_ids": [
+						"DA_ContentSet_Castle"
+					],
+					"failure_reason": ""
+				}
+			],
+			"modules": [
+				{
+					"snapshot_id": "DA_Module_Blocks_Ext_Battlement_+X",
+					"snapshot_schema_version": 1,
+					"debug_name": "DA_Module_Blocks_Ext_Battlement_+X",
+					"template_name": "MedievalBlocks_Battlement_Side_+X",
+					"cell_size_in_blocks":
+					{
+						"x": 5,
+						"y": 5,
+						"z": 5
+					},
+					"roles": [
+						"Boundary"
+					],
+					"supported_intents": [
+						"Boundary"
+					],
+					"allowed_yaw_rotation_steps": [
+						0,
+						1,
+						2,
+						3
+					],
+					"effective_face_rules": [
+						{
+							"direction": "PosX",
+							"connection_tag": "Layout.Face.Solid",
+							"allowed_connection_tags": [
+								"Layout.Face.Open"
+							],
+							"occupancy_policy": "RequiresFilledNeighbor",
+							"connected_traversal_channels": [],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "NegX",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+							"connected_traversal_channels": [],
+							"can_face_region_boundary": true,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "PosY",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "RequiresFilledNeighbor",
+							"connected_traversal_channels": [],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "NegY",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "RequiresFilledNeighbor",
+							"connected_traversal_channels": [],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "PosZ",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [],
+							"occupancy_policy": "RequiresEmptyNeighbor",
+							"connected_traversal_channels": [],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "NegZ",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "RequiresFilledNeighbor",
+							"connected_traversal_channels": [],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						}
+					],
+					"traversal_channels": [],
+					"internal_access_links": [],
+					"min_traversable_neighbor_faces": 0,
+					"weight": 1,
+					"placement_zone": "Edge",
+					"optional": false,
+					"validation_messages": [],
+					"derived_endpoint_offers": [],
+					"derived_span_offers": [
+						{
+							"span_offer_id": "DA_Module_Blocks_Ext_Battlement_+X.Span.PosX",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "PosX",
+							"connection_tag": "Layout.Face.Solid",
+							"allowed_connection_tags": [
+								"Layout.Face.Open"
+							],
+							"roles": [
+								"Boundary"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": false
+						},
+						{
+							"span_offer_id": "DA_Module_Blocks_Ext_Battlement_+X.Span.NegX",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "NegX",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"roles": [
+								"Boundary"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": true
+						},
+						{
+							"span_offer_id": "DA_Module_Blocks_Ext_Battlement_+X.Span.PosY",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "PosY",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"roles": [
+								"Boundary"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": false
+						},
+						{
+							"span_offer_id": "DA_Module_Blocks_Ext_Battlement_+X.Span.NegY",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "NegY",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"roles": [
+								"Boundary"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": false
+						},
+						{
+							"span_offer_id": "DA_Module_Blocks_Ext_Battlement_+X.Span.PosZ",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "PosZ",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [],
+							"roles": [
+								"Boundary"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": true
+						},
+						{
+							"span_offer_id": "DA_Module_Blocks_Ext_Battlement_+X.Span.NegZ",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "NegZ",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"roles": [
+								"Boundary"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": false
+						}
+					],
+					"derived_vertical_access_contracts": [],
+					"proof_records": [
+						{
+							"proof_id": "ModuleSnapshot.Copy",
+							"proof_kind": "SnapshotCopy",
+							"target_id": "DA_Module_Blocks_Ext_Battlement_+X",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Battlement_+X"
+							],
+							"proof_summary": "Copied effective module contract into immutable solver snapshot."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Ext_Battlement_+X.Span.PosX.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Ext_Battlement_+X.Span.PosX",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Battlement_+X"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule PosX."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Ext_Battlement_+X.Span.NegX.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Ext_Battlement_+X.Span.NegX",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Battlement_+X"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule NegX."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Ext_Battlement_+X.Span.PosY.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Ext_Battlement_+X.Span.PosY",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Battlement_+X"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule PosY."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Ext_Battlement_+X.Span.NegY.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Ext_Battlement_+X.Span.NegY",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Battlement_+X"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule NegY."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Ext_Battlement_+X.Span.PosZ.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Ext_Battlement_+X.Span.PosZ",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Battlement_+X"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule PosZ."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Ext_Battlement_+X.Span.NegZ.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Ext_Battlement_+X.Span.NegZ",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Battlement_+X"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule NegZ."
+						}
+					],
+					"validation_assertions": [
+						{
+							"assertion_id": "ModuleSnapshot.SourcePresent",
+							"assertion_kind": "SnapshotSourcePresent",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Ext_Battlement_+X"
+							],
+							"failure_reason": ""
+						},
+						{
+							"assertion_id": "ModuleSnapshot.AssetValidationPassed",
+							"assertion_kind": "AssetValidationPassed",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Ext_Battlement_+X"
+							],
+							"failure_reason": ""
+						},
+						{
+							"assertion_id": "ModuleSnapshot.DerivedEndpointOfferContract",
+							"assertion_kind": "DerivedOfferContractValid",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Ext_Battlement_+X"
+							],
+							"failure_reason": ""
+						},
+						{
+							"assertion_id": "ModuleSnapshot.DerivedSpanOfferContract",
+							"assertion_kind": "DerivedSpanContractValid",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Ext_Battlement_+X"
+							],
+							"failure_reason": ""
+						},
+						{
+							"assertion_id": "ModuleSnapshot.DerivedVerticalAccessContract",
+							"assertion_kind": "DerivedVerticalAccessContractValid",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Ext_Battlement_+X"
+							],
+							"failure_reason": ""
+						}
+					]
+				},
+				{
+					"snapshot_id": "DA_Module_Blocks_Ext_Battlement_Corner_+Y+X",
+					"snapshot_schema_version": 1,
+					"debug_name": "DA_Module_Blocks_Ext_Battlement_Corner_+Y+X",
+					"template_name": "MedievalBlocks_Battlement_Corner_+Y+X",
+					"cell_size_in_blocks":
+					{
+						"x": 5,
+						"y": 5,
+						"z": 5
+					},
+					"roles": [
+						"Boundary"
+					],
+					"supported_intents": [
+						"Boundary"
+					],
+					"allowed_yaw_rotation_steps": [
+						0,
+						1,
+						2,
+						3
+					],
+					"effective_face_rules": [
+						{
+							"direction": "PosX",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "RequiresFilledNeighbor",
+							"connected_traversal_channels": [],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "NegX",
+							"connection_tag": "Layout.Face.Solid",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+							"connected_traversal_channels": [],
+							"can_face_region_boundary": true,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "PosY",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "RequiresFilledNeighbor",
+							"connected_traversal_channels": [],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "NegY",
+							"connection_tag": "Layout.Face.Solid",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+							"connected_traversal_channels": [],
+							"can_face_region_boundary": true,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "PosZ",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [],
+							"occupancy_policy": "RequiresEmptyNeighbor",
+							"connected_traversal_channels": [],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "NegZ",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "RequiresFilledNeighbor",
+							"connected_traversal_channels": [],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						}
+					],
+					"traversal_channels": [],
+					"internal_access_links": [],
+					"min_traversable_neighbor_faces": 0,
+					"weight": 1,
+					"placement_zone": "Corner",
+					"optional": false,
+					"validation_messages": [],
+					"derived_endpoint_offers": [],
+					"derived_span_offers": [
+						{
+							"span_offer_id": "DA_Module_Blocks_Ext_Battlement_Corner_+Y+X.Span.PosX",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "PosX",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"roles": [
+								"Boundary"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": false
+						},
+						{
+							"span_offer_id": "DA_Module_Blocks_Ext_Battlement_Corner_+Y+X.Span.NegX",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "NegX",
+							"connection_tag": "Layout.Face.Solid",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"roles": [
+								"Boundary"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": true
+						},
+						{
+							"span_offer_id": "DA_Module_Blocks_Ext_Battlement_Corner_+Y+X.Span.PosY",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "PosY",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"roles": [
+								"Boundary"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": false
+						},
+						{
+							"span_offer_id": "DA_Module_Blocks_Ext_Battlement_Corner_+Y+X.Span.NegY",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "NegY",
+							"connection_tag": "Layout.Face.Solid",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"roles": [
+								"Boundary"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": true
+						},
+						{
+							"span_offer_id": "DA_Module_Blocks_Ext_Battlement_Corner_+Y+X.Span.PosZ",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "PosZ",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [],
+							"roles": [
+								"Boundary"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": true
+						},
+						{
+							"span_offer_id": "DA_Module_Blocks_Ext_Battlement_Corner_+Y+X.Span.NegZ",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "NegZ",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"roles": [
+								"Boundary"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": false
+						}
+					],
+					"derived_vertical_access_contracts": [],
+					"proof_records": [
+						{
+							"proof_id": "ModuleSnapshot.Copy",
+							"proof_kind": "SnapshotCopy",
+							"target_id": "DA_Module_Blocks_Ext_Battlement_Corner_+Y+X",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Battlement_Corner_+Y+X"
+							],
+							"proof_summary": "Copied effective module contract into immutable solver snapshot."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Ext_Battlement_Corner_+Y+X.Span.PosX.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Ext_Battlement_Corner_+Y+X.Span.PosX",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Battlement_Corner_+Y+X"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule PosX."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Ext_Battlement_Corner_+Y+X.Span.NegX.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Ext_Battlement_Corner_+Y+X.Span.NegX",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Battlement_Corner_+Y+X"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule NegX."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Ext_Battlement_Corner_+Y+X.Span.PosY.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Ext_Battlement_Corner_+Y+X.Span.PosY",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Battlement_Corner_+Y+X"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule PosY."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Ext_Battlement_Corner_+Y+X.Span.NegY.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Ext_Battlement_Corner_+Y+X.Span.NegY",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Battlement_Corner_+Y+X"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule NegY."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Ext_Battlement_Corner_+Y+X.Span.PosZ.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Ext_Battlement_Corner_+Y+X.Span.PosZ",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Battlement_Corner_+Y+X"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule PosZ."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Ext_Battlement_Corner_+Y+X.Span.NegZ.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Ext_Battlement_Corner_+Y+X.Span.NegZ",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Battlement_Corner_+Y+X"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule NegZ."
+						}
+					],
+					"validation_assertions": [
+						{
+							"assertion_id": "ModuleSnapshot.SourcePresent",
+							"assertion_kind": "SnapshotSourcePresent",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Ext_Battlement_Corner_+Y+X"
+							],
+							"failure_reason": ""
+						},
+						{
+							"assertion_id": "ModuleSnapshot.AssetValidationPassed",
+							"assertion_kind": "AssetValidationPassed",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Ext_Battlement_Corner_+Y+X"
+							],
+							"failure_reason": ""
+						},
+						{
+							"assertion_id": "ModuleSnapshot.DerivedEndpointOfferContract",
+							"assertion_kind": "DerivedOfferContractValid",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Ext_Battlement_Corner_+Y+X"
+							],
+							"failure_reason": ""
+						},
+						{
+							"assertion_id": "ModuleSnapshot.DerivedSpanOfferContract",
+							"assertion_kind": "DerivedSpanContractValid",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Ext_Battlement_Corner_+Y+X"
+							],
+							"failure_reason": ""
+						},
+						{
+							"assertion_id": "ModuleSnapshot.DerivedVerticalAccessContract",
+							"assertion_kind": "DerivedVerticalAccessContractValid",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Ext_Battlement_Corner_+Y+X"
+							],
+							"failure_reason": ""
+						}
+					]
+				},
+				{
+					"snapshot_id": "DA_Module_Blocks_Ext_Door_+X",
+					"snapshot_schema_version": 1,
+					"debug_name": "DA_Module_Blocks_Ext_Door_+X",
+					"template_name": "MedievalBlocks_Door_+X",
+					"cell_size_in_blocks":
+					{
+						"x": 5,
+						"y": 5,
+						"z": 5
+					},
+					"roles": [
+						"Entry"
+					],
+					"supported_intents": [
+						"Entry",
+						"Connector"
+					],
+					"allowed_yaw_rotation_steps": [
+						0,
+						1,
+						2,
+						3
+					],
+					"effective_face_rules": [
+						{
+							"direction": "PosX",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open"
+							],
+							"occupancy_policy": "RequiresWalkableFilledNeighbor",
+							"connected_traversal_channels": [
+								"Layout.Traversal.Primary"
+							],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "NegX",
+							"connection_tag": "Layout.Face.Entry",
+							"allowed_connection_tags": [
+								"Layout.Face.Open"
+							],
+							"occupancy_policy": "AllowsEmptyOrWalkableFilledNeighbor",
+							"connected_traversal_channels": [
+								"Layout.Traversal.Primary"
+							],
+							"can_face_region_boundary": true,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "PosY",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+							"connected_traversal_channels": [],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "NegY",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+							"connected_traversal_channels": [],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "PosZ",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "RequiresFilledNeighbor",
+							"connected_traversal_channels": [],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "NegZ",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [],
+							"occupancy_policy": "RequiresEmptyNeighbor",
+							"connected_traversal_channels": [],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						}
+					],
+					"traversal_channels": [
+						"Layout.Traversal.Primary"
+					],
+					"internal_access_links": [],
+					"min_traversable_neighbor_faces": 0,
+					"weight": 1,
+					"placement_zone": "Perimeter",
+					"optional": false,
+					"validation_messages": [],
+					"derived_endpoint_offers": [
+						{
+							"offer_id": "DA_Module_Blocks_Ext_Door_+X.Endpoint.PosX",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "PosX",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open"
+							],
+							"traversal_channels": [
+								"Layout.Traversal.Primary"
+							],
+							"roles": [
+								"Entry"
+							],
+							"occupancy_policy": "RequiresWalkableFilledNeighbor"
+						},
+						{
+							"offer_id": "DA_Module_Blocks_Ext_Door_+X.Endpoint.NegX",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "NegX",
+							"connection_tag": "Layout.Face.Entry",
+							"allowed_connection_tags": [
+								"Layout.Face.Open"
+							],
+							"traversal_channels": [
+								"Layout.Traversal.Primary"
+							],
+							"roles": [
+								"Entry"
+							],
+							"occupancy_policy": "AllowsEmptyOrWalkableFilledNeighbor"
+						}
+					],
+					"derived_span_offers": [
+						{
+							"span_offer_id": "DA_Module_Blocks_Ext_Door_+X.Span.PosX",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "PosX",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open"
+							],
+							"roles": [
+								"Entry"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": false
+						},
+						{
+							"span_offer_id": "DA_Module_Blocks_Ext_Door_+X.Span.NegX",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "NegX",
+							"connection_tag": "Layout.Face.Entry",
+							"allowed_connection_tags": [
+								"Layout.Face.Open"
+							],
+							"roles": [
+								"Entry"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": true
+						},
+						{
+							"span_offer_id": "DA_Module_Blocks_Ext_Door_+X.Span.PosY",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "PosY",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"roles": [
+								"Entry"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": true
+						},
+						{
+							"span_offer_id": "DA_Module_Blocks_Ext_Door_+X.Span.NegY",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "NegY",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"roles": [
+								"Entry"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": true
+						},
+						{
+							"span_offer_id": "DA_Module_Blocks_Ext_Door_+X.Span.PosZ",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "PosZ",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"roles": [
+								"Entry"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": false
+						},
+						{
+							"span_offer_id": "DA_Module_Blocks_Ext_Door_+X.Span.NegZ",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "NegZ",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [],
+							"roles": [
+								"Entry"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": true
+						}
+					],
+					"derived_vertical_access_contracts": [],
+					"proof_records": [
+						{
+							"proof_id": "ModuleSnapshot.Copy",
+							"proof_kind": "SnapshotCopy",
+							"target_id": "DA_Module_Blocks_Ext_Door_+X",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Door_+X"
+							],
+							"proof_summary": "Copied effective module contract into immutable solver snapshot."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Ext_Door_+X.Endpoint.PosX.Proof",
+							"proof_kind": "DerivedOffer",
+							"target_id": "DA_Module_Blocks_Ext_Door_+X.Endpoint.PosX",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Door_+X"
+							],
+							"proof_summary": "Derived endpoint offer from canonical face rule PosX."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Ext_Door_+X.Span.PosX.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Ext_Door_+X.Span.PosX",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Door_+X"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule PosX."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Ext_Door_+X.Endpoint.NegX.Proof",
+							"proof_kind": "DerivedOffer",
+							"target_id": "DA_Module_Blocks_Ext_Door_+X.Endpoint.NegX",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Door_+X"
+							],
+							"proof_summary": "Derived endpoint offer from canonical face rule NegX."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Ext_Door_+X.Span.NegX.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Ext_Door_+X.Span.NegX",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Door_+X"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule NegX."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Ext_Door_+X.Span.PosY.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Ext_Door_+X.Span.PosY",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Door_+X"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule PosY."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Ext_Door_+X.Span.NegY.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Ext_Door_+X.Span.NegY",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Door_+X"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule NegY."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Ext_Door_+X.Span.PosZ.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Ext_Door_+X.Span.PosZ",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Door_+X"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule PosZ."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Ext_Door_+X.Span.NegZ.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Ext_Door_+X.Span.NegZ",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Door_+X"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule NegZ."
+						}
+					],
+					"validation_assertions": [
+						{
+							"assertion_id": "ModuleSnapshot.SourcePresent",
+							"assertion_kind": "SnapshotSourcePresent",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Ext_Door_+X"
+							],
+							"failure_reason": ""
+						},
+						{
+							"assertion_id": "ModuleSnapshot.AssetValidationPassed",
+							"assertion_kind": "AssetValidationPassed",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Ext_Door_+X"
+							],
+							"failure_reason": ""
+						},
+						{
+							"assertion_id": "ModuleSnapshot.DerivedEndpointOfferContract",
+							"assertion_kind": "DerivedOfferContractValid",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Ext_Door_+X"
+							],
+							"failure_reason": ""
+						},
+						{
+							"assertion_id": "ModuleSnapshot.DerivedSpanOfferContract",
+							"assertion_kind": "DerivedSpanContractValid",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Ext_Door_+X"
+							],
+							"failure_reason": ""
+						},
+						{
+							"assertion_id": "ModuleSnapshot.DerivedVerticalAccessContract",
+							"assertion_kind": "DerivedVerticalAccessContractValid",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Ext_Door_+X"
+							],
+							"failure_reason": ""
+						}
+					]
+				},
+				{
+					"snapshot_id": "DA_Module_Blocks_Ext_Pillar_Corner_+Y+X",
+					"snapshot_schema_version": 1,
+					"debug_name": "DA_Module_Blocks_Ext_Pillar_Corner_+Y+X",
+					"template_name": "MedievalBlocks_Pillar_Corner_+Y+X",
+					"cell_size_in_blocks":
+					{
+						"x": 5,
+						"y": 5,
+						"z": 5
+					},
+					"roles": [
+						"Boundary"
+					],
+					"supported_intents": [
+						"Boundary"
+					],
+					"allowed_yaw_rotation_steps": [
+						0,
+						1,
+						2,
+						3
+					],
+					"effective_face_rules": [
+						{
+							"direction": "PosX",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "RequiresFilledNeighbor",
+							"connected_traversal_channels": [],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "NegX",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+							"connected_traversal_channels": [],
+							"can_face_region_boundary": true,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "PosY",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "RequiresFilledNeighbor",
+							"connected_traversal_channels": [],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "NegY",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+							"connected_traversal_channels": [],
+							"can_face_region_boundary": true,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "PosZ",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "RequiresFilledNeighbor",
+							"connected_traversal_channels": [],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "NegZ",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+							"connected_traversal_channels": [],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						}
+					],
+					"traversal_channels": [],
+					"internal_access_links": [],
+					"min_traversable_neighbor_faces": 0,
+					"weight": 1,
+					"placement_zone": "Corner",
+					"optional": false,
+					"validation_messages": [],
+					"derived_endpoint_offers": [],
+					"derived_span_offers": [
+						{
+							"span_offer_id": "DA_Module_Blocks_Ext_Pillar_Corner_+Y+X.Span.PosX",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "PosX",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"roles": [
+								"Boundary"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": false
+						},
+						{
+							"span_offer_id": "DA_Module_Blocks_Ext_Pillar_Corner_+Y+X.Span.NegX",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "NegX",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"roles": [
+								"Boundary"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": true
+						},
+						{
+							"span_offer_id": "DA_Module_Blocks_Ext_Pillar_Corner_+Y+X.Span.PosY",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "PosY",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"roles": [
+								"Boundary"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": false
+						},
+						{
+							"span_offer_id": "DA_Module_Blocks_Ext_Pillar_Corner_+Y+X.Span.NegY",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "NegY",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"roles": [
+								"Boundary"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": true
+						},
+						{
+							"span_offer_id": "DA_Module_Blocks_Ext_Pillar_Corner_+Y+X.Span.PosZ",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "PosZ",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"roles": [
+								"Boundary"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": false
+						},
+						{
+							"span_offer_id": "DA_Module_Blocks_Ext_Pillar_Corner_+Y+X.Span.NegZ",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "NegZ",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"roles": [
+								"Boundary"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": true
+						}
+					],
+					"derived_vertical_access_contracts": [],
+					"proof_records": [
+						{
+							"proof_id": "ModuleSnapshot.Copy",
+							"proof_kind": "SnapshotCopy",
+							"target_id": "DA_Module_Blocks_Ext_Pillar_Corner_+Y+X",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Pillar_Corner_+Y+X"
+							],
+							"proof_summary": "Copied effective module contract into immutable solver snapshot."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Ext_Pillar_Corner_+Y+X.Span.PosX.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Ext_Pillar_Corner_+Y+X.Span.PosX",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Pillar_Corner_+Y+X"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule PosX."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Ext_Pillar_Corner_+Y+X.Span.NegX.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Ext_Pillar_Corner_+Y+X.Span.NegX",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Pillar_Corner_+Y+X"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule NegX."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Ext_Pillar_Corner_+Y+X.Span.PosY.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Ext_Pillar_Corner_+Y+X.Span.PosY",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Pillar_Corner_+Y+X"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule PosY."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Ext_Pillar_Corner_+Y+X.Span.NegY.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Ext_Pillar_Corner_+Y+X.Span.NegY",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Pillar_Corner_+Y+X"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule NegY."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Ext_Pillar_Corner_+Y+X.Span.PosZ.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Ext_Pillar_Corner_+Y+X.Span.PosZ",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Pillar_Corner_+Y+X"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule PosZ."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Ext_Pillar_Corner_+Y+X.Span.NegZ.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Ext_Pillar_Corner_+Y+X.Span.NegZ",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Pillar_Corner_+Y+X"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule NegZ."
+						}
+					],
+					"validation_assertions": [
+						{
+							"assertion_id": "ModuleSnapshot.SourcePresent",
+							"assertion_kind": "SnapshotSourcePresent",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Ext_Pillar_Corner_+Y+X"
+							],
+							"failure_reason": ""
+						},
+						{
+							"assertion_id": "ModuleSnapshot.AssetValidationPassed",
+							"assertion_kind": "AssetValidationPassed",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Ext_Pillar_Corner_+Y+X"
+							],
+							"failure_reason": ""
+						},
+						{
+							"assertion_id": "ModuleSnapshot.DerivedEndpointOfferContract",
+							"assertion_kind": "DerivedOfferContractValid",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Ext_Pillar_Corner_+Y+X"
+							],
+							"failure_reason": ""
+						},
+						{
+							"assertion_id": "ModuleSnapshot.DerivedSpanOfferContract",
+							"assertion_kind": "DerivedSpanContractValid",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Ext_Pillar_Corner_+Y+X"
+							],
+							"failure_reason": ""
+						},
+						{
+							"assertion_id": "ModuleSnapshot.DerivedVerticalAccessContract",
+							"assertion_kind": "DerivedVerticalAccessContractValid",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Ext_Pillar_Corner_+Y+X"
+							],
+							"failure_reason": ""
+						}
+					]
+				},
+				{
+					"snapshot_id": "DA_Module_Blocks_Ext_Wall_+X",
+					"snapshot_schema_version": 1,
+					"debug_name": "DA_Module_Blocks_Ext_Wall_+X",
+					"template_name": "MedievalBlocks_Wall_+X",
+					"cell_size_in_blocks":
+					{
+						"x": 5,
+						"y": 5,
+						"z": 5
+					},
+					"roles": [
+						"Boundary"
+					],
+					"supported_intents": [
+						"Boundary"
+					],
+					"allowed_yaw_rotation_steps": [
+						0,
+						1,
+						2,
+						3
+					],
+					"effective_face_rules": [
+						{
+							"direction": "PosX",
+							"connection_tag": "Layout.Face.Solid",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "RequiresFilledNeighbor",
+							"connected_traversal_channels": [],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "NegX",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+							"connected_traversal_channels": [],
+							"can_face_region_boundary": true,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "PosY",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "RequiresFilledNeighbor",
+							"connected_traversal_channels": [],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "NegY",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "RequiresFilledNeighbor",
+							"connected_traversal_channels": [],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "PosZ",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "RequiresFilledNeighbor",
+							"connected_traversal_channels": [],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "NegZ",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+							"connected_traversal_channels": [],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						}
+					],
+					"traversal_channels": [],
+					"internal_access_links": [],
+					"min_traversable_neighbor_faces": 0,
+					"weight": 1,
+					"placement_zone": "Edge",
+					"optional": false,
+					"validation_messages": [],
+					"derived_endpoint_offers": [],
+					"derived_span_offers": [
+						{
+							"span_offer_id": "DA_Module_Blocks_Ext_Wall_+X.Span.PosX",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "PosX",
+							"connection_tag": "Layout.Face.Solid",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"roles": [
+								"Boundary"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": false
+						},
+						{
+							"span_offer_id": "DA_Module_Blocks_Ext_Wall_+X.Span.NegX",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "NegX",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"roles": [
+								"Boundary"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": true
+						},
+						{
+							"span_offer_id": "DA_Module_Blocks_Ext_Wall_+X.Span.PosY",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "PosY",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"roles": [
+								"Boundary"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": false
+						},
+						{
+							"span_offer_id": "DA_Module_Blocks_Ext_Wall_+X.Span.NegY",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "NegY",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"roles": [
+								"Boundary"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": false
+						},
+						{
+							"span_offer_id": "DA_Module_Blocks_Ext_Wall_+X.Span.PosZ",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "PosZ",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"roles": [
+								"Boundary"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": false
+						},
+						{
+							"span_offer_id": "DA_Module_Blocks_Ext_Wall_+X.Span.NegZ",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "NegZ",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"roles": [
+								"Boundary"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": true
+						}
+					],
+					"derived_vertical_access_contracts": [],
+					"proof_records": [
+						{
+							"proof_id": "ModuleSnapshot.Copy",
+							"proof_kind": "SnapshotCopy",
+							"target_id": "DA_Module_Blocks_Ext_Wall_+X",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Wall_+X"
+							],
+							"proof_summary": "Copied effective module contract into immutable solver snapshot."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Ext_Wall_+X.Span.PosX.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Ext_Wall_+X.Span.PosX",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Wall_+X"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule PosX."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Ext_Wall_+X.Span.NegX.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Ext_Wall_+X.Span.NegX",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Wall_+X"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule NegX."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Ext_Wall_+X.Span.PosY.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Ext_Wall_+X.Span.PosY",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Wall_+X"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule PosY."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Ext_Wall_+X.Span.NegY.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Ext_Wall_+X.Span.NegY",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Wall_+X"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule NegY."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Ext_Wall_+X.Span.PosZ.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Ext_Wall_+X.Span.PosZ",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Wall_+X"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule PosZ."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Ext_Wall_+X.Span.NegZ.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Ext_Wall_+X.Span.NegZ",
+							"source_ids": [
+								"DA_Module_Blocks_Ext_Wall_+X"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule NegZ."
+						}
+					],
+					"validation_assertions": [
+						{
+							"assertion_id": "ModuleSnapshot.SourcePresent",
+							"assertion_kind": "SnapshotSourcePresent",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Ext_Wall_+X"
+							],
+							"failure_reason": ""
+						},
+						{
+							"assertion_id": "ModuleSnapshot.AssetValidationPassed",
+							"assertion_kind": "AssetValidationPassed",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Ext_Wall_+X"
+							],
+							"failure_reason": ""
+						},
+						{
+							"assertion_id": "ModuleSnapshot.DerivedEndpointOfferContract",
+							"assertion_kind": "DerivedOfferContractValid",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Ext_Wall_+X"
+							],
+							"failure_reason": ""
+						},
+						{
+							"assertion_id": "ModuleSnapshot.DerivedSpanOfferContract",
+							"assertion_kind": "DerivedSpanContractValid",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Ext_Wall_+X"
+							],
+							"failure_reason": ""
+						},
+						{
+							"assertion_id": "ModuleSnapshot.DerivedVerticalAccessContract",
+							"assertion_kind": "DerivedVerticalAccessContractValid",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Ext_Wall_+X"
+							],
+							"failure_reason": ""
+						}
+					]
+				},
+				{
+					"snapshot_id": "DA_Module_Blocks_Floor",
+					"snapshot_schema_version": 1,
+					"debug_name": "DA_Module_Blocks_Floor",
+					"template_name": "MedievalBlocks_Floor",
+					"cell_size_in_blocks":
+					{
+						"x": 5,
+						"y": 5,
+						"z": 5
+					},
+					"roles": [
+						"Interior"
+					],
+					"supported_intents": [
+						"Interior",
+						"Core",
+						"Connector"
+					],
+					"allowed_yaw_rotation_steps": [
+						0,
+						1,
+						2,
+						3
+					],
+					"effective_face_rules": [
+						{
+							"direction": "PosX",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Entry",
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "RequiresFilledNeighbor",
+							"connected_traversal_channels": [
+								"Layout.Traversal.Primary"
+							],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "NegX",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Entry",
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "RequiresFilledNeighbor",
+							"connected_traversal_channels": [
+								"Layout.Traversal.Primary"
+							],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "PosY",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Entry",
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "RequiresFilledNeighbor",
+							"connected_traversal_channels": [
+								"Layout.Traversal.Primary"
+							],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "NegY",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Entry",
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "RequiresFilledNeighbor",
+							"connected_traversal_channels": [
+								"Layout.Traversal.Primary"
+							],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "PosZ",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+							"connected_traversal_channels": [],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "NegZ",
+							"connection_tag": "Layout.Face.Solid",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+							"connected_traversal_channels": [],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						}
+					],
+					"traversal_channels": [
+						"Layout.Traversal.Primary"
+					],
+					"internal_access_links": [],
+					"min_traversable_neighbor_faces": 0,
+					"weight": 1,
+					"placement_zone": "Interior",
+					"optional": false,
+					"validation_messages": [],
+					"derived_endpoint_offers": [
+						{
+							"offer_id": "DA_Module_Blocks_Floor.Endpoint.PosX",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "PosX",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Entry",
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"traversal_channels": [
+								"Layout.Traversal.Primary"
+							],
+							"roles": [
+								"Interior"
+							],
+							"occupancy_policy": "RequiresFilledNeighbor"
+						},
+						{
+							"offer_id": "DA_Module_Blocks_Floor.Endpoint.NegX",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "NegX",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Entry",
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"traversal_channels": [
+								"Layout.Traversal.Primary"
+							],
+							"roles": [
+								"Interior"
+							],
+							"occupancy_policy": "RequiresFilledNeighbor"
+						},
+						{
+							"offer_id": "DA_Module_Blocks_Floor.Endpoint.PosY",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "PosY",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Entry",
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"traversal_channels": [
+								"Layout.Traversal.Primary"
+							],
+							"roles": [
+								"Interior"
+							],
+							"occupancy_policy": "RequiresFilledNeighbor"
+						},
+						{
+							"offer_id": "DA_Module_Blocks_Floor.Endpoint.NegY",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "NegY",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Entry",
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"traversal_channels": [
+								"Layout.Traversal.Primary"
+							],
+							"roles": [
+								"Interior"
+							],
+							"occupancy_policy": "RequiresFilledNeighbor"
+						}
+					],
+					"derived_span_offers": [],
+					"derived_vertical_access_contracts": [],
+					"proof_records": [
+						{
+							"proof_id": "ModuleSnapshot.Copy",
+							"proof_kind": "SnapshotCopy",
+							"target_id": "DA_Module_Blocks_Floor",
+							"source_ids": [
+								"DA_Module_Blocks_Floor"
+							],
+							"proof_summary": "Copied effective module contract into immutable solver snapshot."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Floor.Endpoint.PosX.Proof",
+							"proof_kind": "DerivedOffer",
+							"target_id": "DA_Module_Blocks_Floor.Endpoint.PosX",
+							"source_ids": [
+								"DA_Module_Blocks_Floor"
+							],
+							"proof_summary": "Derived endpoint offer from canonical face rule PosX."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Floor.Endpoint.NegX.Proof",
+							"proof_kind": "DerivedOffer",
+							"target_id": "DA_Module_Blocks_Floor.Endpoint.NegX",
+							"source_ids": [
+								"DA_Module_Blocks_Floor"
+							],
+							"proof_summary": "Derived endpoint offer from canonical face rule NegX."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Floor.Endpoint.PosY.Proof",
+							"proof_kind": "DerivedOffer",
+							"target_id": "DA_Module_Blocks_Floor.Endpoint.PosY",
+							"source_ids": [
+								"DA_Module_Blocks_Floor"
+							],
+							"proof_summary": "Derived endpoint offer from canonical face rule PosY."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Floor.Endpoint.NegY.Proof",
+							"proof_kind": "DerivedOffer",
+							"target_id": "DA_Module_Blocks_Floor.Endpoint.NegY",
+							"source_ids": [
+								"DA_Module_Blocks_Floor"
+							],
+							"proof_summary": "Derived endpoint offer from canonical face rule NegY."
+						}
+					],
+					"validation_assertions": [
+						{
+							"assertion_id": "ModuleSnapshot.SourcePresent",
+							"assertion_kind": "SnapshotSourcePresent",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Floor"
+							],
+							"failure_reason": ""
+						},
+						{
+							"assertion_id": "ModuleSnapshot.AssetValidationPassed",
+							"assertion_kind": "AssetValidationPassed",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Floor"
+							],
+							"failure_reason": ""
+						},
+						{
+							"assertion_id": "ModuleSnapshot.DerivedEndpointOfferContract",
+							"assertion_kind": "DerivedOfferContractValid",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Floor"
+							],
+							"failure_reason": ""
+						},
+						{
+							"assertion_id": "ModuleSnapshot.DerivedSpanOfferContract",
+							"assertion_kind": "DerivedSpanContractValid",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Floor"
+							],
+							"failure_reason": ""
+						},
+						{
+							"assertion_id": "ModuleSnapshot.DerivedVerticalAccessContract",
+							"assertion_kind": "DerivedVerticalAccessContractValid",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Floor"
+							],
+							"failure_reason": ""
+						}
+					]
+				},
+				{
+					"snapshot_id": "DA_Module_Blocks_Floor_Stairs_-YTo-Y",
+					"snapshot_schema_version": 1,
+					"debug_name": "DA_Module_Blocks_Floor_Stairs_-YTo-Y",
+					"template_name": "MedievalBlocks_Floor_Stairs_-Yto-Y",
+					"cell_size_in_blocks":
+					{
+						"x": 5,
+						"y": 5,
+						"z": 5
+					},
+					"roles": [
+						"VerticalAccess"
+					],
+					"supported_intents": [
+						"VerticalAccess"
+					],
+					"allowed_yaw_rotation_steps": [
+						0,
+						1,
+						2,
+						3
+					],
+					"effective_face_rules": [
+						{
+							"direction": "PosX",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "RequiresFilledNeighbor",
+							"connected_traversal_channels": [],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "NegX",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "RequiresFilledNeighbor",
+							"connected_traversal_channels": [],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "PosY",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "RequiresFilledNeighbor",
+							"connected_traversal_channels": [],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "NegY",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Entry",
+								"Layout.Face.Open"
+							],
+							"occupancy_policy": "RequiresWalkableFilledNeighbor",
+							"connected_traversal_channels": [
+								"Layout.Traversal.Primary"
+							],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "PosZ",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open"
+							],
+							"occupancy_policy": "RequiresWalkableFilledNeighbor",
+							"connected_traversal_channels": [
+								"Layout.Traversal.Primary"
+							],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "NegZ",
+							"connection_tag": "Layout.Face.Solid",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+							"connected_traversal_channels": [],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						}
+					],
+					"traversal_channels": [
+						"Layout.Traversal.Primary"
+					],
+					"internal_access_links": [],
+					"min_traversable_neighbor_faces": 1,
+					"weight": 1,
+					"placement_zone": "Interior",
+					"optional": false,
+					"validation_messages": [],
+					"derived_endpoint_offers": [
+						{
+							"offer_id": "DA_Module_Blocks_Floor_Stairs_-YTo-Y.Endpoint.NegY",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "NegY",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Entry",
+								"Layout.Face.Open"
+							],
+							"traversal_channels": [
+								"Layout.Traversal.Primary"
+							],
+							"roles": [
+								"VerticalAccess"
+							],
+							"occupancy_policy": "RequiresWalkableFilledNeighbor"
+						},
+						{
+							"offer_id": "DA_Module_Blocks_Floor_Stairs_-YTo-Y.Endpoint.PosZ",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "PosZ",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open"
+							],
+							"traversal_channels": [
+								"Layout.Traversal.Primary"
+							],
+							"roles": [
+								"VerticalAccess"
+							],
+							"occupancy_policy": "RequiresWalkableFilledNeighbor"
+						}
+					],
+					"derived_span_offers": [
+						{
+							"span_offer_id": "DA_Module_Blocks_Floor_Stairs_-YTo-Y.Span.PosX",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "PosX",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"roles": [
+								"VerticalAccess"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": false
+						},
+						{
+							"span_offer_id": "DA_Module_Blocks_Floor_Stairs_-YTo-Y.Span.NegX",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "NegX",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"roles": [
+								"VerticalAccess"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": false
+						},
+						{
+							"span_offer_id": "DA_Module_Blocks_Floor_Stairs_-YTo-Y.Span.PosY",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "PosY",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"roles": [
+								"VerticalAccess"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": false
+						},
+						{
+							"span_offer_id": "DA_Module_Blocks_Floor_Stairs_-YTo-Y.Span.NegY",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "NegY",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Entry",
+								"Layout.Face.Open"
+							],
+							"roles": [
+								"VerticalAccess"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": false
+						},
+						{
+							"span_offer_id": "DA_Module_Blocks_Floor_Stairs_-YTo-Y.Span.PosZ",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "PosZ",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open"
+							],
+							"roles": [
+								"VerticalAccess"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": false
+						},
+						{
+							"span_offer_id": "DA_Module_Blocks_Floor_Stairs_-YTo-Y.Span.NegZ",
+							"closure_id": "None",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "NegZ",
+							"connection_tag": "Layout.Face.Solid",
+							"allowed_connection_tags": [
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"roles": [
+								"VerticalAccess"
+							],
+							"thickness_cells": 1,
+							"seals_boundary": true
+						}
+					],
+					"derived_vertical_access_contracts": [
+						{
+							"contract_id": "DA_Module_Blocks_Floor_Stairs_-YTo-Y.VerticalAccess.PosZ",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"source_traversal_channels": [
+								"Layout.Traversal.Primary"
+							],
+							"exit_traversal_channels": [
+								"Layout.Traversal.Primary"
+							],
+							"exit_face_direction": "PosZ",
+							"require_matching_yaw_at_exit": false
+						}
+					],
+					"proof_records": [
+						{
+							"proof_id": "ModuleSnapshot.Copy",
+							"proof_kind": "SnapshotCopy",
+							"target_id": "DA_Module_Blocks_Floor_Stairs_-YTo-Y",
+							"source_ids": [
+								"DA_Module_Blocks_Floor_Stairs_-YTo-Y"
+							],
+							"proof_summary": "Copied effective module contract into immutable solver snapshot."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Floor_Stairs_-YTo-Y.Span.PosX.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Floor_Stairs_-YTo-Y.Span.PosX",
+							"source_ids": [
+								"DA_Module_Blocks_Floor_Stairs_-YTo-Y"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule PosX."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Floor_Stairs_-YTo-Y.Span.NegX.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Floor_Stairs_-YTo-Y.Span.NegX",
+							"source_ids": [
+								"DA_Module_Blocks_Floor_Stairs_-YTo-Y"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule NegX."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Floor_Stairs_-YTo-Y.Span.PosY.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Floor_Stairs_-YTo-Y.Span.PosY",
+							"source_ids": [
+								"DA_Module_Blocks_Floor_Stairs_-YTo-Y"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule PosY."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Floor_Stairs_-YTo-Y.Endpoint.NegY.Proof",
+							"proof_kind": "DerivedOffer",
+							"target_id": "DA_Module_Blocks_Floor_Stairs_-YTo-Y.Endpoint.NegY",
+							"source_ids": [
+								"DA_Module_Blocks_Floor_Stairs_-YTo-Y"
+							],
+							"proof_summary": "Derived endpoint offer from canonical face rule NegY."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Floor_Stairs_-YTo-Y.Span.NegY.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Floor_Stairs_-YTo-Y.Span.NegY",
+							"source_ids": [
+								"DA_Module_Blocks_Floor_Stairs_-YTo-Y"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule NegY."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Floor_Stairs_-YTo-Y.Endpoint.PosZ.Proof",
+							"proof_kind": "DerivedOffer",
+							"target_id": "DA_Module_Blocks_Floor_Stairs_-YTo-Y.Endpoint.PosZ",
+							"source_ids": [
+								"DA_Module_Blocks_Floor_Stairs_-YTo-Y"
+							],
+							"proof_summary": "Derived endpoint offer from canonical face rule PosZ."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Floor_Stairs_-YTo-Y.Span.PosZ.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Floor_Stairs_-YTo-Y.Span.PosZ",
+							"source_ids": [
+								"DA_Module_Blocks_Floor_Stairs_-YTo-Y"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule PosZ."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Floor_Stairs_-YTo-Y.Span.NegZ.Proof",
+							"proof_kind": "DerivedSpan",
+							"target_id": "DA_Module_Blocks_Floor_Stairs_-YTo-Y.Span.NegZ",
+							"source_ids": [
+								"DA_Module_Blocks_Floor_Stairs_-YTo-Y"
+							],
+							"proof_summary": "Derived boundary span offer from canonical face rule NegZ."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Floor_Stairs_-YTo-Y.VerticalAccess.PosZ.Proof",
+							"proof_kind": "DerivedVerticalAccess",
+							"target_id": "DA_Module_Blocks_Floor_Stairs_-YTo-Y.VerticalAccess.PosZ",
+							"source_ids": [
+								"DA_Module_Blocks_Floor_Stairs_-YTo-Y"
+							],
+							"proof_summary": "Derived vertical-access contract from canonical PosZ face traversal and internal access links."
+						}
+					],
+					"validation_assertions": [
+						{
+							"assertion_id": "ModuleSnapshot.SourcePresent",
+							"assertion_kind": "SnapshotSourcePresent",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Floor_Stairs_-YTo-Y"
+							],
+							"failure_reason": ""
+						},
+						{
+							"assertion_id": "ModuleSnapshot.AssetValidationPassed",
+							"assertion_kind": "AssetValidationPassed",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Floor_Stairs_-YTo-Y"
+							],
+							"failure_reason": ""
+						},
+						{
+							"assertion_id": "ModuleSnapshot.DerivedEndpointOfferContract",
+							"assertion_kind": "DerivedOfferContractValid",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Floor_Stairs_-YTo-Y"
+							],
+							"failure_reason": ""
+						},
+						{
+							"assertion_id": "ModuleSnapshot.DerivedSpanOfferContract",
+							"assertion_kind": "DerivedSpanContractValid",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Floor_Stairs_-YTo-Y"
+							],
+							"failure_reason": ""
+						},
+						{
+							"assertion_id": "ModuleSnapshot.DerivedVerticalAccessContract",
+							"assertion_kind": "DerivedVerticalAccessContractValid",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Floor_Stairs_-YTo-Y"
+							],
+							"failure_reason": ""
+						}
+					]
+				},
+				{
+					"snapshot_id": "DA_Module_Blocks_Floor_StairHole_-Y",
+					"snapshot_schema_version": 1,
+					"debug_name": "DA_Module_Blocks_Floor_StairHole_-Y",
+					"template_name": "MedievalBlocks_Floor_StairHole_-Y",
+					"cell_size_in_blocks":
+					{
+						"x": 5,
+						"y": 5,
+						"z": 5
+					},
+					"roles": [
+						"Interior"
+					],
+					"supported_intents": [
+						"Interior",
+						"Core",
+						"Connector"
+					],
+					"allowed_yaw_rotation_steps": [
+						0,
+						1,
+						2,
+						3
+					],
+					"effective_face_rules": [
+						{
+							"direction": "PosX",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Entry",
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "RequiresFilledNeighbor",
+							"connected_traversal_channels": [
+								"Layout.Traversal.Primary"
+							],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "NegX",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Entry",
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "RequiresFilledNeighbor",
+							"connected_traversal_channels": [
+								"Layout.Traversal.Primary"
+							],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "PosY",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Entry",
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "RequiresFilledNeighbor",
+							"connected_traversal_channels": [
+								"Layout.Traversal.Primary"
+							],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "NegY",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Entry",
+								"Layout.Face.Open"
+							],
+							"occupancy_policy": "RequiresWalkableFilledNeighbor",
+							"connected_traversal_channels": [
+								"Layout.Traversal.Primary"
+							],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "PosZ",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Solid"
+							],
+							"occupancy_policy": "AllowsEmptyOrFilledNeighbor",
+							"connected_traversal_channels": [],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": false
+						},
+						{
+							"direction": "NegZ",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open"
+							],
+							"occupancy_policy": "RequiresWalkableFilledNeighbor",
+							"connected_traversal_channels": [
+								"Layout.Traversal.Primary"
+							],
+							"can_face_region_boundary": false,
+							"require_matching_yaw_with_filled_neighbor": true
+						}
+					],
+					"traversal_channels": [
+						"Layout.Traversal.Primary"
+					],
+					"internal_access_links": [],
+					"min_traversable_neighbor_faces": 1,
+					"weight": 1,
+					"placement_zone": "Interior",
+					"optional": false,
+					"validation_messages": [],
+					"derived_endpoint_offers": [
+						{
+							"offer_id": "DA_Module_Blocks_Floor_StairHole_-Y.Endpoint.PosX",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "PosX",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Entry",
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"traversal_channels": [
+								"Layout.Traversal.Primary"
+							],
+							"roles": [
+								"Interior"
+							],
+							"occupancy_policy": "RequiresFilledNeighbor"
+						},
+						{
+							"offer_id": "DA_Module_Blocks_Floor_StairHole_-Y.Endpoint.NegX",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "NegX",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Entry",
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"traversal_channels": [
+								"Layout.Traversal.Primary"
+							],
+							"roles": [
+								"Interior"
+							],
+							"occupancy_policy": "RequiresFilledNeighbor"
+						},
+						{
+							"offer_id": "DA_Module_Blocks_Floor_StairHole_-Y.Endpoint.PosY",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "PosY",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Entry",
+								"Layout.Face.Open",
+								"Layout.Face.Solid"
+							],
+							"traversal_channels": [
+								"Layout.Traversal.Primary"
+							],
+							"roles": [
+								"Interior"
+							],
+							"occupancy_policy": "RequiresFilledNeighbor"
+						},
+						{
+							"offer_id": "DA_Module_Blocks_Floor_StairHole_-Y.Endpoint.NegY",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "NegY",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Entry",
+								"Layout.Face.Open"
+							],
+							"traversal_channels": [
+								"Layout.Traversal.Primary"
+							],
+							"roles": [
+								"Interior"
+							],
+							"occupancy_policy": "RequiresWalkableFilledNeighbor"
+						},
+						{
+							"offer_id": "DA_Module_Blocks_Floor_StairHole_-Y.Endpoint.NegZ",
+							"local_cell":
+							{
+								"x": 0,
+								"y": 0,
+								"z": 0
+							},
+							"face_direction": "NegZ",
+							"connection_tag": "Layout.Face.Open",
+							"allowed_connection_tags": [
+								"Layout.Face.Open"
+							],
+							"traversal_channels": [
+								"Layout.Traversal.Primary"
+							],
+							"roles": [
+								"Interior"
+							],
+							"occupancy_policy": "RequiresWalkableFilledNeighbor"
+						}
+					],
+					"derived_span_offers": [],
+					"derived_vertical_access_contracts": [],
+					"proof_records": [
+						{
+							"proof_id": "ModuleSnapshot.Copy",
+							"proof_kind": "SnapshotCopy",
+							"target_id": "DA_Module_Blocks_Floor_StairHole_-Y",
+							"source_ids": [
+								"DA_Module_Blocks_Floor_StairHole_-Y"
+							],
+							"proof_summary": "Copied effective module contract into immutable solver snapshot."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Floor_StairHole_-Y.Endpoint.PosX.Proof",
+							"proof_kind": "DerivedOffer",
+							"target_id": "DA_Module_Blocks_Floor_StairHole_-Y.Endpoint.PosX",
+							"source_ids": [
+								"DA_Module_Blocks_Floor_StairHole_-Y"
+							],
+							"proof_summary": "Derived endpoint offer from canonical face rule PosX."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Floor_StairHole_-Y.Endpoint.NegX.Proof",
+							"proof_kind": "DerivedOffer",
+							"target_id": "DA_Module_Blocks_Floor_StairHole_-Y.Endpoint.NegX",
+							"source_ids": [
+								"DA_Module_Blocks_Floor_StairHole_-Y"
+							],
+							"proof_summary": "Derived endpoint offer from canonical face rule NegX."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Floor_StairHole_-Y.Endpoint.PosY.Proof",
+							"proof_kind": "DerivedOffer",
+							"target_id": "DA_Module_Blocks_Floor_StairHole_-Y.Endpoint.PosY",
+							"source_ids": [
+								"DA_Module_Blocks_Floor_StairHole_-Y"
+							],
+							"proof_summary": "Derived endpoint offer from canonical face rule PosY."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Floor_StairHole_-Y.Endpoint.NegY.Proof",
+							"proof_kind": "DerivedOffer",
+							"target_id": "DA_Module_Blocks_Floor_StairHole_-Y.Endpoint.NegY",
+							"source_ids": [
+								"DA_Module_Blocks_Floor_StairHole_-Y"
+							],
+							"proof_summary": "Derived endpoint offer from canonical face rule NegY."
+						},
+						{
+							"proof_id": "DA_Module_Blocks_Floor_StairHole_-Y.Endpoint.NegZ.Proof",
+							"proof_kind": "DerivedOffer",
+							"target_id": "DA_Module_Blocks_Floor_StairHole_-Y.Endpoint.NegZ",
+							"source_ids": [
+								"DA_Module_Blocks_Floor_StairHole_-Y"
+							],
+							"proof_summary": "Derived endpoint offer from canonical face rule NegZ."
+						}
+					],
+					"validation_assertions": [
+						{
+							"assertion_id": "ModuleSnapshot.SourcePresent",
+							"assertion_kind": "SnapshotSourcePresent",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Floor_StairHole_-Y"
+							],
+							"failure_reason": ""
+						},
+						{
+							"assertion_id": "ModuleSnapshot.AssetValidationPassed",
+							"assertion_kind": "AssetValidationPassed",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Floor_StairHole_-Y"
+							],
+							"failure_reason": ""
+						},
+						{
+							"assertion_id": "ModuleSnapshot.DerivedEndpointOfferContract",
+							"assertion_kind": "DerivedOfferContractValid",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Floor_StairHole_-Y"
+							],
+							"failure_reason": ""
+						},
+						{
+							"assertion_id": "ModuleSnapshot.DerivedSpanOfferContract",
+							"assertion_kind": "DerivedSpanContractValid",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Floor_StairHole_-Y"
+							],
+							"failure_reason": ""
+						},
+						{
+							"assertion_id": "ModuleSnapshot.DerivedVerticalAccessContract",
+							"assertion_kind": "DerivedVerticalAccessContractValid",
+							"passed": true,
+							"related_ids": [
+								"DA_Module_Blocks_Floor_StairHole_-Y"
+							],
+							"failure_reason": ""
+						}
+					]
+				}
+			]
+		},
+		"profile_snapshot":
+		{
+			"snapshot_id": "DA_Profile_Castle",
+			"snapshot_schema_version": 1,
+			"debug_name": "DA_Profile_Castle",
+			"region_solve_mode": "RootOrChild",
+			"planner_mode": "FootprintFill",
+			"minimum_footprint_in_cells":
+			{
+				"x": 5,
+				"y": 5
+			},
+			"maximum_footprint_in_cells":
+			{
+				"x": 5,
+				"y": 5
+			},
+			"level_count": 2,
+			"entry_count_mode": "Exact",
+			"entry_count": 1,
+			"min_entry_count": 1,
+			"max_entry_count": 1,
+			"restrict_entry_modules_to_entry_cells": true,
+			"vertical_access_count_mode": "Exact",
+			"vertical_access_count": 1,
+			"min_vertical_access_count": 1,
+			"max_vertical_access_count": 2,
+			"restrict_vertical_access_modules_to_vertical_access_cells": true,
+			"upper_levels_use_boundary_only": false,
+			"closure_requirements": [],
+			"closure_provider_intents": [],
+			"zone_feature_requirements": [
+				{
+					"requirement_id": "Room",
+					"zone": "Interior",
+					"required_features": [
+						"Layout.Feature.Room"
+					],
+					"match_mode": "Any",
+					"min_count": 2,
+					"max_count": 2
+				}
+			],
+			"allow_empty_interior_cells": false,
+			"max_empty_cell_count": 0,
+			"max_solver_candidate_attempts": 50000,
+			"max_solver_duration_seconds": 10,
+			"max_solver_failure_details": 30,
+			"solver_trace_mode": "Always",
+			"max_solver_trace_events": 512,
+			"include_solver_trace_candidate_details": true,
+			"require_all_traversal_channels_reachable": true,
+			"sparse_placement_rules": [],
+			"validation_messages": [],
+			"proof_records": [
+				{
+					"proof_id": "ProfileSnapshot.Copy",
+					"proof_kind": "SnapshotCopy",
+					"target_id": "DA_Profile_Castle",
+					"source_ids": [
+						"DA_Profile_Castle"
+					],
+					"proof_summary": "Copied profile solve contract into immutable solver snapshot."
+				}
+			],
+			"validation_assertions": [
+				{
+					"assertion_id": "ProfileSnapshot.SourcePresent",
+					"assertion_kind": "SnapshotSourcePresent",
+					"passed": true,
+					"related_ids": [
+						"DA_Profile_Castle"
+					],
+					"failure_reason": ""
+				},
+				{
+					"assertion_id": "ProfileSnapshot.AssetValidationPassed",
+					"assertion_kind": "AssetValidationPassed",
+					"passed": true,
+					"related_ids": [
+						"DA_Profile_Castle"
+					],
+					"failure_reason": ""
+				}
+			]
+		}
+	}
+}

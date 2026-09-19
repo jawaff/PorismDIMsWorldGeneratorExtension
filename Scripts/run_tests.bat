@@ -3,14 +3,38 @@ setlocal EnableDelayedExpansion
 
 rem Usage:
 rem   Plugins\PorismDIMsWorldGeneratorExtension\Scripts\run_tests.bat [BuildFlag] [TestFilter]
+rem
 rem   BuildFlag options:
 rem     --build            (default)
 rem     --no-build
 rem     --no-editor-build  (alias for --no-build)
-rem   TestFilter:
-rem     Defaults to the whole PorismDIMsWorldGeneratorExtensionTests module via the
-rem     shared "PorismExtension" automation prefix. Pass a narrower filter explicitly
-rem     only when you are intentionally targeting a subset.
+rem
+rem   TestFilter is a UE automation test prefix (substring match). Defaults to the
+rem   full "PorismExtension" prefix if omitted.
+rem
+rem   Available test groups (all start with "PorismExtension."):
+rem     PorismExtension.Biome       — foundation noise, island biome providers, reservation hierarchy
+rem     PorismExtension.BlockDamage — block damage calculations
+rem     PorismExtension.BlockHit    — block hit detection
+rem     PorismExtension.ChunkWorld  — chunk world generation
+rem     PorismExtension.ChunkWorldExtended — extended chunk world layers
+rem     PorismExtension.DestructionActors — destruction actor logic
+rem     PorismExtension.HealthTraceInteraction — health/trace interaction tests
+rem     PorismExtension.Layout      — layout assets, planning, runtime, fixtures, editor
+rem     PorismExtension.Prediction  — prediction system tests
+rem     PorismExtension.Schema      — schema validation
+rem     PorismExtension.Smoke       — basic smoke tests
+rem     PorismExtension.TraceInteraction — trace interaction tests
+rem
+rem   Examples:
+rem     run_tests.bat                             — all tests (default "PorismExtension" prefix)
+rem     run_tests.bat --no-build                  — all tests, skip editor build
+rem     run_tests.bat PorismExtension.Biome       — Biome group only
+rem     run_tests.bat PorismExtension.Layout --no-build  — Layout group, skip build
+rem     run_tests.bat PorismExtension.Biome.IslandNoise — IslandNoise subgroup
+rem
+rem   Find test names in source: search IMPLEMENT_SIMPLE_AUTOMATION_TEST for the full path.
+rem   In UE 5.7, always use prefix filters (not wildcard forms like "PorismExtension.*").
 
 call "%~dp0env.bat"
 
@@ -92,7 +116,7 @@ if exist "%REPORT_JSON%" (
 
 	set /a REPORT_TOTAL=!REPORT_SUCCEEDED!+!REPORT_WARNINGS!+!REPORT_FAILED!+!REPORT_NOTRUN!
 	set "PERFORMED_COUNT="
-	for /f "tokens=7" %%A in ('findstr /C:"tests performed." "%TEST_LOG_RUN%"') do set "PERFORMED_COUNT=%%A"
+	for /f %%A in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "$Match = Select-String -Path '%TEST_LOG_RUN%' -Pattern '(\d+)\s+tests performed\.' | Select-Object -Last 1; if ($Match) { $Match.Matches[0].Groups[1].Value }"') do set "PERFORMED_COUNT=%%A"
 
 	if "!PERFORMED_COUNT!"=="" (
 		echo Could not determine how many tests Unreal reports as performed from %TEST_LOG_RUN%.

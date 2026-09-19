@@ -23,7 +23,18 @@ public class PorismDIMsWorldGeneratorExtensionTests : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
 			"PorismDIMsWorldGenerator",
-			"PorismDIMsWorldGeneratorExtension"
+			"PorismDIMsWorldGeneratorExtension",
+			"PorismDIMsWorldGeneratorExtensionEditor",
+			"InputCore",
+			"Slate",
+			"SlateCore",
+			"UnrealEd"
+		});
+
+		PrivateIncludePaths.AddRange(new string[]
+		{
+			"PorismDIMsWorldGeneratorExtension/Private",
+			"PorismDIMsWorldGeneratorExtensionEditor/Private"
 		});
 	}
 }

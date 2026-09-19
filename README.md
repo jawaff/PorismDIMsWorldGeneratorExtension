@@ -57,3 +57,15 @@ In `ChunkWorldExtended` class has functionality for informing when the chunks ar
 In addition to a means for checking world readiness, there is a component that can be placed on actors in the scene that will freeze them until their `ChunkWorldWalker` is registered and the chunks near the actor have loaded in. This is meant to prevent the player from falling through the map before the chunks are loaded in and have collisions.
 
 More information can be found in [StartupFreezeAndWorldReady.md](./Docs/Usage/StartupFreezeAndWorldReady.md). 
+
+### Biome Strategy WorldGen Setup
+
+Porism's biome table wants separate noise classes for domain ownership and terrain generation, but these usually need to share the same authored settings. This plugin provides a biome strategy data asset and FastNoiseEditor wrapper that let each biome row select a shared strategy, a biome tag, and either the `DomainNoise` or `GenA` slot.
+
+More information can be found in [BiomeStrategyWorldGenSetup.md](./Docs/Usage/BiomeStrategyWorldGenSetup.md).
+
+### Template Layout Generation
+
+Porism supports templates individually placed across the world using a noise, but doesn't support layout/path generation with the templates. This plugin provides a layout generator that allows towns/castles/villages to be generated with roads between them and even caves.
+
+More information can be found in [LayoutModule.md](./Docs/Usage/LayoutModuleCookbook.md). 

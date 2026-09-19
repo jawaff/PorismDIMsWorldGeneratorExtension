@@ -1,6 +1,6 @@
 # PorismDIMsWorldGeneratorExtension Docs
 
-This plugin-local documentation is the home for the block schema, chunk-world interaction, damage, feedback, and swap systems provided by the extension plugin.
+This plugin-local documentation is the home for the block schema, chunk-world interaction, damage, feedback, swap, layout, and biome strategy systems provided by the extension plugin.
 
 ## Documentation Areas
 - `Docs/Design/`
@@ -10,10 +10,16 @@ This plugin-local documentation is the home for the block schema, chunk-world in
 - [Design/ChunkWorldBlockSwap.md](./Design/ChunkWorldBlockSwap.md)
 - [Design/ChunkWorldDamage.md](./Design/ChunkWorldDamage.md)
 - [Design/ChunkWorldExtended.md](./Design/ChunkWorldExtended.md)
+- [Design/BiomeStrategy.md](./Design/BiomeStrategy.md)
+- [Design/BiomeStrategy/FoundationProviders.md](./Design/BiomeStrategy/FoundationProviders.md)
+- [Design/BiomeStrategy/ReservationProviders.md](./Design/BiomeStrategy/ReservationProviders.md)
+- [Design/LayoutModuleSystem.md](./Design/LayoutModuleSystem.md)
 - [Design/TraceInteractionComponent.md](./Design/TraceInteractionComponent.md)
 - `Docs/Usage/`
   - setup guides and recommended component/library combinations for common gameplay routes
 - [Usage/ChunkWorldGameplaySetup.md](./Usage/ChunkWorldGameplaySetup.md)
+- [Usage/BiomeStrategyWorldGenSetup.md](./Usage/BiomeStrategyWorldGenSetup.md)
+- [Usage/LayoutModuleCookbook.md](./Usage/LayoutModuleCookbook.md)
 - [Usage/BlockTypeSchemaManagement.md](./Usage/BlockTypeSchemaManagement.md)
 - [Usage/MeshActorSwapping.md](./Usage/MeshActorSwapping.md)
 - [Usage/DestructionActorSwapping.md](./Usage/DestructionActorSwapping.md)
@@ -35,6 +41,10 @@ The plugin docs focus on stable public behavior. Project-level rewrites and migr
   - chunk-world host actors for this feature set
 - `Source/PorismDIMsWorldGeneratorExtension/Public/ChunkWorld/Components/`
   - chunk-world runtime components
+- `Source/PorismDIMsWorldGeneratorExtension/Public/Biome/`
+  - biome strategy assets, FastNoiseEditor wrappers, provider/reservation payloads, gameplay tags, and WorldGenDef binding helpers
+- `Source/PorismDIMsWorldGeneratorExtension/Public/Layout/`
+  - fixed-cell layout assets, planner/solver helpers, terrain helpers, preview actor, and streamed runtime realization
 - `Source/PorismDIMsWorldGeneratorExtension/Public/ChunkWorld/Subsystems/`
   - world-scoped registration and coordination services for chunk-world runtime features
 - `Source/PorismDIMsWorldGeneratorExtension/Public/ChunkWorld/Blueprint/`

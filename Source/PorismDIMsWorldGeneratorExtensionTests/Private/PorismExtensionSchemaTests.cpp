@@ -34,7 +34,7 @@ namespace
 	}
 }
 
-UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_PorismExtension_TestBlock, "DropType");
+UE_DEFINE_GAMEPLAY_TAG(TAG_PorismExtension_TestBlock, "DropType");
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FPorismExtensionCustomDataLayoutRoundTripTest,

@@ -20,8 +20,13 @@
 			"LoadingPhase": "Default"
 		},
 		{
-			"Name": "PorismDIMsWorldGeneratorExtensionTests",
+			"Name": "PorismDIMsWorldGeneratorExtensionEditor",
 			"Type": "Editor",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "PorismDIMsWorldGeneratorExtensionTests",
+			"Type": "Runtime",
 			"LoadingPhase": "Default"
 		}
 	],

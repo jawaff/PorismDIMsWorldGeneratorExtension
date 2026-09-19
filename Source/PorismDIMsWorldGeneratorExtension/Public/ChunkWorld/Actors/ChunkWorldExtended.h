@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
 #include "ChunkWorld/ChunkWorld.h"
+#include "ChunkWorld/ChunkWorldLifecycleTypes.h"
 #include "UObject/ObjectKey.h"
 #include "ChunkWorld/Hit/ChunkWorldBlockHitTypes.h"
 #include "ChunkWorldExtended.generated.h"
@@ -15,13 +16,12 @@ class AChunkWorldBlockSwapReplicationProxy;
 class UChunkWorldBlockFeedbackComponent;
 class UChunkWorldBlockSwapScannerComponent;
 class UChunkWorldBlockSwapComponent;
+class UChunkWorldLayoutRuntimeComponent;
 enum class EBlockDestructionPresentationNetMode : uint8;
 struct FChunkWorldBlockDestructionRequest;
 #if WITH_EDITOR
 struct FPropertyChangedEvent;
 #endif
-
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnChunkWorldBlockCustomDataChanged, AChunkWorldExtended*, ChunkWorld, const FIntVector&, BlockWorldPos, bool, bTouchedHealth);
 
 /**
  * Settled local view of one replicated block transition after the current replication batch has already been applied.
@@ -91,6 +91,7 @@ struct FChunkWorldSettledBlockTransition
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnChunkWorldSettledBlockTransition, AChunkWorldExtended*, ChunkWorld, const FChunkWorldSettledBlockTransition&, Transition);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnChunkWorldReady, AChunkWorldExtended*, ChunkWorld);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnChunkWorldObservedChunkLifecycle, AChunkWorldExtended*, ChunkWorld, const FChunkWorldObservedChunkLifecycleEvent&, Event);
 
 /**
  * Basic extension chunk world that hosts the reusable block type schema component used by project-specific block systems.
@@ -111,10 +112,51 @@ public:
 	 */
 	virtual SCacheKey StartGenDTs() override;
 
+	/** Reads existing saved/generated blocks, not procedural terrain. Layout solve
+	 * preparation must use the biome-noise utilities instead. Chunk-scoped batches
+	 * prevent a saved override from retaining the previous chunk's cache data. */
+	virtual TArray<int> GetBlockValuesByBlockWorldPosLevel(
+		const TArray<FIntVector>& Positions, const CChunkData* DetailLevel,
+		ERessourceType ResourceType = ERessourceType::MaterialIndex, int CustomDataIndex = 0) override;
+
+	/**
+	 * Creates a runtime-only WorldGenDef copy when generation needs local fixes that should not mutate authored assets.
+	 */
+	bool PrepareRuntimeWorldGenDefForGeneration();
+
 	/**
 	 * Starts generation and then rebuilds the schema lookup maps once the world indexes are available.
 	 */
 	virtual void StartGen() override;
+
+	/** Joins native generation, then clears all generation-owned layout state without deleting terrain saves/cache. */
+	virtual void StopGen() override;
+
+	/** Observes native create/update/delete independently of optional edit callbacks, preserving Blueprint behavior. May run on a worker. */
+	virtual void ProcessEvent(UFunction* Function, void* Parms) override;
+
+	/** Returns a perspective editor camera in this actor's world, preferring the active viewport. Returns false outside eligible editor worlds. */
+	bool TryGetEditorViewportCameraLocation(FVector& OutCameraLocation) const;
+
+	/**
+	 * Starts a stopped world for explicit cached Apply, preserving previews cached since StopGen.
+	 * StopGen already retired the preceding world's state. Never call while generation is running.
+	 */
+	bool RestartGenerationPreservingLayoutRecords();
+
+	/**
+	 * Testing-only hook that forces the next preserved-layout restart attempt to fail
+	 * before StartGen runs so explicit-apply rollback can be validated deterministically.
+	 */
+	void SetForceNextRestartGenerationFailureForTesting(bool bInForceFailure);
+
+	/** Opt-in planning traces and ownership probes, independent of the shared stats HUD. */
+	UFUNCTION(BlueprintPure, Category = "Debug")
+	bool GetDetailedDiagnostics() const { return bDetailedDiagnostics; }
+
+	/** Changes local diagnostic verbosity without restarting terrain or enabling stats. */
+	UFUNCTION(BlueprintCallable, Category = "Debug")
+	void SetDetailedDiagnostics(bool bEnabled) { bDetailedDiagnostics = bEnabled; }
 
 	/** Ticks world-owned startup readiness after Porism updates walker streaming state. */
 	virtual void Tick(float DeltaTime) override;
@@ -155,6 +197,12 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld")
 	UChunkWorldBlockSwapComponent* GetBlockSwapComponent() const;
 
+	/**
+	 * Returns the streamed layout runtime bridge used for deterministic site reservation and realization.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Layout|ChunkWorld")
+	UChunkWorldLayoutRuntimeComponent* GetLayoutRuntimeComponent() const;
+
 	/** Returns the dedicated replicated courier that transports swap presentation events for this chunk world. */
 	AChunkWorldBlockSwapReplicationProxy* GetBlockSwapReplicationProxy() const;
 
@@ -179,10 +227,6 @@ public:
 	/** Replaces the active world-loader set and recomputes aggregate startup readiness. */
 	void SetChunkWorldWalkers(TArray<UObject*> NewWorldLoaders);
 
-	/** Legacy narrower custom-data event kept only as a compatibility surface. New listeners should use `OnSettledBlockTransition` instead. */
-	UPROPERTY(BlueprintAssignable, Category = "Block|ChunkWorld", meta = (DeprecatedProperty, DeprecationMessage = "Use OnSettledBlockTransition instead so listeners observe the full settled replicated block transition payload."))
-	FOnChunkWorldBlockCustomDataChanged OnBlockCustomDataChanged;
-
 	/** Broadcast after one locally settled replicated block transition is observed on this chunk world. */
 	UPROPERTY(BlueprintAssignable, Category = "Block|ChunkWorld")
 	FOnChunkWorldSettledBlockTransition OnSettledBlockTransition;
@@ -190,6 +234,10 @@ public:
 	/** Broadcast when every currently registered walker has reached a startup-safe ready chunk on this world. */
 	UPROPERTY(BlueprintAssignable, Category = "ChunkWorld|Startup")
 	FOnChunkWorldReady OnWorldReady;
+
+	/** Server-authority broadcast after Porism creates or updates a chunk and the extension has observed its lifecycle kind. */
+	UPROPERTY(BlueprintAssignable, Category = "ChunkWorld|Lifecycle")
+	FOnChunkWorldObservedChunkLifecycle OnServerObservedChunkLifecycle;
 
 	/**
 	 * Processes one server-committed block custom-data write after the schema component has already stored the slot values.
@@ -211,8 +259,17 @@ protected:
 	/** Observes replicated mesh changes so reusable settled-transition subscribers can react after local apply. */
 	virtual void WriteMeshDataAndUpdate(const TArray<SMeshChangeCall>& NetMeshChangeCalls, bool bRefreshChunks) override;
 
+	/** Preserves the native edit override API; lifecycle observation belongs to the subsequent non-edit event. */
+	virtual TArray<FInstanceMeshInfos> OnChunkCreateEdit_Implementation(FIntVector chunkBlockWorldPos, int detailLevel, UPARAM(ref) TArray<FInstanceMeshInfos>& newMeshInstances) override;
+
+	/** Preserves native mesh-edit forwarding without broadcasting a duplicate lifecycle event. */
+	virtual TArray<FInstanceMeshInfos> OnChunkUpdateEdit_Implementation(FIntVector chunkBlockWorldPos, int detailLevel, UPARAM(ref) TArray<FInstanceMeshInfos>& newMeshInstances) override;
+
 #if WITH_EDITOR
-	/** Keeps the runtime schema component synced to the single actor-level editable registry property. */
+	/** Debug switches do not reconstruct the actor, so their pre-edit must not unregister its ticking/rendering components. */
+	virtual void PreEditChange(FProperty* PropertyThatWillChange) override;
+
+	/** Debug edits preserve registration; other edits restore components after native post-edit without reconstructing runtime generator state. Layout edits bypass terrain restart. */
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif
 
@@ -256,9 +313,6 @@ private:
 	/** Builds one reusable settled block transition payload from the coalesced deferred observation state. */
 	bool BuildSettledBlockTransition(const FIntVector& BlockWorldPos, const FDeferredBlockCustomDataChange& DeferredChange, FChunkWorldSettledBlockTransition& OutTransition) const;
 
-	/** Notifies observers that one block's runtime custom-data view changed. */
-	void NotifyBlockCustomDataChanged(const FIntVector& BlockWorldPos, bool bTouchedHealth, const TCHAR* SourceLabel);
-
 	/** Returns true when the current local block state is still represented by material or mesh data. */
 	bool IsRepresentedBlockAt(const FIntVector& BlockWorldPos) const;
 
@@ -298,7 +352,7 @@ private:
 	/** Ensures WorldGenDef and runtime config expose enough custom-data channels for the active schema layout. */
 	void EnsureSchemaCustomDataCapacity();
 
-	/** Applies the actor-owned schema registry to the runtime schema component and adopts legacy component-authored values from older assets when needed. */
+	/** Applies the actor-owned schema registry to the runtime schema component. */
 	void SyncBlockTypeSchemaRegistry();
 
 	/** Records one walker update dispatched on the game thread and refreshes aggregate startup readiness. */
@@ -306,6 +360,9 @@ private:
 
 	/** Returns true when the reported walker chunk is the finest currently ready detail layer for this world. */
 	bool IsWalkerReadyForWorld(const FChunkWorldWalkerInfo& Info) const;
+
+	/** Builds and forwards one server-side chunk lifecycle event from a Porism create/update callback. */
+	void HandleObservedChunkLifecycle(const FIntVector& ChunkBlockWorldPos, int32 DetailLevel, EChunkWorldChunkLifecycleEventType EventType);
 
 	/** Recomputes aggregate startup readiness from the currently registered walker set. */
 	void RefreshWorldReadyState();
@@ -319,6 +376,16 @@ private:
 	/** Single actor-level schema registry entry shown in details panels for chunk world setup. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Block|ChunkWorld", meta = (AllowPrivateAccess = "true", NoClear, ToolTip = "Schema registry asset used by this chunk world's block schema component."))
 	TObjectPtr<UBlockTypeSchemaRegistry> BlockTypeSchemaRegistry = nullptr;
+
+	/** Scoped only to stopped-world explicit Apply; ordinary StartGen always clears previous layout state. */
+	bool bStartingForCachedLayoutApply = false;
+
+	/** One-shot testing flag used to prove explicit-apply rollback when a preserved-layout restart cannot proceed. */
+	bool bForceNextRestartGenerationFailureForTesting = false;
+
+	/** Retains the serialized property name for existing assets; now owns all opt-in layout diagnostics. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Debug", meta = (AllowPrivateAccess = "true", DisplayName = "Detailed Diagnostics", ToolTip = "Logs detailed planning, binding and rejection traces, and enables ownership comparison probes with their temporary shapes. Independent of Show Debug Stats. Leave off for normal generation; enabling this does not restart terrain."))
+	bool bDetailedDiagnostics = false;
 
 	/**
 	 * Reusable schema component that resolves block type schemas and owns the runtime lookup maps.
@@ -337,6 +404,10 @@ private:
 	/** Reusable replicated block swap host used by shared chunk-world hide/restore transitions. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Block|ChunkWorld", meta = (AllowPrivateAccess = "true", ToolTip = "Replicated block swap host used by shared chunk-world hide and restore transitions."))
 	TObjectPtr<UChunkWorldBlockSwapComponent> BlockSwapComponent = nullptr;
+
+	/** Streamed layout runtime bridge that caches deterministic site records and realizes them after chunk load. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Layout|ChunkWorld", meta = (AllowPrivateAccess = "true", ToolTip = "Streamed layout runtime bridge that caches deterministic site records and realizes them after chunk load."))
+	TObjectPtr<UChunkWorldLayoutRuntimeComponent> LayoutRuntimeComponent = nullptr;
 
 	/** Dedicated replicated courier used to transport live swap presentation events outside the Porism chunk-world actor path. */
 	UPROPERTY(Transient)

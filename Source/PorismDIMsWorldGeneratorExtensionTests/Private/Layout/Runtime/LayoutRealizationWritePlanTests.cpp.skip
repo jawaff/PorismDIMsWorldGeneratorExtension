@@ -1,0 +1,1040 @@
+// Copyright 2026 Spotted Loaf Studio
+
+#include "../../../../PorismDIMsWorldGeneratorExtension/Private/Layout/Runtime/LayoutRealizationWritePlan.h"
+
+#include "Misc/AutomationTest.h"
+
+namespace
+{
+	FLayoutSolveResult BuildSuccessfulWritePlanSolveResult()
+	{
+		FLayoutSolveResult SolveResult;
+		SolveResult.bSucceeded = true;
+		SolveResult.SharedCellSizeInBlocks = FIntVector(16, 16, 16);
+		SolveResult.FootprintSize = FIntPoint(2);
+
+		FLayoutPlacedModule Placement;
+		Placement.Cell = FIntVector::ZeroValue;
+		Placement.SourceContentEntryId = TEXT("Content.Entry.0");
+		Placement.ModuleSnapshotId = TEXT("Module.Snapshot.0");
+		Placement.TemplatePath = FSoftObjectPath(TEXT("/Game/Test/Templates/T_Module.T_Module"));
+		SolveResult.Placements.Add(Placement);
+		return SolveResult;
+	}
+
+	TArray<FLayoutContractActiveCellRecord> BuildWritePlanActiveCells()
+	{
+		TArray<FLayoutContractActiveCellRecord> ActiveCells;
+
+		FLayoutContractActiveCellRecord RealCell;
+		RealCell.Cell = FIntVector::ZeroValue;
+		RealCell.CellKind = ELayoutContractActiveCellKind::Real;
+		ActiveCells.Add(RealCell);
+
+		FLayoutContractActiveCellRecord SecondaryRealCell;
+		SecondaryRealCell.Cell = FIntVector(1, 0, 0);
+		SecondaryRealCell.CellKind = ELayoutContractActiveCellKind::Real;
+		ActiveCells.Add(SecondaryRealCell);
+
+		return ActiveCells;
+	}
+
+	FLayoutFrozenTerrainContract BuildWritePlanFrozenTerrainContract()
+	{
+		FLayoutFrozenTerrainContract Contract;
+		Contract.ContractId = TEXT("FrozenTerrain.WritePlan.0");
+		Contract.SharedCellSizeInBlocks = FIntVector(16, 16, 16);
+		Contract.FootprintSizeInCells = FIntPoint(2);
+
+		FLayoutContractActiveCellRecord RealCell;
+		RealCell.Cell = FIntVector::ZeroValue;
+		RealCell.CellKind = ELayoutContractActiveCellKind::Real;
+		Contract.ActiveCells.Add(RealCell);
+
+		FLayoutContractActiveCellRecord ClearanceRealCell;
+		ClearanceRealCell.Cell = FIntVector(1, 0, 0);
+		ClearanceRealCell.CellKind = ELayoutContractActiveCellKind::Real;
+		Contract.ActiveCells.Add(ClearanceRealCell);
+
+		FLayoutContractActiveCellRecord BridgeRealCell;
+		BridgeRealCell.Cell = FIntVector(2, 0, 0);
+		BridgeRealCell.CellKind = ELayoutContractActiveCellKind::Real;
+		Contract.ActiveCells.Add(BridgeRealCell);
+
+		FLayoutContractActiveCellRecord RampRealCell;
+		RampRealCell.Cell = FIntVector(3, 0, 0);
+		RampRealCell.CellKind = ELayoutContractActiveCellKind::Real;
+		Contract.ActiveCells.Add(RampRealCell);
+
+		FLayoutContractActiveCellRecord ExcavationRealCell;
+		ExcavationRealCell.Cell = FIntVector(4, 0, 0);
+		ExcavationRealCell.CellKind = ELayoutContractActiveCellKind::Real;
+		Contract.ActiveCells.Add(ExcavationRealCell);
+
+		FLayoutTerrainCellContractRecord CellContract;
+		CellContract.Cell = FIntVector::ZeroValue;
+		CellContract.Contract = ELayoutFrozenTerrainCellContract::Active;
+		CellContract.bHasFoundationFillEvidence = true;
+		Contract.CellContracts.Add(CellContract);
+
+		FLayoutTerrainCellContractRecord ClearanceCellContract;
+		ClearanceCellContract.Cell = FIntVector(1, 0, 0);
+		ClearanceCellContract.Contract = ELayoutFrozenTerrainCellContract::FlatClearance;
+		ClearanceCellContract.bHasClearanceEvidence = true;
+		Contract.CellContracts.Add(ClearanceCellContract);
+
+		FLayoutTerrainCellContractRecord BridgeCellContract;
+		BridgeCellContract.Cell = FIntVector(2, 0, 0);
+		BridgeCellContract.Contract = ELayoutFrozenTerrainCellContract::BridgeSpan;
+		BridgeCellContract.bHasBridgeSupportEvidence = true;
+		Contract.CellContracts.Add(BridgeCellContract);
+
+		FLayoutTerrainCellContractRecord ExcavationCellContract;
+		ExcavationCellContract.Cell = FIntVector(4, 0, 0);
+		ExcavationCellContract.Contract = ELayoutFrozenTerrainCellContract::TunnelExcavation;
+		ExcavationCellContract.bHasExcavationOverlapZ = true;
+		LayoutLocalBlockCoordinates::TryMakeCoord8(1, ExcavationCellContract.ExcavationOverlapMinLocalZ);
+		LayoutLocalBlockCoordinates::TryMakeCoord8(4, ExcavationCellContract.ExcavationOverlapMaxLocalZ);
+		Contract.CellContracts.Add(ExcavationCellContract);
+
+		FLayoutTerrainCellContractRecord RampCellContract;
+		RampCellContract.Cell = FIntVector(3, 0, 0);
+		RampCellContract.Contract = ELayoutFrozenTerrainCellContract::Active;
+		RampCellContract.bHasRampTransitionEvidence = true;
+		Contract.CellContracts.Add(RampCellContract);
+
+		FLayoutFrozenTerrainWriteRecord TerrainWrite;
+		TerrainWrite.BlockWorldPos = FIntVector(16, 16, 16);
+		TerrainWrite.SourceContract = ELayoutFrozenTerrainCellContract::Active;
+		Contract.TerrainWrites.Add(TerrainWrite);
+
+		FLayoutFrozenTerrainWriteRecord ClearanceWrite;
+		ClearanceWrite.BlockWorldPos = FIntVector(32, 16, 16);
+		ClearanceWrite.SourceContract = ELayoutFrozenTerrainCellContract::FlatClearance;
+		Contract.TerrainWrites.Add(ClearanceWrite);
+
+		FLayoutFrozenTerrainWriteRecord BridgeWrite;
+		BridgeWrite.BlockWorldPos = FIntVector(48, 16, 16);
+		BridgeWrite.SourceContract = ELayoutFrozenTerrainCellContract::BridgeSpan;
+		Contract.TerrainWrites.Add(BridgeWrite);
+
+		FLayoutFrozenTerrainWriteRecord RampWrite;
+		RampWrite.BlockWorldPos = FIntVector(64, 16, 16);
+		RampWrite.SourceContract = ELayoutFrozenTerrainCellContract::Active;
+		Contract.TerrainWrites.Add(RampWrite);
+
+		FLayoutFrozenTerrainWriteRecord ExcavationWrite;
+		ExcavationWrite.BlockWorldPos = FIntVector(80, 16, 16);
+		ExcavationWrite.SourceContract = ELayoutFrozenTerrainCellContract::TunnelExcavation;
+		Contract.TerrainWrites.Add(ExcavationWrite);
+		return Contract;
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FLayoutRealizationWritePlanBuildsSiteBoundaryTest,
+	"PorismExtension.Layout.Runtime.RealizationWritePlan.BuildsSiteBoundary",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FLayoutRealizationWritePlanBuildsSiteBoundaryTest::RunTest(const FString& Parameters)
+{
+	const FLayoutSolveResult SolveResult = BuildSuccessfulWritePlanSolveResult();
+	const FLayoutFrozenTerrainContract FrozenTerrainContract = BuildWritePlanFrozenTerrainContract();
+
+	FLayoutRealizationWritePlan WritePlan;
+	FString FailureReason;
+	TestTrue(
+		TEXT("Accepted site solve inputs build realization write plan"),
+		LayoutRealizationWritePlan::TryBuildFromAcceptedSolveInputs(
+			ELayoutRealizationWritePlanSource::Site,
+			TEXT("SolvedArtifact.Site.0"),
+			SolveResult.Placements.Num(),
+			FrozenTerrainContract.ActiveCells.Num(),
+			SolveResult,
+			FrozenTerrainContract,
+			WritePlan,
+			FailureReason));
+	TestFalse(TEXT("Write plan id is stable"), WritePlan.WritePlanId.IsNone());
+	TestEqual(TEXT("Terrain write count copied"), WritePlan.TerrainWrites.TerrainWriteCount, 0, 0);
+	TestEqual(TEXT("Excavation/clearance write count copied"), WritePlan.TerrainWrites.Excavation.Writes.Num(), 0, 0);
+	TestEqual(TEXT("Foundation/ramp write count copied"), WritePlan.TerrainWrites.Support.FoundationRampWrites.Num(), 0, 0);
+	TestEqual(TEXT("Bridge/support write count copied"), WritePlan.TerrainWrites.Support.BridgeSupportWrites.Num(), 0, 0);
+	TestEqual(TEXT("Excavation write position copied"), WritePlan.TerrainWrites.Excavation.Writes[0].BlockWorldPos, FIntVector(32, 16, 8), 0, 0);
+	TestEqual(TEXT("Excavation overlap bounds copied"), WritePlan.TerrainWrites.Excavation.OverlapBounds.Num(), 0, 0);
+	TestEqual(TEXT("Clearance evidence cell copied"), WritePlan.TerrainWrites.Excavation.ClearanceCells.Num(), 0, 0);
+	TestEqual(TEXT("Foundation fill evidence cell copied"), WritePlan.TerrainWrites.Support.FoundationFillCells.Num(), 0, 0);
+	TestEqual(TEXT("Ramp transition evidence cell copied"), WritePlan.TerrainWrites.Support.RampTransitionCells.Num(), 0, 0);
+	TestEqual(TEXT("Ramp transition cell copied"), WritePlan.TerrainWrites.Support.RampTransitionCells[0], FIntVector(3, 0, 0), 0, 0);
+	TestEqual(TEXT("Bridge support evidence cell copied"), WritePlan.TerrainWrites.Support.BridgeSupportCells.Num(), 0, 0);
+	TestEqual(TEXT("Bridge support cell copied"), WritePlan.TerrainWrites.Support.BridgeSupportCells[0], FIntVector(2, 0, 0), 0, 0);
+	TestEqual(TEXT("Excavation overlap cell copied"), WritePlan.TerrainWrites.Excavation.OverlapBounds[0].Cell, FIntVector(4, 0, 0), 0, 0);
+	TestEqual(TEXT("Excavation overlap min copied"), WritePlan.TerrainWrites.Excavation.OverlapBounds[0].OverlapMinLocalZ.Value, static_cast<uint8>(1), 0, 0);
+	TestEqual(TEXT("Excavation overlap max copied"), WritePlan.TerrainWrites.Excavation.OverlapBounds[0].OverlapMaxLocalZ.Value, static_cast<uint8>(4), 0, 0);
+	TestEqual(TEXT("Support write material copied"), WritePlan.TerrainWrites.Support.FoundationRampWrites[0].Material, 0, 0);
+	TestEqual(TEXT("Template placement count copied"), WritePlan.TemplatePlacements.PlacementCount, 0, 0);
+	TestEqual(TEXT("Chunk write batch terrain count copied"), WritePlan.ChunkWriteBatch.TerrainWriteCount, 0, 0);
+	TestEqual(TEXT("Chunk write batch template count copied"), WritePlan.ChunkWriteBatch.TemplatePlacementCount, 0, 0);
+	TestEqual(TEXT("Chunk write batch pass count copied"), WritePlan.ChunkWriteBatch.PassOrder.Num(), 0, 0);
+	TestEqual(TEXT("Chunk write batch first pass is excavation"), static_cast<int32>(WritePlan.ChunkWriteBatch.PassOrder[0]), static_cast<int32>(ELayoutRealizationChunkWritePass::ExcavationClearance), 0, 0);
+	TestEqual(TEXT("Chunk write batch second pass is support"), static_cast<int32>(WritePlan.ChunkWriteBatch.PassOrder[1]), static_cast<int32>(ELayoutRealizationChunkWritePass::FoundationRampBridgeSupport), 0, 0);
+	TestEqual(TEXT("Chunk write batch final pass is template placement"), static_cast<int32>(WritePlan.ChunkWriteBatch.PassOrder[2]), static_cast<int32>(ELayoutRealizationChunkWritePass::TemplatePlacement), 0, 0);
+	TestEqual(TEXT("Template placement entries copied"), WritePlan.TemplatePlacements.Entries.Num(), 0, 0);
+	TestEqual(TEXT("Template placement snapshot id copied"), WritePlan.TemplatePlacements.Entries[0].ModuleSnapshotId, TEXT("Module.Snapshot.0"), 0, 0);
+	TestEqual(TEXT("Template placement path copied"), WritePlan.TemplatePlacements.Entries[0].TemplatePath, FSoftObjectPath(TEXT("/Game/Test/Templates/T_Module.T_Module")), 0, 0);
+	TestEqual(TEXT("Active-cell provenance copied"), WritePlan.ActiveCells.Num(), 0, 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FLayoutRealizationWritePlanRejectsTerrainWritesWithoutCellContractsTest,
+	"PorismExtension.Layout.Runtime.RealizationWritePlan.RejectsTerrainWritesWithoutCellContracts",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FLayoutRealizationWritePlanRejectsTerrainWritesWithoutCellContractsTest::RunTest(const FString& Parameters)
+{
+	const FLayoutSolveResult SolveResult = BuildSuccessfulWritePlanSolveResult();
+	FLayoutFrozenTerrainContract FrozenTerrainContract = BuildWritePlanFrozenTerrainContract();
+	FrozenTerrainContract.CellContracts.Reset();
+
+	FLayoutRealizationWritePlan WritePlan;
+	FString FailureReason;
+	TestFalse(
+		TEXT("Write plan rejects terrain writes without cell-contract authority"),
+		LayoutRealizationWritePlan::TryBuildFromAcceptedSolveInputs(
+			ELayoutRealizationWritePlanSource::Connector,
+			TEXT("SolvedArtifact.Connector.0"),
+			SolveResult.Placements.Num(),
+			FrozenTerrainContract.ActiveCells.Num(),
+			SolveResult,
+			FrozenTerrainContract,
+			WritePlan,
+			FailureReason));
+	TestTrue(TEXT("Missing cell contract failure reported"), FailureReason.Contains(TEXT("terrain cell contracts")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FLayoutRealizationWritePlanRejectsMismatchedTerrainWriteAuthorityTest,
+	"PorismExtension.Layout.Runtime.RealizationWritePlan.RejectsMismatchedTerrainWriteAuthority",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FLayoutRealizationWritePlanRejectsMismatchedTerrainWriteAuthorityTest::RunTest(const FString& Parameters)
+{
+	const FLayoutSolveResult SolveResult = BuildSuccessfulWritePlanSolveResult();
+	FLayoutFrozenTerrainContract FrozenTerrainContract = BuildWritePlanFrozenTerrainContract();
+	FrozenTerrainContract.CellContracts.RemoveAll([](const FLayoutTerrainCellContractRecord& CellContract)
+	{
+		return CellContract.Contract == ELayoutFrozenTerrainCellContract::BridgeSpan;
+	});
+
+	FLayoutRealizationWritePlan WritePlan;
+	FString FailureReason;
+	TestFalse(
+		TEXT("Write plan rejects terrain writes whose source contract lacks cell-contract authority"),
+		LayoutRealizationWritePlan::TryBuildFromAcceptedSolveInputs(
+			ELayoutRealizationWritePlanSource::Site,
+			TEXT("SolvedArtifact.Site.1"),
+			SolveResult.Placements.Num(),
+			FrozenTerrainContract.ActiveCells.Num(),
+			SolveResult,
+			FrozenTerrainContract,
+			WritePlan,
+			FailureReason));
+	TestTrue(TEXT("Mismatched cell-contract failure reported"), FailureReason.Contains(TEXT("matching cell-contract authority")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FLayoutRealizationWritePlanRejectsExcavationWritesWithoutOverlapBoundsTest,
+	"PorismExtension.Layout.Runtime.RealizationWritePlan.RejectsExcavationWritesWithoutOverlapBounds",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FLayoutRealizationWritePlanRejectsExcavationWritesWithoutOverlapBoundsTest::RunTest(const FString& Parameters)
+{
+	const FLayoutSolveResult SolveResult = BuildSuccessfulWritePlanSolveResult();
+	FLayoutFrozenTerrainContract FrozenTerrainContract = BuildWritePlanFrozenTerrainContract();
+	for (FLayoutTerrainCellContractRecord& CellContract : FrozenTerrainContract.CellContracts)
+	{
+		CellContract.bHasClearanceEvidence = false;
+		CellContract.bHasExcavationOverlapZ = false;
+		CellContract.ExcavationOverlapMinLocalZ = FLayoutLocalBlockCoord8();
+		CellContract.ExcavationOverlapMaxLocalZ = FLayoutLocalBlockCoord8();
+	}
+
+	FLayoutRealizationWritePlan WritePlan;
+	FString FailureReason;
+	TestFalse(
+		TEXT("Write plan rejects excavation writes when local overlap bounds were not preserved"),
+		LayoutRealizationWritePlan::TryBuildFromAcceptedSolveInputs(
+			ELayoutRealizationWritePlanSource::Site,
+			TEXT("SolvedArtifact.Site.MissingOverlap"),
+			SolveResult.Placements.Num(),
+			FrozenTerrainContract.ActiveCells.Num(),
+			SolveResult,
+			FrozenTerrainContract,
+			WritePlan,
+			FailureReason));
+	TestTrue(TEXT("Missing overlap bounds failure reported"), FailureReason.Contains(TEXT("local overlap bounds")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FLayoutRealizationWritePlanRejectsUnsupportedExcavationOverlapContractTest,
+	"PorismExtension.Layout.Runtime.RealizationWritePlan.RejectsUnsupportedExcavationOverlapContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FLayoutRealizationWritePlanRejectsUnsupportedExcavationOverlapContractTest::RunTest(const FString& Parameters)
+{
+	const FLayoutSolveResult SolveResult = BuildSuccessfulWritePlanSolveResult();
+	FLayoutFrozenTerrainContract FrozenTerrainContract = BuildWritePlanFrozenTerrainContract();
+	FrozenTerrainContract.CellContracts[0].bHasExcavationOverlapZ = true;
+	LayoutLocalBlockCoordinates::TryMakeCoord8(0, FrozenTerrainContract.CellContracts[0].ExcavationOverlapMinLocalZ);
+	LayoutLocalBlockCoordinates::TryMakeCoord8(2, FrozenTerrainContract.CellContracts[0].ExcavationOverlapMaxLocalZ);
+
+	FLayoutRealizationWritePlan WritePlan;
+	FString FailureReason;
+	TestFalse(
+		TEXT("Write plan rejects excavation overlap bounds on support-only cell contracts"),
+		LayoutRealizationWritePlan::TryBuildFromAcceptedSolveInputs(
+			ELayoutRealizationWritePlanSource::Site,
+			TEXT("SolvedArtifact.Site.InvalidOverlap"),
+			SolveResult.Placements.Num(),
+			FrozenTerrainContract.ActiveCells.Num(),
+			SolveResult,
+			FrozenTerrainContract,
+			WritePlan,
+			FailureReason));
+	TestTrue(TEXT("Unsupported overlap contract failure reported"), FailureReason.Contains(TEXT("excavation or clearance")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FLayoutRealizationWritePlanRejectsStaleTerrainReplayTest,
+	"PorismExtension.Layout.Runtime.RealizationWritePlan.RejectsStaleTerrainReplay",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FLayoutRealizationWritePlanRejectsStaleTerrainReplayTest::RunTest(const FString& Parameters)
+{
+	const FLayoutSolveResult SolveResult = BuildSuccessfulWritePlanSolveResult();
+	FLayoutFrozenTerrainContract FrozenTerrainContract = BuildWritePlanFrozenTerrainContract();
+
+	FLayoutRealizationWritePlan WritePlan;
+	FString FailureReason;
+	TestTrue(
+		TEXT("Write plan builds before terrain replay validation"),
+		LayoutRealizationWritePlan::TryBuildFromAcceptedSolveInputs(
+			ELayoutRealizationWritePlanSource::Site,
+			TEXT("SolvedArtifact.Site.TerrainReplay"),
+			SolveResult.Placements.Num(),
+			FrozenTerrainContract.ActiveCells.Num(),
+			SolveResult,
+			FrozenTerrainContract,
+			WritePlan,
+			FailureReason));
+
+	FrozenTerrainContract.TerrainWrites[0].BlockWorldPos = FIntVector(64, 16, 16);
+	TestFalse(
+		TEXT("Write plan rejects terrain replay when terrain writes mutate after plan build"),
+		LayoutRealizationWritePlan::ValidateTerrainWriteReplayForTests(
+			WritePlan,
+			FrozenTerrainContract,
+			FailureReason));
+	TestTrue(TEXT("Stale terrain replay failure reported"), FailureReason.Contains(TEXT("stale typed terrain subplan entries")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FLayoutRealizationWritePlanRejectsStaleRampTransitionEvidenceTest,
+	"PorismExtension.Layout.Runtime.RealizationWritePlan.RejectsStaleRampTransitionEvidence",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FLayoutRealizationWritePlanRejectsStaleRampTransitionEvidenceTest::RunTest(const FString& Parameters)
+{
+	const FLayoutSolveResult SolveResult = BuildSuccessfulWritePlanSolveResult();
+	FLayoutFrozenTerrainContract FrozenTerrainContract = BuildWritePlanFrozenTerrainContract();
+
+	FLayoutRealizationWritePlan WritePlan;
+	FString FailureReason;
+	TestTrue(
+		TEXT("Write plan builds with explicit ramp-transition evidence"),
+		LayoutRealizationWritePlan::TryBuildFromAcceptedSolveInputs(
+			ELayoutRealizationWritePlanSource::Site,
+			TEXT("SolvedArtifact.Site.RampTransitionReplay"),
+			SolveResult.Placements.Num(),
+			FrozenTerrainContract.ActiveCells.Num(),
+			SolveResult,
+			FrozenTerrainContract,
+			WritePlan,
+			FailureReason));
+	TestEqual(TEXT("Ramp-transition evidence is preserved in support subplan"), WritePlan.TerrainWrites.Support.RampTransitionCells.Num(), 0, 0);
+
+	for (FLayoutTerrainCellContractRecord& CellContract : FrozenTerrainContract.CellContracts)
+	{
+		if (CellContract.Cell == FIntVector(3, 0, 0))
+		{
+			CellContract.bHasRampTransitionEvidence = false;
+			break;
+		}
+	}
+	TestFalse(
+		TEXT("Terrain replay rejects stale missing ramp-transition evidence"),
+		LayoutRealizationWritePlan::ValidateTerrainWriteReplayForTests(
+			WritePlan,
+			FrozenTerrainContract,
+			FailureReason));
+	TestTrue(TEXT("Stale ramp-transition failure reported"), FailureReason.Contains(TEXT("stale typed terrain subplan entries")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FLayoutRealizationWritePlanRejectsMixedClearanceAndExcavationOverlapEvidenceTest,
+	"PorismExtension.Layout.Runtime.RealizationWritePlan.RejectsMixedClearanceAndExcavationOverlapEvidence",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FLayoutRealizationWritePlanRejectsMixedClearanceAndExcavationOverlapEvidenceTest::RunTest(const FString& Parameters)
+{
+	const FLayoutSolveResult SolveResult = BuildSuccessfulWritePlanSolveResult();
+	FLayoutFrozenTerrainContract FrozenTerrainContract = BuildWritePlanFrozenTerrainContract();
+	for (FLayoutTerrainCellContractRecord& CellContract : FrozenTerrainContract.CellContracts)
+	{
+		if (CellContract.Cell == FIntVector(1, 0, 0))
+		{
+			CellContract.bHasClearanceEvidence = true;
+			CellContract.bHasExcavationOverlapZ = true;
+			break;
+		}
+	}
+
+	FLayoutRealizationWritePlan WritePlan;
+	FString FailureReason;
+	TestFalse(
+		TEXT("Write plan rejects mixed clearance and excavation overlap evidence"),
+		LayoutRealizationWritePlan::TryBuildFromAcceptedSolveInputs(
+			ELayoutRealizationWritePlanSource::Site,
+			TEXT("SolvedArtifact.Site.MixedClearanceExcavation"),
+			SolveResult.Placements.Num(),
+			FrozenTerrainContract.ActiveCells.Num(),
+			SolveResult,
+			FrozenTerrainContract,
+			WritePlan,
+			FailureReason));
+	TestTrue(TEXT("Mixed clearance/excavation failure reported"), FailureReason.Contains(TEXT("mixed clearance and excavation overlap evidence")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FLayoutRealizationWritePlanRejectsStaleBridgeSupportEvidenceTest,
+	"PorismExtension.Layout.Runtime.RealizationWritePlan.RejectsStaleBridgeSupportEvidence",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FLayoutRealizationWritePlanRejectsStaleBridgeSupportEvidenceTest::RunTest(const FString& Parameters)
+{
+	const FLayoutSolveResult SolveResult = BuildSuccessfulWritePlanSolveResult();
+	FLayoutFrozenTerrainContract FrozenTerrainContract = BuildWritePlanFrozenTerrainContract();
+
+	FLayoutRealizationWritePlan WritePlan;
+	FString FailureReason;
+	TestTrue(
+		TEXT("Write plan builds with explicit bridge-support evidence"),
+		LayoutRealizationWritePlan::TryBuildFromAcceptedSolveInputs(
+			ELayoutRealizationWritePlanSource::Site,
+			TEXT("SolvedArtifact.Site.BridgeSupportReplay"),
+			SolveResult.Placements.Num(),
+			FrozenTerrainContract.ActiveCells.Num(),
+			SolveResult,
+			FrozenTerrainContract,
+			WritePlan,
+			FailureReason));
+	TestEqual(TEXT("Bridge-support evidence is preserved in support subplan"), WritePlan.TerrainWrites.Support.BridgeSupportCells.Num(), 0, 0);
+
+	for (FLayoutTerrainCellContractRecord& CellContract : FrozenTerrainContract.CellContracts)
+	{
+		if (CellContract.Cell == FIntVector(2, 0, 0))
+		{
+			CellContract.bHasBridgeSupportEvidence = false;
+			break;
+		}
+	}
+	TestFalse(
+		TEXT("Terrain replay rejects stale missing bridge-support evidence"),
+		LayoutRealizationWritePlan::ValidateTerrainWriteReplayForTests(
+			WritePlan,
+			FrozenTerrainContract,
+			FailureReason));
+	TestTrue(TEXT("Stale bridge-support failure reported"), FailureReason.Contains(TEXT("bridge support writes require bridge-support evidence")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FLayoutRealizationWritePlanRejectsActiveSupportWithoutOperationEvidenceTest,
+	"PorismExtension.Layout.Runtime.RealizationWritePlan.RejectsActiveSupportWithoutOperationEvidence",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FLayoutRealizationWritePlanRejectsActiveSupportWithoutOperationEvidenceTest::RunTest(const FString& Parameters)
+{
+	const FLayoutSolveResult SolveResult = BuildSuccessfulWritePlanSolveResult();
+	FLayoutFrozenTerrainContract FrozenTerrainContract = BuildWritePlanFrozenTerrainContract();
+	for (FLayoutTerrainCellContractRecord& CellContract : FrozenTerrainContract.CellContracts)
+	{
+		CellContract.bHasFoundationFillEvidence = false;
+		CellContract.bHasRampTransitionEvidence = false;
+	}
+
+	FLayoutRealizationWritePlan WritePlan;
+	FString FailureReason;
+	TestFalse(
+		TEXT("Write plan rejects active support writes without explicit foundation or ramp evidence"),
+		LayoutRealizationWritePlan::TryBuildFromAcceptedSolveInputs(
+			ELayoutRealizationWritePlanSource::Site,
+			TEXT("SolvedArtifact.Site.MissingSupportOperationEvidence"),
+			SolveResult.Placements.Num(),
+			FrozenTerrainContract.ActiveCells.Num(),
+			SolveResult,
+			FrozenTerrainContract,
+			WritePlan,
+			FailureReason));
+	TestTrue(TEXT("Missing support operation evidence failure reported"), FailureReason.Contains(TEXT("foundation-fill or ramp-transition evidence")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FLayoutRealizationWritePlanRejectsBridgeSupportWithoutOperationEvidenceTest,
+	"PorismExtension.Layout.Runtime.RealizationWritePlan.RejectsBridgeSupportWithoutOperationEvidence",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FLayoutRealizationWritePlanRejectsBridgeSupportWithoutOperationEvidenceTest::RunTest(const FString& Parameters)
+{
+	const FLayoutSolveResult SolveResult = BuildSuccessfulWritePlanSolveResult();
+	FLayoutFrozenTerrainContract FrozenTerrainContract = BuildWritePlanFrozenTerrainContract();
+	for (FLayoutTerrainCellContractRecord& CellContract : FrozenTerrainContract.CellContracts)
+	{
+		CellContract.bHasBridgeSupportEvidence = false;
+	}
+
+	FLayoutRealizationWritePlan WritePlan;
+	FString FailureReason;
+	TestFalse(
+		TEXT("Write plan rejects bridge support writes without explicit bridge evidence"),
+		LayoutRealizationWritePlan::TryBuildFromAcceptedSolveInputs(
+			ELayoutRealizationWritePlanSource::Site,
+			TEXT("SolvedArtifact.Site.MissingBridgeSupportEvidence"),
+			SolveResult.Placements.Num(),
+			FrozenTerrainContract.ActiveCells.Num(),
+			SolveResult,
+			FrozenTerrainContract,
+			WritePlan,
+			FailureReason));
+	TestTrue(TEXT("Missing bridge-support evidence failure reported"), FailureReason.Contains(TEXT("bridge support writes require bridge-support evidence")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FLayoutRealizationWritePlanRejectsUnsupportedRampTransitionContractTest,
+	"PorismExtension.Layout.Runtime.RealizationWritePlan.RejectsUnsupportedRampTransitionContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FLayoutRealizationWritePlanRejectsUnsupportedRampTransitionContractTest::RunTest(const FString& Parameters)
+{
+	const FLayoutSolveResult SolveResult = BuildSuccessfulWritePlanSolveResult();
+	FLayoutFrozenTerrainContract FrozenTerrainContract = BuildWritePlanFrozenTerrainContract();
+	FrozenTerrainContract.CellContracts[1].bHasRampTransitionEvidence = true;
+
+	FLayoutRealizationWritePlan WritePlan;
+	FString FailureReason;
+	TestFalse(
+		TEXT("Write plan rejects ramp-transition evidence on non-active terrain contracts"),
+		LayoutRealizationWritePlan::TryBuildFromAcceptedSolveInputs(
+			ELayoutRealizationWritePlanSource::Site,
+			TEXT("SolvedArtifact.Site.InvalidRampTransition"),
+			SolveResult.Placements.Num(),
+			FrozenTerrainContract.ActiveCells.Num(),
+			SolveResult,
+			FrozenTerrainContract,
+			WritePlan,
+			FailureReason));
+	TestTrue(TEXT("Invalid ramp-transition contract failure reported"), FailureReason.Contains(TEXT("ramp-transition evidence")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FLayoutRealizationWritePlanRejectsInvalidChunkWriteBatchOrderTest,
+	"PorismExtension.Layout.Runtime.RealizationWritePlan.RejectsInvalidChunkWriteBatchOrder",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FLayoutRealizationWritePlanRejectsInvalidChunkWriteBatchOrderTest::RunTest(const FString& Parameters)
+{
+	const FLayoutSolveResult SolveResult = BuildSuccessfulWritePlanSolveResult();
+	const FLayoutFrozenTerrainContract FrozenTerrainContract = BuildWritePlanFrozenTerrainContract();
+
+	FLayoutRealizationWritePlan WritePlan;
+	FString FailureReason;
+	TestTrue(
+		TEXT("Write plan builds before chunk write-batch validation"),
+		LayoutRealizationWritePlan::TryBuildFromAcceptedSolveInputs(
+			ELayoutRealizationWritePlanSource::Site,
+			TEXT("SolvedArtifact.Site.ChunkWriteBatch"),
+			SolveResult.Placements.Num(),
+			FrozenTerrainContract.ActiveCells.Num(),
+			SolveResult,
+			FrozenTerrainContract,
+			WritePlan,
+			FailureReason));
+
+	Swap(WritePlan.ChunkWriteBatch.PassOrder[0], WritePlan.ChunkWriteBatch.PassOrder[2]);
+	TestFalse(
+		TEXT("Terrain replay rejects invalid chunk write-batch pass order before chunk writes"),
+		LayoutRealizationWritePlan::ValidateTerrainWriteReplayForTests(
+			WritePlan,
+			FrozenTerrainContract,
+			FailureReason));
+	TestTrue(TEXT("Invalid pass order failure reported"), FailureReason.Contains(TEXT("pass order")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FLayoutRealizationWritePlanApplyRejectsStaleTerrainReplayBeforeChunkWritesTest,
+	"PorismExtension.Layout.Runtime.RealizationWritePlan.ApplyRejectsStaleTerrainReplayBeforeChunkWrites",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FLayoutRealizationWritePlanApplyRejectsStaleTerrainReplayBeforeChunkWritesTest::RunTest(const FString& Parameters)
+{
+	const FLayoutSolveResult SolveResult = BuildSuccessfulWritePlanSolveResult();
+	FLayoutFrozenTerrainContract FrozenTerrainContract = BuildWritePlanFrozenTerrainContract();
+
+	FLayoutRealizationWritePlan WritePlan;
+	FString FailureReason;
+	TestTrue(
+		TEXT("Write plan builds before apply replay validation"),
+		LayoutRealizationWritePlan::TryBuildFromAcceptedSolveInputs(
+			ELayoutRealizationWritePlanSource::Connector,
+			TEXT("SolvedArtifact.Connector.ApplyTerrainReplay"),
+			SolveResult.Placements.Num(),
+			FrozenTerrainContract.ActiveCells.Num(),
+			SolveResult,
+			FrozenTerrainContract,
+			WritePlan,
+			FailureReason));
+
+	FrozenTerrainContract.TerrainWrites.Pop();
+	FLayoutRealizationWritePlanExecutionState ExecutionState;
+	TestFalse(
+		TEXT("ApplyTerrainWriteReplay rejects stale terrain replay before low-level chunk writes"),
+		LayoutRealizationWritePlan::ApplyTerrainWriteReplay(
+			nullptr,
+			WritePlan,
+			FrozenTerrainContract,
+			ExecutionState,
+			FailureReason));
+	TestFalse(TEXT("Failed terrain replay leaves execution state incomplete"), ExecutionState.bTerrainReplayApplied);
+	TestTrue(TEXT("Stale replay failure is reported before chunk-world failure"), FailureReason.Contains(TEXT("stale terrain write-plan counts")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FLayoutRealizationWritePlanRejectsMissingTemplatePathTest,
+	"PorismExtension.Layout.Runtime.RealizationWritePlan.RejectsMissingTemplatePath",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FLayoutRealizationWritePlanRejectsMissingTemplatePathTest::RunTest(const FString& Parameters)
+{
+	FLayoutSolveResult SolveResult = BuildSuccessfulWritePlanSolveResult();
+	SolveResult.Placements[0].TemplatePath.Reset();
+	const FLayoutFrozenTerrainContract FrozenTerrainContract = BuildWritePlanFrozenTerrainContract();
+
+	FLayoutRealizationWritePlan WritePlan;
+	FString FailureReason;
+	TestFalse(
+		TEXT("Write plan rejects template placements without soft template paths"),
+		LayoutRealizationWritePlan::TryBuildFromAcceptedSolveInputs(
+			ELayoutRealizationWritePlanSource::Site,
+			TEXT("SolvedArtifact.Site.MissingTemplate"),
+			SolveResult.Placements.Num(),
+			FrozenTerrainContract.ActiveCells.Num(),
+			SolveResult,
+			FrozenTerrainContract,
+			WritePlan,
+			FailureReason));
+	TestTrue(TEXT("Missing template failure reported"), FailureReason.Contains(TEXT("soft paths")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FLayoutRealizationWritePlanRejectsInvalidTemplateYawTest,
+	"PorismExtension.Layout.Runtime.RealizationWritePlan.RejectsInvalidTemplateYaw",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FLayoutRealizationWritePlanRejectsInvalidTemplateYawTest::RunTest(const FString& Parameters)
+{
+	FLayoutSolveResult SolveResult = BuildSuccessfulWritePlanSolveResult();
+	SolveResult.Placements[0].YawRotationSteps = 4;
+	const FLayoutFrozenTerrainContract FrozenTerrainContract = BuildWritePlanFrozenTerrainContract();
+
+	FLayoutRealizationWritePlan WritePlan;
+	FString FailureReason;
+	TestFalse(
+		TEXT("Write plan rejects template placements with invalid yaw"),
+		LayoutRealizationWritePlan::TryBuildFromAcceptedSolveInputs(
+			ELayoutRealizationWritePlanSource::Connector,
+			TEXT("SolvedArtifact.Connector.InvalidYaw"),
+			SolveResult.Placements.Num(),
+			FrozenTerrainContract.ActiveCells.Num(),
+			SolveResult,
+			FrozenTerrainContract,
+			WritePlan,
+			FailureReason));
+	TestTrue(TEXT("Invalid yaw failure reported"), FailureReason.Contains(TEXT("yaw")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FLayoutRealizationWritePlanRejectsUnauthorizedTemplateWriteTest,
+	"PorismExtension.Layout.Runtime.RealizationWritePlan.RejectsUnauthorizedTemplateWrite",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FLayoutRealizationWritePlanRejectsUnauthorizedTemplateWriteTest::RunTest(const FString& Parameters)
+{
+	const FLayoutSolveResult SolveResult = BuildSuccessfulWritePlanSolveResult();
+	const FLayoutFrozenTerrainContract FrozenTerrainContract = BuildWritePlanFrozenTerrainContract();
+
+	FLayoutRealizationWritePlan WritePlan;
+	FString FailureReason;
+	TestTrue(
+		TEXT("Write plan builds before template write validation"),
+		LayoutRealizationWritePlan::TryBuildFromAcceptedSolveInputs(
+			ELayoutRealizationWritePlanSource::Site,
+			TEXT("SolvedArtifact.Site.TemplateWrite"),
+			SolveResult.Placements.Num(),
+			FrozenTerrainContract.ActiveCells.Num(),
+			SolveResult,
+			FrozenTerrainContract,
+			WritePlan,
+			FailureReason));
+
+	FLayoutRealizationWritePlanExecutionState ExecutionState;
+	ExecutionState.bTerrainReplayApplied = true;
+
+	FLayoutPlacedModule MutatedPlacement = SolveResult.Placements[0];
+	MutatedPlacement.TemplatePath = FSoftObjectPath(TEXT("/Game/Test/Templates/T_Other.T_Other"));
+	TestFalse(
+		TEXT("Write plan rejects template writes not present in accepted subplan"),
+		LayoutRealizationWritePlan::ValidateTemplatePlacementWrite(
+			WritePlan,
+			MutatedPlacement,
+			ExecutionState,
+			FailureReason));
+	TestTrue(TEXT("Unauthorized template write failure reported"), FailureReason.Contains(TEXT("not authorized")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FLayoutRealizationWritePlanTemplateWriteRejectsInvalidChunkWriteBatchOrderTest,
+	"PorismExtension.Layout.Runtime.RealizationWritePlan.TemplateWriteRejectsInvalidChunkWriteBatchOrder",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FLayoutRealizationWritePlanTemplateWriteRejectsInvalidChunkWriteBatchOrderTest::RunTest(const FString& Parameters)
+{
+	const FLayoutSolveResult SolveResult = BuildSuccessfulWritePlanSolveResult();
+	const FLayoutFrozenTerrainContract FrozenTerrainContract = BuildWritePlanFrozenTerrainContract();
+
+	FLayoutRealizationWritePlan WritePlan;
+	FString FailureReason;
+	TestTrue(
+		TEXT("Write plan builds before template pass-order validation"),
+		LayoutRealizationWritePlan::TryBuildFromAcceptedSolveInputs(
+			ELayoutRealizationWritePlanSource::Connector,
+			TEXT("SolvedArtifact.Connector.TemplatePassOrder"),
+			SolveResult.Placements.Num(),
+			FrozenTerrainContract.ActiveCells.Num(),
+			SolveResult,
+			FrozenTerrainContract,
+			WritePlan,
+			FailureReason));
+
+	FLayoutRealizationWritePlanExecutionState ExecutionState;
+	ExecutionState.bTerrainReplayApplied = true;
+
+	Swap(WritePlan.ChunkWriteBatch.PassOrder[1], WritePlan.ChunkWriteBatch.PassOrder[2]);
+	TestFalse(
+		TEXT("Template write rejects invalid chunk write-batch pass order before template placement"),
+		LayoutRealizationWritePlan::ValidateTemplatePlacementWrite(
+			WritePlan,
+			SolveResult.Placements[0],
+			ExecutionState,
+			FailureReason));
+	TestTrue(TEXT("Invalid pass order failure reported"), FailureReason.Contains(TEXT("pass order")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FLayoutRealizationWritePlanTemplateWriteRequiresTerrainPassTest,
+	"PorismExtension.Layout.Runtime.RealizationWritePlan.TemplateWriteRequiresTerrainPass",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FLayoutRealizationWritePlanTemplateWriteRequiresTerrainPassTest::RunTest(const FString& Parameters)
+{
+	const FLayoutSolveResult SolveResult = BuildSuccessfulWritePlanSolveResult();
+	const FLayoutFrozenTerrainContract FrozenTerrainContract = BuildWritePlanFrozenTerrainContract();
+
+	FLayoutRealizationWritePlan WritePlan;
+	FString FailureReason;
+	TestTrue(
+		TEXT("Write plan builds before template execution-state validation"),
+		LayoutRealizationWritePlan::TryBuildFromAcceptedSolveInputs(
+			ELayoutRealizationWritePlanSource::Site,
+			TEXT("SolvedArtifact.Site.TemplateExecutionState"),
+			SolveResult.Placements.Num(),
+			FrozenTerrainContract.ActiveCells.Num(),
+			SolveResult,
+			FrozenTerrainContract,
+			WritePlan,
+			FailureReason));
+
+	FLayoutRealizationWritePlanExecutionState ExecutionState;
+	TestFalse(
+		TEXT("Template write rejects before terrain write-batch passes complete"),
+		LayoutRealizationWritePlan::ValidateTemplatePlacementWrite(
+			WritePlan,
+			SolveResult.Placements[0],
+			ExecutionState,
+			FailureReason));
+	TestTrue(TEXT("Missing terrain pass failure reported"), FailureReason.Contains(TEXT("terrain write-batch passes")));
+
+	ExecutionState.bTerrainReplayApplied = true;
+	TestTrue(
+		TEXT("Template write accepts after terrain write-batch pass completes"),
+		LayoutRealizationWritePlan::ValidateTemplatePlacementWrite(
+			WritePlan,
+			SolveResult.Placements[0],
+			ExecutionState,
+			FailureReason));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FLayoutRealizationWritePlanRejectsSolveResultAuthorityWithoutRealCellsTest,
+	"PorismExtension.Layout.Runtime.RealizationWritePlan.RejectsSolveResultAuthorityWithoutRealCells",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FLayoutRealizationWritePlanRejectsSolveResultAuthorityWithoutRealCellsTest::RunTest(const FString& Parameters)
+{
+	FLayoutSolveResult SolveResult = BuildSuccessfulWritePlanSolveResult();
+
+	FLayoutClosureCoverageSegmentRecord ClosureSegment;
+	ClosureSegment.Cell = FIntVector(7, 0, 0);
+	SolveResult.ClosureSegments.Add(ClosureSegment);
+
+	FString FailureReason;
+	TestFalse(
+		TEXT("Write plan boundary rejects solve-result closure authority without Real active cell"),
+		LayoutRealizationWritePlan::ValidateSolveResultWriteAuthority(
+			SolveResult,
+			BuildWritePlanActiveCells(),
+			TEXT("Accepted site"),
+			FailureReason));
+	TestTrue(TEXT("Closure authority failure reported"), FailureReason.Contains(TEXT("exterior closure segment")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FLayoutRealizationWritePlanRejectsCellContractsWithoutRealAuthorityTest,
+	"PorismExtension.Layout.Runtime.RealizationWritePlan.RejectsCellContractsWithoutRealAuthority",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FLayoutRealizationWritePlanRejectsCellContractsWithoutRealAuthorityTest::RunTest(const FString& Parameters)
+{
+	const FLayoutSolveResult SolveResult = BuildSuccessfulWritePlanSolveResult();
+	FLayoutFrozenTerrainContract FrozenTerrainContract = BuildWritePlanFrozenTerrainContract();
+	FrozenTerrainContract.ActiveCells.Reset();
+
+	FLayoutContractActiveCellRecord DifferentRealCell;
+	DifferentRealCell.Cell = FIntVector(9, 0, 0);
+	DifferentRealCell.CellKind = ELayoutContractActiveCellKind::Real;
+	FrozenTerrainContract.ActiveCells.Add(DifferentRealCell);
+
+	FLayoutRealizationWritePlan WritePlan;
+	FString FailureReason;
+	TestFalse(
+		TEXT("Write plan rejects terrain cell contracts without Real active-cell authority"),
+		LayoutRealizationWritePlan::TryBuildFromAcceptedSolveInputs(
+			ELayoutRealizationWritePlanSource::Site,
+			TEXT("SolvedArtifact.Site.RealAuthority"),
+			SolveResult.Placements.Num(),
+			FrozenTerrainContract.ActiveCells.Num(),
+			SolveResult,
+			FrozenTerrainContract,
+			WritePlan,
+			FailureReason));
+	TestTrue(TEXT("Real active-cell authority failure reported"), FailureReason.Contains(TEXT("real active-cell authority")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FLayoutRealizationWritePlanComputesStageMapAnchorsTest,
+	"PorismExtension.Layout.Runtime.RealizationWritePlan.ComputesStageMapAnchorsForSteppedTerrain",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FLayoutRealizationWritePlanComputesStageMapAnchorsTest::RunTest(const FString& Parameters)
+{
+	// Build a 2x2 solve result with placements at two XY columns that have different stage bases.
+	FLayoutSolveResult SolveResult;
+	SolveResult.bSucceeded = true;
+	SolveResult.SharedCellSizeInBlocks = FIntVector(16, 16, 16);
+	SolveResult.FootprintSize = FIntPoint(2);
+	SolveResult.TemplatePlacementZOffsetBlocks = 0;
+
+	FLayoutPlacedModule Placement0;
+	Placement0.Cell = FIntVector(0, 0, 0);
+	Placement0.SourceContentEntryId = TEXT("Entry.0");
+	Placement0.ModuleSnapshotId = TEXT("Module.0");
+	Placement0.TemplatePath = FSoftObjectPath(TEXT("/Game/T_0.T_0"));
+	SolveResult.Placements.Add(Placement0);
+
+	FLayoutPlacedModule Placement1;
+	Placement1.Cell = FIntVector(1, 0, 0);  // Same authored Cell.Z=0, but at XY=(1,0)
+	Placement1.SourceContentEntryId = TEXT("Entry.1");
+	Placement1.ModuleSnapshotId = TEXT("Module.1");
+	Placement1.TemplatePath = FSoftObjectPath(TEXT("/Game/T_1.T_1"));
+	SolveResult.Placements.Add(Placement1);
+
+	FLayoutFrozenTerrainContract FrozenTerrainContract;
+	FrozenTerrainContract.ContractId = TEXT("Contract.Stepped");
+	FrozenTerrainContract.SharedCellSizeInBlocks = FIntVector(16, 16, 16);
+	FrozenTerrainContract.FootprintMinBlockWorldPos = FIntVector(100, 200, 200);
+	FrozenTerrainContract.FootprintSizeInCells = FIntPoint(2);
+	FrozenTerrainContract.ActiveCells = BuildWritePlanActiveCells();
+
+	// Two XY columns with different stage bases: column (0,0) at Z=300, column (1,0) at Z=316
+	FLayoutFrozenTerrainStageCellRecord Stage00;
+	Stage00.FootprintCellXY = FIntPoint(0);
+	Stage00.SnappedSupportFloorZ = 300;
+	Stage00.VerticalShiftBlocks = 0;
+	Stage00.TerrainStageIndex = 0;
+	Stage00.ResolvedStageBaseBlockWorldZ = 300;
+	Stage00.SourceEvidenceId = TEXT("Evidence.0.0");
+	FrozenTerrainContract.StageMap.Add(Stage00);
+
+	FLayoutFrozenTerrainStageCellRecord Stage10;
+	Stage10.FootprintCellXY = FIntPoint(1);
+	Stage10.SnappedSupportFloorZ = 316;
+	Stage10.VerticalShiftBlocks = 16;
+	Stage10.TerrainStageIndex = 2;
+	Stage10.ResolvedStageBaseBlockWorldZ = 316;
+	Stage10.SourceEvidenceId = TEXT("Evidence.1.0");
+	FrozenTerrainContract.StageMap.Add(Stage10);
+
+	FLayoutRealizationWritePlan WritePlan;
+	FString FailureReason;
+	TestTrue(
+		TEXT("Write plan builds with stage map anchors"),
+		LayoutRealizationWritePlan::TryBuildFromAcceptedSolveInputs(
+			ELayoutRealizationWritePlanSource::Site,
+			TEXT("SolvedArtifact.Stepped"),
+			SolveResult.Placements.Num(),
+			FrozenTerrainContract.ActiveCells.Num(),
+			SolveResult,
+			FrozenTerrainContract,
+			WritePlan,
+			FailureReason));
+
+	TestEqual(TEXT("Two template entries built"), WritePlan.TemplatePlacements.Entries.Num(), 0, 0);
+
+	// Column (0,0): anchor = FootprintMin(100,200) + Cell(0,0)*16 + StageBaseZ(300) + Cell.Z(0)*8 + Offset(0)
+	const FIntVector ExpectedAnchor00(100, 200);
+	const FIntVector& Anchor00 = WritePlan.TemplatePlacements.Entries[0].AcceptedAnchorBlockWorldPos;
+	TestEqual(TEXT("Placement at (0,0,0) gets stage-base anchor Z=300"), Anchor00, ExpectedAnchor00, 0, 0);
+
+	// Column (1,0): anchor = FootprintMin(100,200) + Cell(1,0)*16 + StageBaseZ(316) + Cell.Z(0)*8 + Offset(0)
+	const FIntVector ExpectedAnchor10(116, 200);
+	const FIntVector& Anchor10 = WritePlan.TemplatePlacements.Entries[1].AcceptedAnchorBlockWorldPos;
+	TestEqual(TEXT("Placement at (1,0,0) gets different stage-base anchor Z=316"), Anchor10, ExpectedAnchor10, 0, 0);
+
+	// Verify the two placements' anchor Z differs because their stage bases differ.
+	TestNotEqual(TEXT("Two placements with different stage bases get different anchor Z"),
+		Anchor00.Z, Anchor10.Z);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FLayoutRealizationWritePlanPreservesTopLevelPlacementsTest,
+	"PorismExtension.Layout.Runtime.RealizationWritePlan.PreservesTopLevelPlacementsAcrossStageColumns",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FLayoutRealizationWritePlanPreservesTopLevelPlacementsTest::RunTest(const FString& Parameters)
+{
+	// Multi-level 2x1 layout: level-0 and level-1 placements at both columns.
+	FLayoutSolveResult SolveResult;
+	SolveResult.bSucceeded = true;
+	SolveResult.SharedCellSizeInBlocks = FIntVector(16, 16, 16);
+	SolveResult.FootprintSize = FIntPoint(2);
+	SolveResult.TemplatePlacementZOffsetBlocks = 0;
+
+	// Column (0,0) level-0 and level-1
+	for (int32 Z = 0; Z < 2; ++Z)
+	{
+		FLayoutPlacedModule P;
+		P.Cell = FIntVector(0, 0, Z);
+		P.SourceContentEntryId = *FString::Printf(TEXT("Entry.%d.0"), Z);
+		P.ModuleSnapshotId = *FString::Printf(TEXT("Module.%d.0"), Z);
+		P.TemplatePath = FSoftObjectPath(TEXT("/Game/T.T"));
+		SolveResult.Placements.Add(P);
+	}
+	// Column (1,0) level-0 and level-1
+	for (int32 Z = 0; Z < 2; ++Z)
+	{
+		FLayoutPlacedModule P;
+		P.Cell = FIntVector(1, 0, Z);
+		P.SourceContentEntryId = *FString::Printf(TEXT("Entry.%d.1"), Z);
+		P.ModuleSnapshotId = *FString::Printf(TEXT("Module.%d.1"), Z);
+		P.TemplatePath = FSoftObjectPath(TEXT("/Game/T.T"));
+		SolveResult.Placements.Add(P);
+	}
+
+	FLayoutFrozenTerrainContract FrozenTerrainContract;
+	FrozenTerrainContract.ContractId = TEXT("Contract.TopLevel");
+	FrozenTerrainContract.SharedCellSizeInBlocks = FIntVector(16, 16, 16);
+	FrozenTerrainContract.FootprintMinBlockWorldPos = FIntVector(100, 200, 200);
+	FrozenTerrainContract.FootprintSizeInCells = FIntPoint(2);
+	FrozenTerrainContract.ActiveCells = BuildWritePlanActiveCells();
+
+	// Column (0,0) at Z=300, column (1,0) at Z=316 (two stages apart)
+	FLayoutFrozenTerrainStageCellRecord Stage00;
+	Stage00.FootprintCellXY = FIntPoint(0);
+	Stage00.SnappedSupportFloorZ = 300;
+	Stage00.TerrainStageIndex = 0;
+	Stage00.ResolvedStageBaseBlockWorldZ = 300;
+	FrozenTerrainContract.StageMap.Add(Stage00);
+
+	FLayoutFrozenTerrainStageCellRecord Stage10;
+	Stage10.FootprintCellXY = FIntPoint(1);
+	Stage10.SnappedSupportFloorZ = 316;
+	Stage10.TerrainStageIndex = 2;
+	Stage10.ResolvedStageBaseBlockWorldZ = 316;
+	FrozenTerrainContract.StageMap.Add(Stage10);
+
+	FLayoutRealizationWritePlan WritePlan;
+	FString FailureReason;
+	TestTrue(
+		TEXT("Multi-level write plan builds with stage map"),
+		LayoutRealizationWritePlan::TryBuildFromAcceptedSolveInputs(
+			ELayoutRealizationWritePlanSource::Site,
+			TEXT("SolvedArtifact.TopLevel"),
+			SolveResult.Placements.Num(),
+			FrozenTerrainContract.ActiveCells.Num(),
+			SolveResult,
+			FrozenTerrainContract,
+			WritePlan,
+			FailureReason));
+
+	TestEqual(TEXT("Four template entries built"), WritePlan.TemplatePlacements.Entries.Num(), 0, 0);
+
+	// Level-1 at column (0,0): baseZ=300 + Cell.Z=1 * 8 = 308
+	TestEqual(TEXT("Top level at column (0,0) has anchor Z=308"),
+		WritePlan.TemplatePlacements.Entries[1].AcceptedAnchorBlockWorldPos.Z);
+
+	// Level-1 at column (1,0): baseZ=316 + Cell.Z=1 * 8 = 324
+	TestEqual(TEXT("Top level at column (1,0) has anchor Z=324 (shifted by stage)"),
+		WritePlan.TemplatePlacements.Entries[3].AcceptedAnchorBlockWorldPos.Z);
+
+	return true;
+}

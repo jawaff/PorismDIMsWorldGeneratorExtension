@@ -262,7 +262,7 @@ void AChunkWorldChaosDestructionPresentationActor::ApplyExternalStrainField(cons
 
 	if (DestructionTuning.FractureFieldMode == EChunkWorldChaosFractureFieldMode::Uniform)
 	{
-		// Project-specific change: the gentle break-apart path uses uniform strain so heavy props release evenly and gravity drives the visible motion instead of a blast-like focal point.
+		// The gentle break-apart path uses uniform strain so heavy props release evenly and gravity drives the visible motion instead of a blast-like focal point.
 		UUniformScalar* UniformStrainField = NewObject<UUniformScalar>(this);
 		if (UniformStrainField == nullptr)
 		{
@@ -278,7 +278,7 @@ void AChunkWorldChaosDestructionPresentationActor::ApplyExternalStrainField(cons
 		return;
 	}
 
-	// Project-specific change: use one transient radial strain field for localized fracture patterns when subclasses explicitly want a directional break.
+	// Use one transient radial strain field for localized fracture patterns when subclasses explicitly want a directional break.
 	URadialFalloff* StrainField = NewObject<URadialFalloff>(this);
 	if (StrainField == nullptr)
 	{
@@ -311,7 +311,7 @@ void AChunkWorldChaosDestructionPresentationActor::ApplyGentleSeparationImpulse(
 		return;
 	}
 
-	// Project-specific change: prefer a small delayed impulse here so heavy props separate enough to read as broken while gravity remains the dominant motion.
+	// Prefer a small delayed impulse here so heavy props separate enough to read as broken while gravity remains the dominant motion.
 	GeometryCollectionComponent->AddRadialImpulse(
 		FieldOrigin,
 		SeparationImpulseRadius,

@@ -20,6 +20,7 @@ public class PorismDIMsWorldGeneratorExtension : ModuleRules
 			"FieldSystemEngine",
 			"GameplayTags",
 			"GeometryCollectionEngine",
+			"Json",
 			"Niagara",
 			"PorismDIMsWorldGenerator"
 		});
@@ -30,5 +31,16 @@ public class PorismDIMsWorldGeneratorExtension : ModuleRules
 			"PhysicsCore",
 			"PorismDIMsWorldGenerator"
 		});
+
+		if (Target.bBuildEditor)
+		{
+			PrivateDependencyModuleNames.AddRange(new string[]
+			{
+				"MessageLog",
+				"Slate",
+				"SlateCore",
+				"UnrealEd"
+			});
+		}
 	}
 }

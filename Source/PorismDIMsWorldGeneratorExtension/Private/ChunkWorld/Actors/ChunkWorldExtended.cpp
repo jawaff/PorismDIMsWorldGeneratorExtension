@@ -16,14 +16,108 @@
 #include "ChunkWorld/Components/ChunkWorldBlockSwapComponent.h"
 #include "ChunkWorldStructs/ChunkWorldRuntimeStructs.h"
 #include "ChunkWorldStructs/ChunkWorldStructs.h"
+#include "Engine/DataTable.h"
+#include "FastNoise/FastNoiseEditor.h"
+#include "Layout/Runtime/ChunkWorldLayoutRuntimeComponent.h"
+#include "Biome/Noise/Strategy/BiomeFastNoiseEditor.h"
 #include "Kismet/GameplayStatics.h"
 #include "PorismDIMsWorldGeneratorExtension.h"
-#include "TimerManager.h"
+
+#if WITH_EDITOR
+#include "Editor.h"
+#include "LevelEditorViewport.h"
+#include "UObject/UnrealType.h"
+#endif
 
 DEFINE_LOG_CATEGORY_STATIC(LogChunkWorldExtended, Log, All);
 
 namespace
 {
+	int32 ResolveSingleChunkFlatAxis(const UWorldGenDef* WorldGenDef)
+	{
+		if (WorldGenDef == nullptr)
+		{
+			return INDEX_NONE;
+		}
+
+		int32 SingleChunkCount = 0;
+		int32 FlatAxis = INDEX_NONE;
+		const EAxisBehavior AxisBehaviors[] = {
+			WorldGenDef->AxisBehaviorX,
+			WorldGenDef->AxisBehaviorY,
+			WorldGenDef->AxisBehaviorZ
+		};
+		for (int32 Axis = 0; Axis < UE_ARRAY_COUNT(AxisBehaviors); ++Axis)
+		{
+			if (AxisBehaviors[Axis] == EAxisBehavior::SingleChunk)
+			{
+				++SingleChunkCount;
+				FlatAxis = Axis;
+			}
+		}
+
+		return SingleChunkCount == 1 ? FlatAxis : INDEX_NONE;
+	}
+
+	double GetVectorAxis(const FVector& Value, const int32 Axis)
+	{
+		return Axis == 0 ? Value.X : (Axis == 1 ? Value.Y : Value.Z);
+	}
+
+	double& GetMutableVectorAxis(FVector& Value, const int32 Axis)
+	{
+		return Axis == 0 ? Value.X : (Axis == 1 ? Value.Y : Value.Z);
+	}
+
+	int32 GetIntVectorAxis(const FIntVector& Value, const int32 Axis)
+	{
+		return Axis == 0 ? Value.X : (Axis == 1 ? Value.Y : Value.Z);
+	}
+
+	int32 CalculateLayerFlatAxisChunkSize(
+		const UWorldGenDef* WorldGenDef,
+		const FChunkDataParams& LayerParams,
+		const int32 FlatAxis)
+	{
+		if (WorldGenDef == nullptr || FlatAxis == INDEX_NONE)
+		{
+			return 0;
+		}
+
+		const double BlockSize = FMath::Max(1.0, LayerParams.BlockSizeMulti * static_cast<double>(FMath::Max(1, WorldGenDef->BaseBlockSize)));
+		const double ChunkBlockCount = static_cast<double>(FMath::Max(1, GetIntVectorAxis(WorldGenDef->ChunkBlockSize, FlatAxis)));
+		const double ChunkSize = GetVectorAxis(LayerParams.ChunkSizeMulti, FlatAxis) * ChunkBlockCount * BlockSize;
+		return FMath::Max(1, FMath::RoundToInt(ChunkSize));
+	}
+
+	bool CopyWorldChunkLayers(const UWorldGenDef* WorldGenDef, TArray<FChunkDataParams>& OutLayers, bool& bOutCopiedFromDataTable)
+	{
+		OutLayers.Reset();
+		bOutCopiedFromDataTable = false;
+		if (WorldGenDef == nullptr)
+		{
+			return false;
+		}
+
+		if (WorldGenDef->WorldChunksDT != nullptr && WorldGenDef->WorldChunksDT->GetRowMap().Num() > 0)
+		{
+			bOutCopiedFromDataTable = true;
+			for (const TPair<FName, uint8*>& Row : WorldGenDef->WorldChunksDT->GetRowMap())
+			{
+				if (Row.Value != nullptr)
+				{
+					OutLayers.Add(*reinterpret_cast<const FChunkDataParams*>(Row.Value));
+				}
+			}
+		}
+		else
+		{
+			OutLayers = WorldGenDef->WorldChunks;
+		}
+
+		return !OutLayers.IsEmpty();
+	}
+
 	struct FObservedBlockCustomDataChange
 	{
 		bool bTouchedHealth = false;
@@ -64,6 +158,96 @@ namespace
 		return false;
 	}
 
+	TArray<const FBiomeDualData*> GetWorldBiomeRows(const UWorldGenDef* WorldGenDef)
+	{
+		TArray<const FBiomeDualData*> Rows;
+		if (WorldGenDef == nullptr)
+		{
+			return Rows;
+		}
+
+		if (WorldGenDef->WorldBiomesDT != nullptr && WorldGenDef->WorldBiomesDT->GetRowMap().Num() > 0)
+		{
+			for (const TPair<FName, uint8*>& Row : WorldGenDef->WorldBiomesDT->GetRowMap())
+			{
+				if (Row.Value != nullptr)
+				{
+					Rows.Add(reinterpret_cast<const FBiomeDualData*>(Row.Value));
+				}
+			}
+			return Rows;
+		}
+
+		Rows.Reserve(WorldGenDef->WorldBiomes.Num());
+		for (const FBiomeDualData& Row : WorldGenDef->WorldBiomes)
+		{
+			Rows.Add(&Row);
+		}
+		return Rows;
+	}
+
+	const UBiomeFastNoiseEditor* GetBiomeEditorDefaultObject(const TSubclassOf<UFastNoiseEditor>& EditorClass)
+	{
+		return EditorClass != nullptr
+			? Cast<UBiomeFastNoiseEditor>(EditorClass->GetDefaultObject())
+			: nullptr;
+	}
+
+	const UBiomeFastNoiseEditor* ResolveBiomeSlotEditor(const FBiomeDualData& Row, const EBiomeNoiseSlot DesiredSlot)
+	{
+		if (const UBiomeFastNoiseEditor* RuntimeGenA = Cast<UBiomeFastNoiseEditor>(Row.GenARun))
+		{
+			if (RuntimeGenA->NoiseSlot == DesiredSlot)
+			{
+				return RuntimeGenA;
+			}
+		}
+		if (const UBiomeFastNoiseEditor* ClassGenA = GetBiomeEditorDefaultObject(Row.GenABP))
+		{
+			if (ClassGenA->NoiseSlot == DesiredSlot)
+			{
+				return ClassGenA;
+			}
+		}
+		if (const UBiomeFastNoiseEditor* RuntimeDomain = Cast<UBiomeFastNoiseEditor>(Row.DomainRun))
+		{
+			if (RuntimeDomain->NoiseSlot == DesiredSlot)
+			{
+				return RuntimeDomain;
+			}
+		}
+		if (const UBiomeFastNoiseEditor* ClassDomain = GetBiomeEditorDefaultObject(Row.DomainBP))
+		{
+			if (ClassDomain->NoiseSlot == DesiredSlot)
+			{
+				return ClassDomain;
+			}
+		}
+		return nullptr;
+	}
+
+	const UBiomeFastNoiseEditor* FindFirstBiomeGenAEditor(const UWorldGenDef* WorldGenDef, int32& OutBiomeRowIndex)
+	{
+		OutBiomeRowIndex = INDEX_NONE;
+		const TArray<const FBiomeDualData*> Rows = GetWorldBiomeRows(WorldGenDef);
+		for (int32 RowIndex = 0; RowIndex < Rows.Num(); ++RowIndex)
+		{
+			const FBiomeDualData* Row = Rows[RowIndex];
+			if (Row == nullptr || Row->BiomeHidden)
+			{
+				continue;
+			}
+
+			if (const UBiomeFastNoiseEditor* BiomeEditor = ResolveBiomeSlotEditor(*Row, EBiomeNoiseSlot::GenA))
+			{
+				OutBiomeRowIndex = RowIndex;
+				return BiomeEditor;
+			}
+		}
+
+		return nullptr;
+	}
+
 }
 
 AChunkWorldExtended::AChunkWorldExtended()
@@ -72,21 +256,183 @@ AChunkWorldExtended::AChunkWorldExtended()
 	BlockFeedbackComponent = CreateDefaultSubobject<UChunkWorldBlockFeedbackComponent>(TEXT("BlockFeedbackComponent"));
 	BlockSwapScannerComponent = CreateDefaultSubobject<UChunkWorldBlockSwapScannerComponent>(TEXT("BlockSwapScannerComponent"));
 	BlockSwapComponent = CreateDefaultSubobject<UChunkWorldBlockSwapComponent>(TEXT("BlockSwapComponent"));
+	LayoutRuntimeComponent = CreateDefaultSubobject<UChunkWorldLayoutRuntimeComponent>(TEXT("LayoutRuntimeComponent"));
 	BlockFeedbackComponent->SetIsReplicated(true);
 	SyncBlockTypeSchemaRegistry();
+}
+
+TArray<int> AChunkWorldExtended::GetBlockValuesByBlockWorldPosLevel(
+	const TArray<FIntVector>& Positions, const CChunkData* DetailLevel,
+	const ERessourceType ResourceType, const int CustomDataIndex)
+{
+	if (ResourceType != ERessourceType::MaterialIndex && ResourceType != ERessourceType::BiomeSwitchIndex)
+	{
+		return Super::GetBlockValuesByBlockWorldPosLevel(Positions, DetailLevel, ResourceType, CustomDataIndex);
+	}
+	TArray<int> Result;
+	if (!IsRunning() || DetailLevel == nullptr) return Result;
+	Result.Reserve(Positions.Num());
+	TArray<FIntVector> ChunkPositions;
+	for (int32 Begin = 0; Begin < Positions.Num();)
+	{
+		const FIntVector Chunk = BlockWorldPosToChunkGridPos(Positions[Begin], DetailLevel);
+		int32 End = Begin + 1;
+		while (End < Positions.Num() && BlockWorldPosToChunkGridPos(Positions[End], DetailLevel) == Chunk) ++End;
+		ChunkPositions.Reset(End - Begin);
+		ChunkPositions.Append(Positions.GetData() + Begin, End - Begin);
+		Result.Append(Super::GetBlockValuesByBlockWorldPosLevel(ChunkPositions, DetailLevel, ResourceType, CustomDataIndex));
+		Begin = End;
+	}
+	return Result;
 }
 
 SCacheKey AChunkWorldExtended::StartGenDTs()
 {
 	SyncBlockTypeSchemaRegistry();
 	EnsureSchemaCustomDataCapacity();
+	PrepareRuntimeWorldGenDefForGeneration();
 	return Super::StartGenDTs();
+}
+
+bool AChunkWorldExtended::PrepareRuntimeWorldGenDefForGeneration()
+{
+	if (WorldGenDef == nullptr)
+	{
+		return false;
+	}
+
+	TArray<FChunkDataParams> RuntimeLayers;
+	bool bCopiedFromDataTable = false;
+	bool bChangedLayer = false;
+	const int32 FlatAxis = ResolveSingleChunkFlatAxis(WorldGenDef);
+	if (FlatAxis != INDEX_NONE
+		&& CopyWorldChunkLayers(WorldGenDef, RuntimeLayers, bCopiedFromDataTable)
+		&& RuntimeLayers.Num() >= 2)
+	{
+		const int32 LastLayerIndex = RuntimeLayers.Num() - 1;
+		const int32 LastFlatChunkSize = CalculateLayerFlatAxisChunkSize(WorldGenDef, RuntimeLayers[LastLayerIndex], FlatAxis);
+		if (LastFlatChunkSize > 0)
+		{
+			for (int32 LayerIndex = 0; LayerIndex < LastLayerIndex; ++LayerIndex)
+			{
+				FChunkDataParams& LayerParams = RuntimeLayers[LayerIndex];
+				const int32 CurrentFlatChunkSize = CalculateLayerFlatAxisChunkSize(WorldGenDef, LayerParams, FlatAxis);
+				if (CurrentFlatChunkSize == LastFlatChunkSize)
+				{
+					continue;
+				}
+
+				const double BaseBlockSize = static_cast<double>(FMath::Max(1, WorldGenDef->BaseBlockSize));
+				const double BlockSize = FMath::Max(1.0, LayerParams.BlockSizeMulti * BaseBlockSize);
+				const double ChunkBlockCount = static_cast<double>(FMath::Max(1, GetIntVectorAxis(WorldGenDef->ChunkBlockSize, FlatAxis)));
+				const double DesiredChunkSizeMulti = static_cast<double>(LastFlatChunkSize) / (ChunkBlockCount * BlockSize);
+				const double PreviousChunkSizeMulti = GetVectorAxis(LayerParams.ChunkSizeMulti, FlatAxis);
+				GetMutableVectorAxis(LayerParams.ChunkSizeMulti, FlatAxis) = DesiredChunkSizeMulti;
+				bChangedLayer = true;
+
+				UE_LOG(
+					LogChunkWorldExtended,
+					Verbose,
+					TEXT("Chunk world '%s' normalized 2D flat-axis layer span before generation: Layer=%d Axis=%d ChunkSize=%d -> %d ChunkSizeMulti=%.6f -> %.6f Source=%s WorldGenDef=%s."),
+					*GetNameSafe(this),
+					LayerIndex,
+					FlatAxis,
+					CurrentFlatChunkSize,
+					LastFlatChunkSize,
+					PreviousChunkSizeMulti,
+					DesiredChunkSizeMulti,
+					bCopiedFromDataTable ? TEXT("WorldChunksDT") : TEXT("InlineWorldChunks"),
+					*GetNameSafe(WorldGenDef));
+			}
+		}
+	}
+
+	int32 FirstBiomeRowIndex = INDEX_NONE;
+	const bool bUsesBiomeStrategy = FindFirstBiomeGenAEditor(WorldGenDef, FirstBiomeRowIndex) != nullptr;
+	const bool bNeedsExplicitZeroWorldGen = bUsesBiomeStrategy
+		&& WorldGenDef->WorldGen.IsEmpty()
+		&& WorldGenDef->WorldGenBP == nullptr
+		&& WorldGenDef->WorldGenRun == nullptr;
+	if (!bChangedLayer && !bNeedsExplicitZeroWorldGen)
+	{
+		return false;
+	}
+
+	// Use a runtime copy so extension fixes do not mutate authored Porism assets.
+	if (UWorldGenDef* RuntimeWorldGenDef = DuplicateObject<UWorldGenDef>(WorldGenDef, this))
+	{
+		if (bChangedLayer)
+		{
+			RuntimeWorldGenDef->WorldChunks = MoveTemp(RuntimeLayers);
+			RuntimeWorldGenDef->WorldChunksDT = nullptr;
+		}
+		if (bNeedsExplicitZeroWorldGen)
+		{
+			RuntimeWorldGenDef->WorldGenRun = NewObject<UFastNoiseEditor>(
+				RuntimeWorldGenDef,
+				UFastNoiseEditor::StaticClass(),
+				NAME_None,
+				RF_Transient | RF_TextExportTransient | RF_DuplicateTransient);
+			UE_LOG(
+				LogChunkWorldExtended,
+				Verbose,
+				TEXT("Chunk world '%s' installed explicit zero WorldGen on runtime copy because authored WorldGen was empty. This avoids Porism's constant-positive fallback from shifting biome density surfaces downward. WorldGenDef=%s."),
+				*GetNameSafe(this),
+				*GetNameSafe(RuntimeWorldGenDef));
+		}
+		WorldGenDef = RuntimeWorldGenDef;
+		return true;
+	}
+
+	return false;
+}
+
+void AChunkWorldExtended::ProcessEvent(UFunction* Function, void* Parms)
+{
+	static const FName CreateEvent = GET_FUNCTION_NAME_CHECKED(AChunkWorldBase, OnChunkCreate);
+	static const FName UpdateEvent = GET_FUNCTION_NAME_CHECKED(AChunkWorldBase, OnChunkUpdate);
+	static const FName DeleteEvent = GET_FUNCTION_NAME_CHECKED(AChunkWorldBase, OnChunkDelete);
+	const FName EventName = Function != nullptr ? Function->GetFName() : NAME_None;
+	if (Parms != nullptr && LayoutRuntimeComponent != nullptr
+		&& (EventName == CreateEvent || EventName == UpdateEvent || EventName == DeleteEvent))
+	{
+		const FStructProperty* Position = FindFProperty<FStructProperty>(Function, TEXT("chunkBlockWorldPos"));
+		const FIntProperty* Detail = FindFProperty<FIntProperty>(Function, TEXT("detailLevel"));
+		if (Position != nullptr && Detail != nullptr)
+		{
+			const FIntVector Origin = *Position->ContainerPtrToValuePtr<FIntVector>(Parms);
+			const int32 Level = Detail->GetPropertyValue_InContainer(Parms);
+			if (EventName == DeleteEvent)
+			{
+				LayoutRuntimeComponent->QueueObservedUnloadedChunk(Origin, Level);
+			}
+			else
+			{
+				HandleObservedChunkLifecycle(Origin, Level, EventName == CreateEvent
+					? EChunkWorldChunkLifecycleEventType::Created : EChunkWorldChunkLifecycleEventType::Updated);
+			}
+		}
+	}
+	Super::ProcessEvent(Function, Parms);
+}
+
+void AChunkWorldExtended::StopGen()
+{
+	Super::StopGen();
+	if (LayoutRuntimeComponent != nullptr)
+	{
+		LayoutRuntimeComponent->ResetResolvedLayoutRecords(true);
+	}
 }
 
 void AChunkWorldExtended::StartGen()
 {
 	SyncBlockTypeSchemaRegistry();
 	ResetWorldReadyStateTracking();
+	if (!bStartingForCachedLayoutApply && LayoutRuntimeComponent != nullptr)
+	{
+		LayoutRuntimeComponent->ResetResolvedLayoutRecords(true);
+	}
 	Super::StartGen();
 
 	if (BlockTypeSchemaComponent != nullptr)
@@ -104,6 +450,70 @@ void AChunkWorldExtended::StartGen()
 				*GetNameSafe(WorldGenDef));
 		}
 	}
+}
+
+bool AChunkWorldExtended::RestartGenerationPreservingLayoutRecords()
+{
+	check(!IsRunning());
+	TGuardValue<bool> PreserveCachedApply(bStartingForCachedLayoutApply, true);
+	if (LayoutRuntimeComponent != nullptr)
+	{
+		// Restarted generation must rebuild its loaded-chunk picture from fresh
+		// lifecycle events instead of trusting the previous run's observations.
+		LayoutRuntimeComponent->ResetObservedChunkLoadStateForGenerationRestart();
+	}
+	if (bForceNextRestartGenerationFailureForTesting)
+	{
+		bForceNextRestartGenerationFailureForTesting = false;
+		return false;
+	}
+	StartGen();
+	return IsRunning();
+}
+
+void AChunkWorldExtended::SetForceNextRestartGenerationFailureForTesting(const bool bInForceFailure)
+{
+	bForceNextRestartGenerationFailureForTesting = bInForceFailure;
+}
+
+bool AChunkWorldExtended::TryGetEditorViewportCameraLocation(FVector& OutCameraLocation) const
+{
+#if WITH_EDITOR
+	const UWorld* const OwningWorld = GetWorld();
+	const auto IsEligibleViewport = [OwningWorld](const FLevelEditorViewportClient* Client)
+	{
+		return OwningWorld != nullptr && Client != nullptr && Client->IsPerspective()
+			&& Client->GetWorld() == OwningWorld;
+	};
+	FLevelEditorViewportClient* EditorViewportClient = GCurrentLevelEditingViewportClient;
+	if (!IsEligibleViewport(EditorViewportClient))
+	{
+		EditorViewportClient = nullptr;
+	}
+	if (EditorViewportClient == nullptr && GEditor != nullptr)
+	{
+		for (FLevelEditorViewportClient* CandidateClient : GEditor->GetLevelViewportClients())
+		{
+			if (IsEligibleViewport(CandidateClient))
+			{
+				EditorViewportClient = CandidateClient;
+				break;
+			}
+		}
+	}
+
+	if (EditorViewportClient == nullptr)
+	{
+		OutCameraLocation = FVector::ZeroVector;
+		return false;
+	}
+
+	OutCameraLocation = EditorViewportClient->GetViewTransform().GetLocation();
+	return true;
+#else
+	OutCameraLocation = FVector::ZeroVector;
+	return false;
+#endif
 }
 
 void AChunkWorldExtended::Tick(float DeltaTime)
@@ -263,6 +673,11 @@ UChunkWorldBlockSwapComponent* AChunkWorldExtended::GetBlockSwapComponent() cons
 	return BlockSwapComponent;
 }
 
+UChunkWorldLayoutRuntimeComponent* AChunkWorldExtended::GetLayoutRuntimeComponent() const
+{
+	return LayoutRuntimeComponent;
+}
+
 AChunkWorldBlockSwapReplicationProxy* AChunkWorldExtended::GetBlockSwapReplicationProxy() const
 {
 	return BlockSwapReplicationProxy;
@@ -284,6 +699,22 @@ bool AChunkWorldExtended::WasChunkWorldWalkerIncludedInStartupReady(const UObjec
 	return WorldLoader != nullptr && StartupReadyWalkerKeys.Contains(FObjectKey(WorldLoader));
 }
 
+TArray<FInstanceMeshInfos> AChunkWorldExtended::OnChunkCreateEdit_Implementation(
+	FIntVector chunkBlockWorldPos,
+	int detailLevel,
+	TArray<FInstanceMeshInfos>& newMeshInstances)
+{
+	return Super::OnChunkCreateEdit_Implementation(chunkBlockWorldPos, detailLevel, newMeshInstances);
+}
+
+TArray<FInstanceMeshInfos> AChunkWorldExtended::OnChunkUpdateEdit_Implementation(
+	FIntVector chunkBlockWorldPos,
+	int detailLevel,
+	TArray<FInstanceMeshInfos>& newMeshInstances)
+{
+	return Super::OnChunkUpdateEdit_Implementation(chunkBlockWorldPos, detailLevel, newMeshInstances);
+}
+
 void AChunkWorldExtended::PostLoad()
 {
 	Super::PostLoad();
@@ -291,9 +722,63 @@ void AChunkWorldExtended::PostLoad()
 }
 
 #if WITH_EDITOR
+void AChunkWorldExtended::PreEditChange(FProperty* PropertyThatWillChange)
+{
+	const FName PropertyName = PropertyThatWillChange != nullptr ? PropertyThatWillChange->GetFName() : NAME_None;
+	if (PropertyName == GET_MEMBER_NAME_CHECKED(AChunkWorldExtended, ShowDebugData)
+		|| PropertyName == GET_MEMBER_NAME_CHECKED(AChunkWorldExtended, bDetailedDiagnostics))
+	{
+		// AActor pre-edit unregisters every component. These non-reconstructing edits
+		// must preserve registration, including native terrain tick and layout HUD delegates.
+		UObject::PreEditChange(PropertyThatWillChange);
+		return;
+	}
+	Super::PreEditChange(PropertyThatWillChange);
+}
+
 void AChunkWorldExtended::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
-	Super::PostEditChangeProperty(PropertyChangedEvent);
+	const FProperty* const Property = PropertyChangedEvent.Property;
+	const UClass* const PropertyOwner = Property != nullptr ? Property->GetOwnerClass() : nullptr;
+	const UClass* const MemberOwner = PropertyChangedEvent.MemberProperty != nullptr
+		? PropertyChangedEvent.MemberProperty->GetOwnerClass() : nullptr;
+	const bool bLayoutComponentEdit = (PropertyOwner != nullptr
+		&& PropertyOwner->IsChildOf(UChunkWorldLayoutRuntimeComponent::StaticClass()))
+		|| (MemberOwner != nullptr && MemberOwner->IsChildOf(UChunkWorldLayoutRuntimeComponent::StaticClass()))
+		|| (PropertyChangedEvent.MemberProperty != nullptr
+			&& PropertyChangedEvent.MemberProperty != Property
+			&& PropertyChangedEvent.MemberProperty->GetFName()
+				== GET_MEMBER_NAME_CHECKED(AChunkWorldExtended, LayoutRuntimeComponent));
+	// The native superclass handler only restarts terrain; it does not call AActor editor
+	// bookkeeping. Component layout edits are consumed by the component, not terrain generation.
+	const FName PropertyName = Property != nullptr ? Property->GetFName() : NAME_None;
+	const bool bStatsEdit = PropertyName == GET_MEMBER_NAME_CHECKED(AChunkWorldExtended, ShowDebugData)
+		|| PropertyName == GET_MEMBER_NAME_CHECKED(AChunkWorldExtended, bDetailedDiagnostics);
+	if (bStatsEdit && LayoutRuntimeComponent != nullptr)
+	{
+		// Retain native ShowDebugData as the single serialized HUD switch.
+		LayoutRuntimeComponent->SetDebugGenerationStats(ShowDebugData);
+	}
+	if (bStatsEdit)
+	{
+		// Preserve property-change broadcasts without actor construction or terrain restart.
+		UObject::PostEditChangeProperty(PropertyChangedEvent);
+	}
+	else
+	{
+		if (!bLayoutComponentEdit)
+		{
+			Super::PostEditChangeProperty(PropertyChangedEvent);
+		}
+		// Native post-edit restarts generation but never pairs AActor's pre-edit
+		// unregistration. Restore ticks/HUD without rerunning construction scripts:
+		// reconstruction discards the native generator's runtime WorldGenDef instance.
+		if (!IsTemplate())
+		{
+			RegisterAllComponents();
+		}
+		UObject::PostEditChangeProperty(PropertyChangedEvent);
+	}
 	SyncBlockTypeSchemaRegistry();
 }
 #endif
@@ -303,23 +788,6 @@ void AChunkWorldExtended::SyncBlockTypeSchemaRegistry()
 	if (BlockTypeSchemaComponent == nullptr)
 	{
 		return;
-	}
-
-	// Project-side migration note: older chunk world Blueprints may still have the schema registry serialized on the
-	// component from before the actor-level property became the single source of truth. Adopt that value so runtime
-	// block lookup continues to work until those assets are resaved.
-	if (BlockTypeSchemaRegistry == nullptr)
-	{
-		if (UBlockTypeSchemaRegistry* LegacyComponentRegistry = BlockTypeSchemaComponent->GetBlockTypeSchemaRegistry())
-		{
-			BlockTypeSchemaRegistry = LegacyComponentRegistry;
-			UE_LOG(
-				LogChunkWorldExtended,
-				Warning,
-				TEXT("Chunk world '%s' adopted legacy schema registry '%s' from its BlockTypeSchemaComponent. Resave the asset so the actor-level registry becomes authoritative."),
-				*GetNameSafe(this),
-				*GetNameSafe(BlockTypeSchemaRegistry));
-		}
 	}
 
 	BlockTypeSchemaComponent->SetBlockTypeSchemaRegistry(BlockTypeSchemaRegistry);
@@ -351,6 +819,33 @@ bool AChunkWorldExtended::IsWalkerReadyForWorld(const FChunkWorldWalkerInfo& Inf
 
 	const int32 FinestDetailLevel = static_cast<int32>(WorldChunks.size()) - 1;
 	return Info.DetailLevel >= FinestDetailLevel;
+}
+
+void AChunkWorldExtended::HandleObservedChunkLifecycle(
+	const FIntVector& ChunkBlockWorldPos,
+	const int32 DetailLevel,
+	const EChunkWorldChunkLifecycleEventType EventType)
+{
+	FChunkWorldObservedChunkLifecycleEvent Event;
+	Event.ChunkBlockWorldPos = ChunkBlockWorldPos;
+	Event.DetailLevel = DetailLevel;
+	Event.EventType = EventType;
+	Event.bServerAuthority = HasAuthority();
+	const int32 FinestDetailLevel = GetChunkLayerCount() - 1;
+	Event.bFinestDetail = FinestDetailLevel >= 0 && DetailLevel >= FinestDetailLevel;
+	Event.bGeneratedForFirstTime = Event.bServerAuthority
+		&& Event.bFinestDetail
+		&& EventType == EChunkWorldChunkLifecycleEventType::Created;
+
+	if (LayoutRuntimeComponent != nullptr)
+	{
+		LayoutRuntimeComponent->QueueObservedChunkLifecycle(Event);
+	}
+
+	if (Event.bServerAuthority)
+	{
+		OnServerObservedChunkLifecycle.Broadcast(this, Event);
+	}
 }
 
 void AChunkWorldExtended::RefreshWorldReadyState()
@@ -513,7 +1008,7 @@ void AChunkWorldExtended::WriteCustomDataAndUpdate(const TArray<SCustomDataChang
 				int32 CurrentHealth = 0;
 				if (TryGetObservedRuntimeHealth(ObservedBlockChange.Key, CurrentHealth) && CurrentHealth != *PreviousHealth)
 				{
-					// Project-specific change: preserve both damage and healing deltas from the settled client-only
+					// Preserve both damage and healing deltas from the settled client-only
 					// replication callback so UI/prediction listeners can react to health restoration as well.
 					QueueObservedReplicatedHealthTransition(ObservedBlockChange.Key, *PreviousHealth, CurrentHealth);
 				}
@@ -562,6 +1057,14 @@ void AChunkWorldExtended::WriteBlockValuesAndUpdate(const TArray<SBlockChangeCal
 	}
 
 	Super::WriteBlockValuesAndUpdate(NetBlockChangeCalls, bRefreshChunks);
+
+	if (BlockSwapComponent != nullptr)
+	{
+		// Layout/runtime template stamps can change represented block presentation
+		// without emitting any mesh writes, so keep active swap visibility aligned
+		// after pure block-material updates as well.
+		BlockSwapComponent->QueueActiveSwapPresentationRefresh();
+	}
 
 	if (HasAuthority())
 	{
@@ -907,7 +1410,7 @@ bool AChunkWorldExtended::SpawnResolvedDestructionActor(
 	}
 
 	const bool bShouldReplicateActor = PresentationNetMode == EBlockDestructionPresentationNetMode::ReplicatedActor;
-	// Project-specific change: destruction presentation delivery is authored per block definition, so force the spawn
+	// Destruction presentation delivery is authored per block definition, so force the spawn
 	// instance to match that policy instead of inheriting whichever replication default the actor class currently has.
 	DestructionActor->SetReplicates(bShouldReplicateActor);
 	if (!bShouldReplicateActor)
@@ -1014,7 +1517,6 @@ void AChunkWorldExtended::FlushDeferredBlockCustomDataChanges()
 			OnSettledBlockTransition.Broadcast(this, Transition);
 		}
 
-		NotifyBlockCustomDataChanged(PendingChange.Key, PendingChange.Value.bTouchedHealth, TEXT("DeferredBlockUpdate"));
 	}
 }
 
@@ -1053,14 +1555,6 @@ bool AChunkWorldExtended::BuildSettledBlockTransition(
 	}
 
 	return true;
-}
-
-void AChunkWorldExtended::NotifyBlockCustomDataChanged(
-	const FIntVector& BlockWorldPos,
-	const bool bTouchedHealth,
-	const TCHAR* /*SourceLabel*/)
-{
-	OnBlockCustomDataChanged.Broadcast(this, BlockWorldPos, bTouchedHealth);
 }
 
 bool AChunkWorldExtended::IsRepresentedBlockAt(const FIntVector& BlockWorldPos) const

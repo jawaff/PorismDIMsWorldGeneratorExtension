@@ -7,7 +7,7 @@
 #include "ChunkWorld/Blueprint/ChunkWorldBlockHitBlueprintLibrary.h"
 #include "ChunkWorld/Components/BlockTypeSchemaComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "Layout/LayoutWorldTestUtilities.h"
+#include "Layout/Support/LayoutWorldTestUtilities.h"
 #include "Misc/AutomationTest.h"
 #include "NativeGameplayTags.h"
 #include "StructUtils/InstancedStruct.h"
@@ -36,7 +36,7 @@ namespace
 	}
 }
 
-UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_PorismExtension_TestBlock, "DropType");
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_PorismExtension_TestBlock);
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FPorismExtensionBlockHitBlueprintLibraryInvalidInputTest,

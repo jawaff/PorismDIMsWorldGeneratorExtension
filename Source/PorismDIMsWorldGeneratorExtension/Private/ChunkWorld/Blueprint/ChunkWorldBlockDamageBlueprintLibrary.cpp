@@ -239,7 +239,7 @@ bool UChunkWorldBlockDamageBlueprintLibrary::TryApplyBlockHealthDeltaForResolved
 		return false;
 	}
 
-	// Project-specific change: treat uninitialized health custom data as authored full health and fold the first
+	// Treat uninitialized health custom data as authored full health and fold the first
 	// health mutation into one schema write so initialization does not commit separately from the real change.
 	const bool bHasInitializedCustomData = ResolvedHit.BlockTypeSchemaComponent != nullptr
 		&& ResolvedHit.BlockTypeSchemaComponent->IsBlockCustomDataInitialized(ResolvedHit.BlockWorldPos);

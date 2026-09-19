@@ -62,7 +62,6 @@ void FLayoutTestWorldSupport::InitializeTransientChunkWorld(
 	{
 		SchemaComponent->SetBlockTypeSchemaRegistry(SchemaRegistry);
 	}
-
 	FChunkDataParams ChunkParams;
 	ChunkParams.ChunkType = EChunkTypes::ChunkCubic;
 	ChunkParams.BlockSizeMulti = 1.0;
