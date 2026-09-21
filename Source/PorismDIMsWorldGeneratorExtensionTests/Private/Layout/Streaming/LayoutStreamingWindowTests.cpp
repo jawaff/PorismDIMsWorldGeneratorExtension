@@ -160,6 +160,21 @@ bool FLayoutStreamingWindowObservedChunkCoverageTest::RunTest(const FString& Par
 	Layers[0].Chunks.Add(FIntVector::ZeroValue, FLayoutLoadedChunkState{true});
 	TestEqual(TEXT("Material lookup prefers the observed finer layer"),
 		FLayoutStreamingWindow::FindLoadedLayerAtPosition(FIntVector(1), Layers), 1);
+	TestEqual(TEXT("Restored fine coverage cannot borrow coarse Created authority"),
+		FLayoutStreamingWindow::FindLoadedLayerAtPosition(FIntVector(1), Layers, true), INDEX_NONE);
+	TestFalse(TEXT("Restored fine coverage at the query origin blocks automatic writes"),
+		FLayoutStreamingWindow::IsBlockBoxCovered(FIntVector(0), FIntVector(31), Layers, true));
+	Layers[1].Chunks.Reset();
+	Layers[1].Chunks.Add(FIntVector(16), FLayoutLoadedChunkState{});
+	TestFalse(TEXT("Interior restored fine chunk blocks a fresh coarse box even when Box.Min is fresh"),
+		FLayoutStreamingWindow::IsBlockBoxCovered(FIntVector(0), FIntVector(31), Layers, true));
+	TestTrue(TEXT("The same interior restored chunk remains readable"),
+		FLayoutStreamingWindow::IsBlockBoxCovered(FIntVector(0), FIntVector(31), Layers));
+	Layers[0].Chunks.FindChecked(FIntVector::ZeroValue).bCreated = false;
+	Layers[1].Chunks.FindChecked(FIntVector(16)).bCreated = true;
+	TestTrue(TEXT("Fine Created authority wins over restored coarse coverage underneath"),
+		FLayoutStreamingWindow::IsBlockBoxCovered(FIntVector(16), FIntVector(31), Layers, true));
+	Layers[0].Chunks.FindChecked(FIntVector::ZeroValue).bCreated = true;
 	Layers[1].Chunks.Reset();
 	TestEqual(TEXT("Fine unload exposes existing coarse coverage"),
 		FLayoutStreamingWindow::FindLoadedLayerAtPosition(FIntVector(1), Layers), 0);

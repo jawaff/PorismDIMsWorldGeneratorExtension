@@ -304,7 +304,7 @@ int32 FLayoutStreamingWindow::FindLoadedLayerAtPosition(
 		const FLayoutLoadedChunkLayer& Layer = Layers[Level];
 		if (Layer.ChunkSizeInBlocks.GetMin() <= 0) continue;
 		const FLayoutLoadedChunkState* Chunk = Layer.Chunks.Find(BlockWorldPosToChunkOrigin(Position, Layer.ChunkSizeInBlocks));
-		if (Chunk && (!bRequireCreated || Chunk->bCreated)) return Level;
+		if (Chunk) return !bRequireCreated || Chunk->bCreated ? Level : INDEX_NONE;
 	}
 	return INDEX_NONE;
 }
@@ -319,6 +319,57 @@ bool FLayoutStreamingWindow::IsBlockBoxCovered(
 	struct FBox { FIntVector Min; FIntVector Max; };
 	TArray<FBox, TInlineAllocator<8>> Remaining;
 	Remaining.Add({Min, Max});
+	if (bRequireCreated)
+	{
+		// Scan current loaded records; add a spatial index only if coverage profiling warrants it.
+		// Consume finest coverage first, including fine chunks strictly inside a coarse box.
+		// Once consumed, coarser restored data cannot override that authority.
+		for (int32 Level = Layers.Num() - 1; Level >= 0; --Level)
+		{
+			const FLayoutLoadedChunkLayer& Layer = Layers[Level];
+			if (Layer.ChunkSizeInBlocks.GetMin() <= 0) continue;
+			for (const auto& Pair : Layer.Chunks)
+			{
+				for (int32 Index = Remaining.Num() - 1; Index >= 0; --Index)
+				{
+					const FBox Box = Remaining[Index];
+					FBox Intersection;
+					bool bIntersects = true;
+					for (int32 Axis = 0; Axis < 3; ++Axis)
+					{
+						Intersection.Min[Axis] = FMath::Max(Box.Min[Axis], Pair.Key[Axis]);
+						Intersection.Max[Axis] = static_cast<int32>(FMath::Min<int64>(Box.Max[Axis],
+							int64(Pair.Key[Axis]) + Layer.ChunkSizeInBlocks[Axis] - 1));
+						bIntersects &= Intersection.Min[Axis] <= Intersection.Max[Axis];
+					}
+					if (!bIntersects) continue;
+					if (!Pair.Value.bCreated) return false;
+					Remaining.RemoveAtSwap(Index, 1, EAllowShrinking::No);
+					// Six disjoint residual slabs; strict inequalities keep +/-1 in range.
+					FBox Residual = Box;
+					for (int32 Axis = 0; Axis < 3; ++Axis)
+					{
+						if (Residual.Min[Axis] < Intersection.Min[Axis])
+						{
+							FBox Slab = Residual;
+							Slab.Max[Axis] = Intersection.Min[Axis] - 1;
+							Remaining.Add(Slab);
+						}
+						if (Residual.Max[Axis] > Intersection.Max[Axis])
+						{
+							FBox Slab = Residual;
+							Slab.Min[Axis] = Intersection.Max[Axis] + 1;
+							Remaining.Add(Slab);
+						}
+						Residual.Min[Axis] = Intersection.Min[Axis];
+						Residual.Max[Axis] = Intersection.Max[Axis];
+					}
+				}
+				if (Remaining.IsEmpty()) return true;
+			}
+		}
+		return false;
+	}
 	while (!Remaining.IsEmpty())
 	{
 		const FBox Box = Remaining.Pop(EAllowShrinking::No);

@@ -29,6 +29,21 @@ struct FLayoutLoadedChunkLayer
 	TMap<FIntVector, FLayoutLoadedChunkState> Chunks;
 };
 
+/** Ephemeral creation authority. Discovery completion preserves it; native unload/recreation invalidates it. */
+struct FLayoutCreatedChunkIdentity
+{
+	int32 DetailLevel = INDEX_NONE;
+	FIntVector Origin = FIntVector::ZeroValue;
+	uint64 Lifetime = 0;
+
+	bool IsCurrent(const TConstArrayView<FLayoutLoadedChunkLayer> Layers) const
+	{
+		if (Lifetime == 0 || !Layers.IsValidIndex(DetailLevel)) return false;
+		const FLayoutLoadedChunkState* Chunk = Layers[DetailLevel].Chunks.Find(Origin);
+		return Chunk && Chunk->bCreated && Chunk->Lifetime == Lifetime;
+	}
+};
+
 /**
  * Streaming-window helpers for deterministic chunk-origin coverage checks.
  * These helpers keep the realization gating math testable without requiring a
@@ -84,13 +99,15 @@ public:
 		const FIntVector& RootAnchorBlockWorldPos,
 		const FIntVector& SharedCellSizeInBlocks);
 
-	/** Returns the finest observed layer covering a base-block position, or INDEX_NONE. No world/data reads. */
+	/** Returns the finest observed layer covering a base-block position, or INDEX_NONE.
+	 * Created authority is tested on that layer only; restored fine data never falls through to fresh coarse data. */
 	static int32 FindLoadedLayerAtPosition(
 		const FIntVector& Position,
 		TConstArrayView<FLayoutLoadedChunkLayer> Layers,
 		bool bRequireCreated = false);
 
-	/** Tests the complete inclusive box against the loaded LOD union, without expanding coarse chunks into fine tiles. */
+	/** Tests the complete inclusive box against the loaded LOD union, without expanding coarse chunks into fine tiles.
+	 * Required Created authority follows finest-available precedence over every covered sub-box. */
 	static bool IsBlockBoxCovered(
 		const FIntVector& Min,
 		const FIntVector& Max,

@@ -72,6 +72,8 @@ struct PORISMDIMSWORLDGENERATOREXTENSION_API FLayoutContinuationRouteReservation
 	FString EdgeKey;
 	/** Automatic ownership counts once across preparation, segments and canceled captures. */
 	bool bAutomatic = false;
+	/** Endpoint's Created lifetime survives discovery completion, but not native unload/recreation. */
+	FLayoutCreatedChunkIdentity CreationOrigin;
 	bool bReleased = false;
 	TSet<uint64> SegmentKeys;
 	TSet<uint64> CommittedSegmentKeys;
@@ -359,13 +361,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Layout")
 	void ProcessQueuedLayoutWorkNow();
 
-	/** Queues one loaded chunk observation from any thread so discovery and realization can run on the game thread. */
+	/** Queues loaded coverage from any thread using a zero-based native layer index; grants no Created authority. */
 	void QueueObservedLoadedChunk(const FIntVector& ChunkBlockWorldPos, int32 DetailLevel);
 
-	/** Queues one chunk lifecycle observation from any thread so generation-sensitive work runs on the game thread. */
+	/** Queues lifecycle intent from any thread; Event.DetailLevel must already be a zero-based native layer index. */
 	void QueueObservedChunkLifecycle(const FChunkWorldObservedChunkLifecycleEvent& Event);
 
-	/** Thread-safe native unload handoff; invalidates readiness without erasing root stamp protection. */
+	/** Thread-safe unload handoff using a zero-based native layer index; preserves root stamp protection. */
 	void QueueObservedUnloadedChunk(const FIntVector& ChunkBlockWorldPos, int32 DetailLevel);
 
 	/** Returns true when one cached site should still be considered for realization work. */
@@ -914,6 +916,8 @@ private:
 	TOptional<FIntPoint> ActivePlanningArea;
 	bool bPlanningAreaDeferred = false;
 	int32 PlanningAreaAdmissions = 0;
+	/** Previous retained owner count wakes parked capacity waits only when capacity changes. */
+	int32 LastAutomaticWorkCount = 0;
 	uint64 EvictedAutomaticWork = 0;
 
 	/** One game-thread snapshot shared by discovery, priority, and retention during a runtime work pass. */
@@ -921,6 +925,17 @@ private:
 
 	/** Automatic root owners, retained through solved-waiting state and canceled-worker retirement. */
 	TMap<FString, FLayoutBackgroundSolveHandle> PendingPlanningWindowSolveHandlesByRecordKey;
+
+	/** Creation authority retained with automatic owners through solved-waiting and canceled capture retirement. */
+	TMap<FString, FLayoutCreatedChunkIdentity> AutomaticRootCreationOrigins;
+	TMap<uint64, FLayoutCreatedChunkIdentity> AutomaticPreparationCreationOrigins;
+
+	/** Captures finest-available Created authority without inventing eligibility from loaded coverage. */
+	FLayoutCreatedChunkIdentity CaptureCreatedChunkIdentity(const FIntVector Position) const;
+	/** Automatic-only root fence; explicit preview/apply does not consult this ownership. */
+	bool IsAutomaticRootOriginCurrent(const FString& RecordKey) const;
+	/** Checks the prepared writable cells before automatic segment solving, distinct from support reads. */
+	bool IsPreparedContinuationCreatedEligible(const FLayoutPreparedContinuation& Prepared) const;
 
 	/** Planned site centers for queued planning-window root proof jobs keyed by planned-site record key. */
 	TMap<FString, FIntVector> PendingPlanningWindowSolveCentersByRecordKey;

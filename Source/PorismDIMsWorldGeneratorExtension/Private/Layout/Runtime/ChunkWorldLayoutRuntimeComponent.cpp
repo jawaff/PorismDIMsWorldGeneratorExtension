@@ -3906,7 +3906,7 @@ void UChunkWorldLayoutRuntimeComponent::FinishPlanningAreaAttempt(const FString&
 	if ((bFailed || bCanceled) && RootSpacingReservations.Remove(RecordKey) > 0)
 		PlanningAreaQueue->NotifyReservationReleased(RecordKey);
 	FIntPoint Area;
-	if (PlanningAreasByRecordKey.RemoveAndCopyValue(RecordKey, Area)) PlanningAreaQueue->FinishAttempt(Area, RecordKey, bFailed, bCanceled);
+	if (PlanningAreasByRecordKey.RemoveAndCopyValue(RecordKey, Area)) PlanningAreaQueue->FinishAttempt(Area, RecordKey, bFailed);
 }
 
 void UChunkWorldLayoutRuntimeComponent::CancelPlanningAreaDiscovery()
@@ -3927,6 +3927,8 @@ void UChunkWorldLayoutRuntimeComponent::SubmitPlanningAreaDiscovery(
 	const double CaptureStart = bTimeCapture ? FPlatformTime::Seconds() : 0.0;
 	ON_SCOPE_EXIT { if (bTimeCapture) DiscoveryCaptureTiming.Record((FPlatformTime::Seconds() - CaptureStart) * 1000.0); };
 	const uint64 ScanId = PlanningAreaQueue->GetScanId(Area);
+	FIntVector OwnerMin, OwnerMax;
+	if (!PlanningAreaQueue->GetScanBounds(Area, OwnerMin, OwnerMax)) return;
 	AChunkWorldExtended* const ChunkWorld = GetOwningChunkWorld();
 	if (ChunkWorld == nullptr || ChunkWorld->WorldGenDef == nullptr)
 	{
@@ -3954,7 +3956,8 @@ void UChunkWorldLayoutRuntimeComponent::SubmitPlanningAreaDiscovery(
 					if (Pair.Value.ExcludesCenterRegion(BindingId, Min, Max, Candidate.LayoutProfile->MaximumFootprintInCells,
 						Binding->BaseCellDimensionsBlocks, Binding->MinimumRootGapCells))
 					{
-						PlanningAreaQueue->MarkBlockedByReservation(Area, Pair.Key);
+						if (PlanningAreasByRecordKey.Contains(Pair.Key))
+							PlanningAreaQueue->MarkBlockedByReservation(Area, Pair.Key);
 						bExcluded = true;
 						break;
 					}
@@ -4020,7 +4023,7 @@ void UChunkWorldLayoutRuntimeComponent::SubmitPlanningAreaDiscovery(
 	Submission.Tier = ELayoutBackgroundSolveJobTier::NearRoot;
 	Submission.LifecycleStage = ELayoutBackgroundSolveLifecycleStage::Preparation;
 	Submission.Priority = FLayoutPlanningAreaQueue::ComputePriority(Center, PlanningPriorityCenters);
-	Submission.Work = [Prepared, Noise, Min, Max, DiagnosticContext](const FLayoutSolveCancellationToken& Token, FString& OutFailure)
+	Submission.Work = [Prepared, Noise, OwnerMin, OwnerMax, DiagnosticContext](const FLayoutSolveCancellationToken& Token, FString& OutFailure)
 	{
 		LayoutSolveExecution::FDiagnosticScope Diagnostics(DiagnosticContext, TEXT("location-preparation"), &OutFailure);
 		for (auto& Item : *Prepared)
@@ -4032,14 +4035,15 @@ void UChunkWorldLayoutRuntimeComponent::SubmitPlanningAreaDiscovery(
 			// surface/cavity and full-footprint checks still sample across native chunk edges.
 			TArray<FLayoutReservationPocket> Pockets;
 			Pockets.AddDefaulted_GetRef().SampleBlockXYs = LayoutWorldBindingSitePlanner::BuildBoundedNormalCellSiteCenters(
-				Min, Max, Inputs.SharedCellSizeInBlocks);
+				FIntPoint(OwnerMin.X, OwnerMin.Y), FIntPoint(OwnerMax.X, OwnerMax.Y), Inputs.SharedCellSizeInBlocks);
 			Item.Samples = Pockets[0].SampleBlockXYs.Num();
 			Item.Records = LayoutWorldBindingSitePlanner::BuildPendingSiteRecordsFromPockets(
 				Pockets, Inputs, Noise->GetSampler(), &Item.BlockingReservations, &Item.OccupancyRejected);
-			Item.Records.RemoveAll([Min, Max](const FPlannedLayoutSiteRecord& Record)
+			Item.Records.RemoveAll([OwnerMin, OwnerMax](const FPlannedLayoutSiteRecord& Record)
 			{
 				const FIntVector Position = Record.GetPlannedSiteReservationSourceSelection().SiteCenterBlockWorldPos;
-				return Position.X < Min.X || Position.X > Max.X || Position.Y < Min.Y || Position.Y > Max.Y;
+				return Position.X < OwnerMin.X || Position.X > OwnerMax.X || Position.Y < OwnerMin.Y || Position.Y > OwnerMax.Y
+					|| Position.Z < OwnerMin.Z || Position.Z > OwnerMax.Z;
 			});
 		}
 		const bool bSucceeded = !Token.IsCancellationRequested();
@@ -4098,8 +4102,8 @@ void UChunkWorldLayoutRuntimeComponent::SubmitPlanningAreaDiscovery(
 					Item.Samples, Item.Records.Num(), Item.OccupancyRejected, Item.BlockingReservations.Num());
 			for (const FString& Key : Item.BlockingReservations)
 			{
-				if (Runtime->RootSpacingReservations.Contains(Key)) Runtime->PlanningAreaQueue->MarkBlockedByReservation(Area, Key);
-				else Runtime->bPlanningAreaDeferred = true; // Worker rejected against an exclusion already released.
+				if (Runtime->PlanningAreasByRecordKey.Contains(Key)) Runtime->PlanningAreaQueue->MarkBlockedByReservation(Area, Key);
+				else if (!Runtime->RootSpacingReservations.Contains(Key)) Runtime->PlanningAreaQueue->RequestRetry(Area);
 			}
 			Runtime->AdmitPlanningSitesFromWorldBinding(Binding, Item.Inputs, Item.Records, Noise);
 		}
@@ -4144,6 +4148,21 @@ bool UChunkWorldLayoutRuntimeComponent::IsAutomaticPlanningPositionEligible(cons
 	const FIntVector Origin = FLayoutStreamingWindow::BlockWorldPosToChunkOrigin(Position, ObservedCoverageTileSize);
 	const auto* Mark = StampedChunkOrigins.Find(Origin);
 	return !Mark || !Mark->bLoadedFromSave;
+}
+
+FLayoutCreatedChunkIdentity UChunkWorldLayoutRuntimeComponent::CaptureCreatedChunkIdentity(const FIntVector Position) const
+{
+	const int32 Level = FLayoutStreamingWindow::FindLoadedLayerAtPosition(Position, ObservedChunkLayers, true);
+	if (Level == INDEX_NONE) return {};
+	const auto& Layer = ObservedChunkLayers[Level];
+	const FIntVector Origin = FLayoutStreamingWindow::BlockWorldPosToChunkOrigin(Position, Layer.ChunkSizeInBlocks);
+	return {Level, Origin, Layer.Chunks.FindChecked(Origin).Lifetime};
+}
+
+bool UChunkWorldLayoutRuntimeComponent::IsAutomaticRootOriginCurrent(const FString& RecordKey) const
+{
+	const auto* Origin = AutomaticRootCreationOrigins.Find(RecordKey);
+	return Origin && Origin->IsCurrent(ObservedChunkLayers);
 }
 
 int32 UChunkWorldLayoutRuntimeComponent::CountAutomaticPlanningWork() const
@@ -4288,6 +4307,9 @@ void UChunkWorldLayoutRuntimeComponent::UpdateLoadedChunkPlanning()
 	AChunkWorldExtended* const ChunkWorld = GetOwningChunkWorld();
 	UWorld* const World = GetWorld();
 	const TArray<FIntVector> Centers = CollectPlanningWindowCenters();
+	const int32 AutomaticWorkCount = CountAutomaticPlanningWork();
+	if (AutomaticWorkCount < LastAutomaticWorkCount) PlanningAreaQueue->NotifyCapacityAvailable();
+	LastAutomaticWorkCount = AutomaticWorkCount;
 	const bool bActive = bEnablePlanningWindowRuntimeUpdates && !LayoutWorldBindings.IsEmpty()
 		&& ChunkWorld && ChunkWorld->WorldGenDef && ChunkWorld->IsRunning() && World && !Centers.IsEmpty();
 	if (!bActive)
@@ -4329,9 +4351,12 @@ void UChunkWorldLayoutRuntimeComponent::UpdateLoadedChunkPlanning()
 		{
 			const auto* Record = PlanningWindowStore ? PlanningWindowStore->FindPlannedLayoutSiteRecord(Pair.Key) : nullptr;
 			if (Record && Record->State != EPlannedLayoutSiteState::Realized
-				&& !IsAutomaticPlanningPositionEligible(Record->SiteCenterBlockWorldPos)) InvalidRoots.Add(Pair.Key);
+				&& (!IsAutomaticRootOriginCurrent(Pair.Key)
+					|| !IsAutomaticPlanningPositionEligible(Record->SiteCenterBlockWorldPos))) InvalidRoots.Add(Pair.Key);
 		}
 		for (const FString& Key : InvalidRoots) RetireAutomaticRoot(Key);
+		// Equal final coverage after Delete/Created still represents a different native lifetime.
+		RetireInvalidAutomaticContinuations();
 		TArray<FIntPoint> Mins, Maxs;
 		CollectLoadedPlanningBounds(Mins, Maxs);
 		PruneContinuationEndpointsOutsideExpandedWindows(Mins, Maxs);
@@ -4388,8 +4413,9 @@ void UChunkWorldLayoutRuntimeComponent::UpdateLoadedChunkPlanning()
 	const bool bSelected = PlanningAreaQueue->TakeNext(Centers, Area);
 	if (bTimeSelection) DiscoverySelectionTiming.Record((FPlatformTime::Seconds() - SelectionStart) * 1000.0);
 	if (!bSelected) return;
-	FIntPoint Min, Max;
-	PlanningAreaQueue->GetBounds(Area, Min, Max);
+	FIntVector OwnerMin, OwnerMax;
+	if (!PlanningAreaQueue->GetScanBounds(Area, OwnerMin, OwnerMax)) return;
+	const FIntPoint Min(OwnerMin.X, OwnerMin.Y), Max(OwnerMax.X, OwnerMax.Y);
 	const FIntVector Center(int32((int64(Min.X) + Max.X) / 2), int32((int64(Min.Y) + Max.Y) / 2),
 		PlanningAreaQueue->GetSelectedCenter().Z);
 	if (!MakeAutomaticPlanningRoom(Center))
@@ -5010,6 +5036,11 @@ int32 UChunkWorldLayoutRuntimeComponent::ImportAcceptedPlannedLayoutSiteRecordsF
 
 		const FLayoutPlannedSiteLifecycleMetadata PlannedLifecycleMetadata =
 			PlannedRecord.GetPlannedSiteLifecycleMetadata();
+		if (!IsAutomaticRootOriginCurrent(PlannedLifecycleMetadata.StableRecordKey))
+		{
+			RetireAutomaticRoot(PlannedLifecycleMetadata.StableRecordKey);
+			continue;
+		}
 		FString RealizationInputFailureReason;
 		if (!LayoutRealizationWritePlan::ValidateAcceptedSolvePayloadForRealizationInputs(
 				AcceptedSolvePayload,
@@ -5167,7 +5198,12 @@ int32 UChunkWorldLayoutRuntimeComponent::AdmitPlanningSitesFromWorldBinding(
 		// Native Created coverage, not character distance, owns automatic eligibility.
 		if (!IsAutomaticPlanningPositionEligible(PendingReservationSourceSelection.SiteCenterBlockWorldPos))
 		{
-			++CoverageWaitingCount;
+			if (ActivePlanningArea.IsSet() && FLayoutStreamingWindow::FindLoadedLayerAtPosition(
+				PendingReservationSourceSelection.SiteCenterBlockWorldPos, ObservedChunkLayers) == INDEX_NONE)
+			{
+				PlanningAreaQueue->MarkCoverageWaiting(ActivePlanningArea.GetValue());
+				++CoverageWaitingCount;
+			}
 			continue;
 		}
 		const FLayoutSiteSolveSourceSelection PendingSolveSourceSelection =
@@ -5261,7 +5297,7 @@ int32 UChunkWorldLayoutRuntimeComponent::AdmitPlanningSitesFromWorldBinding(
 		{
 			if (ActivePlanningArea.IsSet())
 				for (const auto& Pair : RootSpacingReservations)
-					if (Pair.Key != PendingRecordKey && !SpacingBounds.IsSeparatedFrom(Pair.Value,
+					if (Pair.Key != PendingRecordKey && PlanningAreasByRecordKey.Contains(Pair.Key) && !SpacingBounds.IsSeparatedFrom(Pair.Value,
 						WorldBinding->MinimumRootGapCells, WorldBinding->BaseCellDimensionsBlocks))
 						PlanningAreaQueue->MarkBlockedByReservation(ActivePlanningArea.GetValue(), Pair.Key);
 			continue;
@@ -5299,6 +5335,15 @@ int32 UChunkWorldLayoutRuntimeComponent::AdmitPlanningSitesFromWorldBinding(
 			PlanningAreasByRecordKey.Add(PendingRecordKey, ActivePlanningArea.GetValue());
 			++PlanningAreaAdmissions;
 		}
+		const FLayoutCreatedChunkIdentity CreationOrigin = ActivePlanningArea.IsSet()
+			? PlanningAreaQueue->GetScanOrigin(ActivePlanningArea.GetValue())
+			: CaptureCreatedChunkIdentity(PendingReservationSourceSelection.SiteCenterBlockWorldPos);
+		if (!CreationOrigin.IsCurrent(ObservedChunkLayers))
+		{
+			FinishPlanningAreaAttempt(PendingRecordKey, false, true);
+			continue;
+		}
+		AutomaticRootCreationOrigins.Add(PendingRecordKey, CreationOrigin);
 		RootSpacingReservations.Add(PendingRecordKey, SpacingBounds);
 		bool bSubmittedToLifecycle = false;
 		ON_SCOPE_EXIT
@@ -5637,7 +5682,7 @@ int32 UChunkWorldLayoutRuntimeComponent::AdmitPlanningSitesFromWorldBinding(
 			continue;
 		}
 		Preparation.PublishOnGameThread = [WeakThis = TWeakObjectPtr<UChunkWorldLayoutRuntimeComponent>(this),
-			PreparedInputs, PendingRecord, PendingRecordKey, RootDescriptorId, DiagnosticContext,
+			PreparedInputs, PendingRecord, PendingRecordKey, RootDescriptorId, DiagnosticContext, CreationOrigin,
 			Priority = Preparation.Priority](const FLayoutBackgroundSolveCompletion& Completion)
 		{
 			UChunkWorldLayoutRuntimeComponent* const Runtime = WeakThis.Get();
@@ -5648,6 +5693,11 @@ int32 UChunkWorldLayoutRuntimeComponent::AdmitPlanningSitesFromWorldBinding(
 			if (Metadata.State != EPlannedLayoutSiteState::Pending
 				|| Metadata.FrozenSubmissionDescriptorId != RootDescriptorId
 				|| Metadata.FrozenSubmissionState != ELayoutPlannedSiteFrozenSubmissionState::None) return;
+			if (!CreationOrigin.IsCurrent(Runtime->ObservedChunkLayers))
+			{
+				Runtime->RetireAutomaticRoot(PendingRecordKey);
+				return;
+			}
 			if (!Completion.bWorkSucceeded)
 			{
 				Runtime->RejectPlanningRootAndTombstoneFrozenSubmissionDescriptor(PendingRecordKey,
@@ -5819,6 +5869,12 @@ bool UChunkWorldLayoutRuntimeComponent::SubmitPreparedPlanningRoot(
 		MakeShared<FPlanningWindowBackgroundSolveSharedResult, ESPMode::ThreadSafe>();
 	TSharedRef<FLayoutWorkerSolvePacket, ESPMode::ThreadSafe> SharedDescriptorWorkerSolvePacket =
 		MakeShared<FLayoutWorkerSolvePacket, ESPMode::ThreadSafe>(WorkerSolvePacket);
+	const FLayoutCreatedChunkIdentity CreationOrigin = AutomaticRootCreationOrigins.FindRef(StoredPendingRecordKey);
+	if (!CreationOrigin.IsCurrent(ObservedChunkLayers))
+	{
+		RetireAutomaticRoot(StoredPendingRecordKey);
+		return false;
+	}
 	const FPlannedLayoutSiteRecord CapturedPendingRecord = StoredPendingRecord;
 	const FLayoutWorldBindingSiteFrontendSelection CapturedFrontendSelection = PendingFrontendSelection;
 	const FLayoutPlannedSiteReservationSourceSelection CapturedReservationSelection = PendingReservationSourceSelection;
@@ -5842,7 +5898,8 @@ bool UChunkWorldLayoutRuntimeComponent::SubmitPreparedPlanningRoot(
 		CapturedSolveSourceSelection,
 		CapturedRootDescriptorId,
 		CapturedRootRegionGroupId,
-		CapturedSolvedArtifactId](const FLayoutBackgroundSolveCompletion& Completion)
+		CapturedSolvedArtifactId,
+		CreationOrigin](const FLayoutBackgroundSolveCompletion& Completion)
 	{
 		UChunkWorldLayoutRuntimeComponent* const Component = WeakThis.Get();
 		if (Component == nullptr)
@@ -5878,6 +5935,11 @@ bool UChunkWorldLayoutRuntimeComponent::SubmitPreparedPlanningRoot(
 			|| Component->IsFrozenSubmissionDescriptorTombstoned(CapturedRootDescriptorId))
 		{
 			Component->TombstoneFrozenSubmissionDescriptorPayload(CapturedRootDescriptorId);
+			return;
+		}
+		if (!CreationOrigin.IsCurrent(Component->ObservedChunkLayers))
+		{
+			Component->RetireAutomaticRoot(StoredLifecycleMetadata.StableRecordKey);
 			return;
 		}
 		FString DescriptorPublishFailureReason;
@@ -6509,6 +6571,10 @@ void UChunkWorldLayoutRuntimeComponent::PumpBackgroundLayoutSolves()
 		It.RemoveCurrent();
 		LastConnectorEndpointRevision = 0;
 	}
+	for (auto It = AutomaticRootCreationOrigins.CreateIterator(); It; ++It)
+		if (!PendingPlanningWindowSolveHandlesByRecordKey.Contains(It.Key())) It.RemoveCurrent();
+	for (auto It = AutomaticPreparationCreationOrigins.CreateIterator(); It; ++It)
+		if (!PendingAutomaticContinuationPreparations.Contains(It.Key())) It.RemoveCurrent();
 	for (auto It = ContinuationRouteReservations.CreateIterator(); It; ++It)
 	{
 		if (!It.Value().bReleased) continue;
@@ -9519,6 +9585,8 @@ void UChunkWorldLayoutRuntimeComponent::TryRealizeEligibleSites()
 	for (auto It = ResolvedSiteRecords.CreateIterator(); It; ++It)
 	{
 		FResolvedLayoutSiteRecord& SiteRecord = It.Value();
+		if (const FString* Key = PlanningRecordKeysBySiteRecordKey.Find(It.Key());
+			Key && !IsAutomaticRootOriginCurrent(*Key)) continue;
 		if (!ShouldAttemptRealization(SiteRecord))
 		{
 			continue;
@@ -9664,10 +9732,33 @@ void UChunkWorldLayoutRuntimeComponent::RefreshPlacedContinuationRootReadiness()
 	}
 }
 
+bool UChunkWorldLayoutRuntimeComponent::IsPreparedContinuationCreatedEligible(const FLayoutPreparedContinuation& Prepared) const
+{
+	const FIntVector Size = Prepared.ConnectorRecord.GetResolvedConnectorFrontendSelection().SharedCellSizeInBlocks;
+	if (Size.GetMin() <= 0 || Prepared.PlannedCells.IsEmpty()) return false;
+	for (const FLayoutPlannedCell& Cell : Prepared.PlannedCells)
+	{
+		FIntVector Min, Max;
+		for (int32 Axis = 0; Axis < 3; ++Axis)
+		{
+			const int64 Start = int64(Prepared.PathOriginBlockWorldPos[Axis]) - Size[Axis] / 2
+				+ int64(Cell.Cell[Axis]) * Size[Axis];
+			const int64 End = Start + Size[Axis] - 1;
+			if (Start < MIN_int32 || End > MAX_int32) return false;
+			Min[Axis] = int32(Start);
+			Max[Axis] = int32(End);
+		}
+		if (!FLayoutStreamingWindow::IsBlockBoxCovered(Min, Max, ObservedChunkLayers, true)) return false;
+	}
+	return true;
+}
+
 bool UChunkWorldLayoutRuntimeComponent::IsContinuationRouteEligible(const FLayoutId RouteId) const
 {
 	const FLayoutPreparedContinuationRoute* Prepared = RetainedPreparedContinuationRoutesById.Find(RouteId);
-	return Prepared != nullptr
+	const auto* State = ContinuationRouteReservations.Find(RouteId);
+	return Prepared != nullptr && State && !State->bReleased
+		&& (!State->bAutomatic || State->CreationOrigin.IsCurrent(ObservedChunkLayers))
 		&& LoadedContinuationRootKeys.Contains(Prepared->Route.StartRootEndpoint.RootRecordKey)
 		&& LoadedContinuationRootKeys.Contains(Prepared->Route.EndRootEndpoint.RootRecordKey);
 }
@@ -9698,7 +9789,8 @@ void UChunkWorldLayoutRuntimeComponent::RetireInvalidAutomaticContinuations(cons
 	{
 		const auto* Edge = PlanningWindowStore != nullptr
 			? PlanningWindowStore->FindContinuationEdgeRecord(ContinuationEdgeKeysByConnectorKey.FindRef(Pair.Key)) : nullptr;
-		if (bRetireAll || Edge == nullptr || !LoadedContinuationRootKeys.Contains(Edge->StartRootRecordKey)
+		if (bRetireAll || !AutomaticPreparationCreationOrigins.FindRef(Pair.Key).IsCurrent(ObservedChunkLayers)
+			|| Edge == nullptr || !LoadedContinuationRootKeys.Contains(Edge->StartRootRecordKey)
 			|| !LoadedContinuationRootKeys.Contains(Edge->EndRootRecordKey)) CanceledPreparations.Add(Pair.Key);
 	}
 	for (const uint64 Key : CanceledPreparations)
@@ -9725,7 +9817,9 @@ void UChunkWorldLayoutRuntimeComponent::SubmitAutomaticContinuationPreparation(c
 	if (PendingAutomaticContinuationPreparations.Contains(Key)) return;
 	for (const auto& Pair : ContinuationRouteReservations)
 		if (Pair.Value.EdgeKey == EdgeKey) return;
-	if (!MakeAutomaticPlanningRoom(RouteRecord.StartEndpointBlockWorldPos))
+	FLayoutCreatedChunkIdentity CreationOrigin = CaptureCreatedChunkIdentity(RouteRecord.StartEndpointBlockWorldPos);
+	if (!CreationOrigin.IsCurrent(ObservedChunkLayers)) CreationOrigin = CaptureCreatedChunkIdentity(RouteRecord.EndEndpointBlockWorldPos);
+	if (!CreationOrigin.IsCurrent(ObservedChunkLayers) || !MakeAutomaticPlanningRoom(RouteRecord.StartEndpointBlockWorldPos))
 	{
 		ReleaseContinuationReservationForConnector(Key);
 		return;
@@ -9741,6 +9835,7 @@ void UChunkWorldLayoutRuntimeComponent::SubmitAutomaticContinuationPreparation(c
 	FLayoutBackgroundSolveHandle Pending;
 	Pending.LayoutGroupId = GroupId;
 	PendingAutomaticContinuationPreparations.Add(Key, Pending);
+	AutomaticPreparationCreationOrigins.Add(Key, CreationOrigin);
 	bool bSubmitted = false;
 	ON_SCOPE_EXIT { if (!bSubmitted) PendingAutomaticContinuationPreparations.Remove(Key); };
 	const int32 WorldSeed = ResolveLayoutWorldSeed();
@@ -9773,7 +9868,7 @@ void UChunkWorldLayoutRuntimeComponent::SubmitAutomaticContinuationPreparation(c
 		return !Token.IsCancellationRequested() && FLayoutConnectorPlanning::TryPrepareContinuationRoute(
 			RouteRecord, *Inputs, WorldSeed, &Context, *Prepared, Reason) && !Token.IsCancellationRequested();
 	};
-	Submission.PublishOnGameThread = [WeakThis = TWeakObjectPtr<UChunkWorldLayoutRuntimeComponent>(this), Prepared, Key, EdgeKey, GroupId](const FLayoutBackgroundSolveCompletion& Completion)
+	Submission.PublishOnGameThread = [WeakThis = TWeakObjectPtr<UChunkWorldLayoutRuntimeComponent>(this), Prepared, Key, EdgeKey, GroupId, CreationOrigin](const FLayoutBackgroundSolveCompletion& Completion)
 	{
 		auto* Runtime = WeakThis.Get();
 		if (Runtime == nullptr) return;
@@ -9784,7 +9879,8 @@ void UChunkWorldLayoutRuntimeComponent::SubmitAutomaticContinuationPreparation(c
 		const auto* Store = Runtime->PlanningWindowStore.Get();
 		const auto* Edge = Store != nullptr ? Store->FindContinuationEdgeRecord(EdgeKey) : nullptr;
 		const auto* World = Runtime->GetOwningChunkWorld();
-		if (Edge == nullptr || !Runtime->bEnablePlanningWindowRuntimeUpdates || World == nullptr
+		if (!CreationOrigin.IsCurrent(Runtime->ObservedChunkLayers)
+			|| Edge == nullptr || !Runtime->bEnablePlanningWindowRuntimeUpdates || World == nullptr
 			|| !World->HasAuthority() || !World->IsRunning() || Runtime->CollectPlanningWindowCenters().IsEmpty()
 			|| !Runtime->LoadedContinuationRootKeys.Contains(Edge->StartRootRecordKey)
 			|| !Runtime->LoadedContinuationRootKeys.Contains(Edge->EndRootRecordKey))
@@ -9830,6 +9926,7 @@ void UChunkWorldLayoutRuntimeComponent::SubmitAutomaticContinuationPreparation(c
 		const FLayoutId RouteId(*Prepared->Route.RouteKey);
 		Runtime->RegisterContinuationRouteReservation(RouteId, EdgeKey, SegmentKeys);
 		Runtime->ContinuationRouteReservations.FindChecked(RouteId).bAutomatic = true;
+		Runtime->ContinuationRouteReservations.FindChecked(RouteId).CreationOrigin = CreationOrigin;
 		Runtime->ContinuationRouteReservations.FindChecked(RouteId).bAwaitingSubmission = true;
 		Runtime->RetainedPreparedContinuationRoutesById.Add(RouteId, MoveTemp(*Prepared));
 		if (!SegmentKeys.Contains(Key)) Runtime->ContinuationEdgeKeysByConnectorKey.Remove(Key);
@@ -10072,7 +10169,8 @@ void UChunkWorldLayoutRuntimeComponent::RefreshConnectorRecords(const bool bForc
 		for (auto& Segment : Pair.Value.Segments)
 		{
 			const uint64 SegmentKey = BuildResolvedConnectorRecordKey(Segment.ConnectorRecord);
-			if (Segment.PreparedContinuation.IsSet())
+			if (Segment.PreparedContinuation.IsSet() && IsContinuationRouteEligible(Pair.Key)
+				&& IsPreparedContinuationCreatedEligible(Segment.PreparedContinuation.GetValue()))
 			{
 				SegmentedConnectorRecords.Add(Segment.ConnectorRecord);
 				PreparedContinuationsByConnectorKey.Add(SegmentKey, MoveTemp(Segment.PreparedContinuation.GetValue()));
@@ -11459,6 +11557,7 @@ void UChunkWorldLayoutRuntimeComponent::TryRealizeEligibleConnectors()
 			continue;
 		}
 
+		if (!IsContinuationRouteEligible(ConnectorRecord->ContinuationRouteId)) continue;
 		const TSet<FIntVector> RequiredChunkOrigins = CollectRequiredChunkOrigins(*ConnectorRecord);
 		if (RequiresFreshCreatedChunkRealizationGate(*ConnectorRecord)
 			&& !HasFreshCreatedChunkEligibility(RequiredChunkOrigins))

@@ -406,7 +406,8 @@ void AChunkWorldExtended::ProcessEvent(UFunction* Function, void* Parms)
 			const int32 Level = Detail->GetPropertyValue_InContainer(Parms);
 			if (EventName == DeleteEvent)
 			{
-				LayoutRuntimeComponent->QueueObservedUnloadedChunk(Origin, Level);
+				// Native callbacks use one-based layer IDs; layout APIs use array indices.
+				if (Level > 0) LayoutRuntimeComponent->QueueObservedUnloadedChunk(Origin, Level - 1);
 			}
 			else
 			{
@@ -915,9 +916,12 @@ void AChunkWorldExtended::HandleObservedChunkLifecycle(
 		&& Event.bFinestDetail
 		&& EventType == EChunkWorldChunkLifecycleEventType::Created;
 
-	if (LayoutRuntimeComponent != nullptr)
+	if (LayoutRuntimeComponent != nullptr && DetailLevel > 0)
 	{
-		LayoutRuntimeComponent->QueueObservedChunkLifecycle(Event);
+		// Normalize only the layout copy; shared lifecycle consumers retain native units.
+		FChunkWorldObservedChunkLifecycleEvent LayoutEvent = Event;
+		LayoutEvent.DetailLevel = DetailLevel - 1;
+		LayoutRuntimeComponent->QueueObservedChunkLifecycle(LayoutEvent);
 	}
 
 	if (Event.bServerAuthority)

@@ -16,6 +16,79 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLayoutPlanningAreaQueueTest,
 	"PorismExtension.Layout.Runtime.PlanningAreaQueue.ProgressAndAllowance",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLayoutCreatedLifetimeQueueTest,
+	"PorismExtension.Layout.Runtime.PlanningAreaQueue.CreatedLifetime",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+/** Pure-data lifecycle check: no world, UObject fixtures or solver execution. */
+bool FLayoutCreatedLifetimeQueueTest::RunTest(const FString& Parameters)
+{
+	TArray<FLayoutLoadedChunkLayer> Directory;
+	FLayoutPlanningAreaQueue Queue(Directory);
+	using FKey = FLayoutPlanningAreaQueue::FChunkKey;
+	const FKey Owner(0, FIntVector::ZeroValue), Neighbor(0, FIntVector(8, 0, 0));
+	const TArray<FIntVector> Centers{FIntVector::ZeroValue};
+	FIntPoint Area;
+	Queue.Configure(4, 2);
+	Queue.Observe(Owner, FIntVector(8), false);
+	TestFalse(TEXT("Updated-only coverage has no automatic traversal"), Queue.TakeNext(Centers, Area));
+	Directory[0].Chunks.Add(FIntVector(64, 0, 0), FLayoutLoadedChunkState{true});
+	TestFalse(TEXT("Center changes never discover work by scanning loaded records"),
+		Queue.TakeNext({FIntVector(64, 0, 0)}, Area));
+	Directory[0].Chunks.Remove(FIntVector(64, 0, 0));
+	Queue.Observe(Owner, FIntVector(8), true);
+	TestTrue(TEXT("Created grants first traversal"), Queue.TakeNext(Centers, Area));
+	const FLayoutCreatedChunkIdentity Original = Queue.GetScanOrigin(Area);
+	FIntVector Min, Max;
+	TestTrue(TEXT("Scan has lifetime-owned bounds"), Queue.GetScanBounds(Area, Min, Max));
+	TestEqual(TEXT("Enumeration clips the canonical region to its owner"), Max, FIntVector(7));
+	Queue.FinishScan(Area, false, Queue.GetScanId(Area));
+	TestTrue(TEXT("Completed discovery retains write authority"), Original.IsCurrent(Directory));
+	Queue.Reset();
+	Queue.Observe(Owner, FIntVector(8), true);
+	TestFalse(TEXT("Reset and duplicate Created never replay a completed lifetime"), Queue.TakeNext(Centers, Area));
+	Queue.Observe(Neighbor, FIntVector(8), true);
+	TestTrue(TEXT("Neighbor receives its own portion of the same canonical area"), Queue.TakeNext(Centers, Area));
+	TestEqual(TEXT("New owner is the neighbor, not the completed chunk"), Queue.GetScanOrigin(Area).Origin, Neighbor.Get<1>());
+	Queue.FinishScan(Area, true, Queue.GetScanId(Area));
+	TestFalse(TEXT("Capacity waits do not poll discovery"), Queue.TakeNext(Centers, Area));
+	Queue.NotifyCapacityAvailable();
+	TestTrue(TEXT("Capacity change resumes unfinished area"), Queue.TakeNext(Centers, Area));
+	Queue.MarkCoverageWaiting(Area);
+	Queue.FinishScan(Area, false, Queue.GetScanId(Area));
+	TestFalse(TEXT("Coverage wait stays parked"), Queue.TakeNext(Centers, Area));
+	Queue.Observe(FKey(1, Neighbor.Get<1>()), FIntVector(8), false);
+	TestTrue(TEXT("Arriving read coverage wakes unfinished owner without granting new authority"), Queue.TakeNext(Centers, Area));
+	Queue.MarkBlockedByReservation(Area, TEXT("PendingRoot"));
+	Queue.FinishScan(Area, false, Queue.GetScanId(Area));
+	Queue.NotifyReservationReleased(TEXT("OtherRoot"));
+	TestFalse(TEXT("Unrelated release leaves reservation wait parked"), Queue.TakeNext(Centers, Area));
+	Queue.NotifyReservationReleased(TEXT("PendingRoot"));
+	TestTrue(TEXT("Matching release resumes unfinished area"), Queue.TakeNext(Centers, Area));
+	Queue.FinishScan(Area, false, Queue.GetScanId(Area));
+	Queue.RequestRetry(Area);
+	TestFalse(TEXT("Terminal area cannot be reopened"), Queue.TakeNext(Centers, Area));
+	Queue.Forget(Owner);
+	Queue.Observe(Owner, FIntVector(8), false);
+	TestFalse(TEXT("Delete then Updated fences the old creation"), Original.IsCurrent(Directory));
+	TestFalse(TEXT("Restored lifetime has no discovery"), Queue.TakeNext(Centers, Area));
+	Queue.Observe(Owner, FIntVector(8), true);
+	TestTrue(TEXT("A genuine later Created receives a new traversal"), Queue.TakeNext(Centers, Area));
+	TestFalse(TEXT("Later Created does not revive the old identity"), Original.IsCurrent(Directory));
+	Queue.ResetLoadedDirectory();
+	Queue.Configure(4, 2);
+	Queue.Observe(Owner, FIntVector(32, 16, 16), true);
+	Queue.TakeNext(Centers, Area);
+	Queue.FinishScan(Area, false, Queue.GetScanId(Area));
+	const int64 Prefix = Directory[0].Chunks.FindChecked(FIntVector::ZeroValue).ScanOffset;
+	Queue.Reset();
+	TestTrue(TEXT("Unfinished prefix survives input revision and priority movement"), Queue.TakeNext({FIntVector(31, 0, 0)}, Area));
+	TestEqual(TEXT("Cursor never rewinds on changed center"), Directory[0].Chunks.FindChecked(FIntVector::ZeroValue).ScanOffset, Prefix);
+	Queue.Configure(3, 2);
+	TestFalse(TEXT("Lattice change retires started remainder instead of replaying it"), Queue.TakeNext(Centers, Area));
+	return true;
+}
+
 bool FLayoutPlanningAreaQueueTest::RunTest(const FString& Parameters)
 {
 	TArray<FLayoutLoadedChunkLayer> Directory;
@@ -38,7 +111,11 @@ bool FLayoutPlanningAreaQueueTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Proven irrelevant coverage stays idle"), Queue.TakeNext(Centers, Area));
 
 	Queue.Reset();
-	TestTrue(TEXT("Input revision rescreens loaded terrain"), Queue.TakeNext(Centers, Area));
+	TestFalse(TEXT("Input revision preserves terminal terrain"), Queue.TakeNext(Centers, Area));
+	// The remaining allowance scenarios need a genuinely new native lifetime under the Created-only contract.
+	Queue.Forget(Near);
+	Queue.Observe(Near, Size, true);
+	TestTrue(TEXT("New creation starts allowance fixture"), Queue.TakeNext(Centers, Area));
 	TestTrue(TEXT("Positive evidence promotes a slot"), Queue.MarkEligible(Area, Queue.GetScanId(Area)));
 	TestTrue(TEXT("First candidate reserves allowance"), Queue.BeginAttempt(Area, TEXT("SuccessA")));
 	Queue.FinishScan(Area, true, Queue.GetScanId(Area));
@@ -51,7 +128,7 @@ bool FLayoutPlanningAreaQueueTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Third candidate shares allowance"), Queue.BeginAttempt(Area, TEXT("C")));
 	TestFalse(TEXT("In-flight attempts cannot overshoot allowance"), Queue.BeginAttempt(Area, TEXT("D")));
 	Queue.FinishScan(Area, true, Queue.GetScanId(Area));
-	Queue.FinishAttempt(Area, TEXT("A"), false, true);
+	Queue.FinishAttempt(Area, TEXT("A"), false);
 	TestTrue(TEXT("Cancellation returns allowance"), Queue.TakeNext(Centers, Area));
 	Queue.FinishAttempt(Area, TEXT("B"), true);
 	Queue.FinishAttempt(Area, TEXT("C"), true);
@@ -126,10 +203,10 @@ bool FLayoutPlanningAreaQueueTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Negative inclusive lower bound"), Min, FIntPoint(-16, -16));
 	TestEqual(TEXT("Negative inclusive upper bound"), Max, FIntPoint(-1, -1));
 	Queue.FinishScan(Area, false, Queue.GetScanId(Area));
-	const FString SettledBookkeeping = Queue.DescribeBookkeeping();
+	const int64 SettledOffset = Directory[0].Chunks.FindChecked(FIntVector(-16, -16, 0)).ScanOffset;
 	for (int32 Repeat = 0; Repeat < 32; ++Repeat)
 		Queue.Observe(FKey(0, FIntVector(-16, -16, 0)), Size, Repeat % 2 == 0);
-	TestEqual(TEXT("Stationary Created/Updated preserves settled bookkeeping"), Queue.DescribeBookkeeping(), SettledBookkeeping);
+	TestEqual(TEXT("Stationary Created/Updated preserves settled cursor"), Directory[0].Chunks.FindChecked(FIntVector(-16, -16, 0)).ScanOffset, SettledOffset);
 	TestFalse(TEXT("Stationary settled coverage does not rescan"), Queue.TakeNext({FIntVector(-1, -1, 0)}, Area));
 	Queue.ResetLoadedDirectory();
 	Queue.Configure(4, 1);
@@ -140,7 +217,8 @@ bool FLayoutPlanningAreaQueueTest::RunTest(const FString& Parameters)
 	Queue.FinishScan(Area, false, Queue.GetScanId(Area));
 	TestFalse(TEXT("Unchanged partial coverage settles"), Queue.TakeNext(Centers, Area));
 	Queue.Observe(FKey(0, FIntVector(8, 0, 0)), FIntVector(8), true);
-	TestTrue(TEXT("New neighbor coverage reopens the shared completed area"), Queue.TakeNext(Centers, Area));
+	TestTrue(TEXT("New neighbor scans its own part of the shared area"), Queue.TakeNext(Centers, Area));
+	TestEqual(TEXT("Completed first owner is not reopened"), Queue.GetScanOrigin(Area).Origin, FIntVector(8, 0, 0));
 	TestTrue(TEXT("Coverage arrival preserves failed-key allowance"), Queue.HasFailed(Area, TEXT("RetainedFailure")));
 	Queue.MarkBlockedByReservation(Area, TEXT("ReleasedDuringScan"));
 	Queue.NotifyReservationReleased(TEXT("ReleasedDuringScan"));
@@ -212,14 +290,17 @@ bool FLayoutPlanningAreaQueueTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Full exclusion creates no discovery worker"), OwnedRuntime->PendingPlanningAreaDiscovery.IsSet());
 	TestFalse(TEXT("Full exclusion remains dormant"), OwnedRuntime->PlanningAreaQueue->TakeNext(Centers, Area));
 	OwnedRuntime->FinishPlanningAreaAttempt(TEXT("AreaBlocker"), false, true);
-	TestTrue(TEXT("Released root without an area attempt reopens discovery"), OwnedRuntime->PlanningAreaQueue->TakeNext(Centers, Area));
-	OwnedRuntime->PlanningAreaQueue->FinishScan(Area, true, OwnedRuntime->PlanningAreaQueue->GetScanId(Area));
+	TestFalse(TEXT("Clearing permanent exclusion never reopens completed discovery"), OwnedRuntime->PlanningAreaQueue->TakeNext(Centers, Area));
+	// Each later scenario now requires a new native lifetime, not a forbidden completed-area replay.
+	OwnedRuntime->PlanningAreaQueue->Forget(Near);
+	OwnedRuntime->PlanningAreaQueue->Observe(Near, Size, true);
 	OwnedRuntime->RootSpacingReservations.Add(TEXT("ClearedRoot"), Exclusion);
 	TestTrue(TEXT("Explicit reset fixture starts a scan"), OwnedRuntime->PlanningAreaQueue->TakeNext(Centers, Area));
 	OwnedRuntime->SubmitPlanningAreaDiscovery(Area, FIntVector(8, 8, 0), FIntPoint(0), FIntPoint(15));
 	OwnedRuntime->ResetResolvedLayoutSiteRecords(true);
-	TestTrue(TEXT("Explicit root clear wakes its blocked region"), OwnedRuntime->PlanningAreaQueue->TakeNext(Centers, Area));
-	OwnedRuntime->PlanningAreaQueue->FinishScan(Area, true, OwnedRuntime->PlanningAreaQueue->GetScanId(Area));
+	TestFalse(TEXT("Explicit root clear preserves completed region"), OwnedRuntime->PlanningAreaQueue->TakeNext(Centers, Area));
+	OwnedRuntime->PlanningAreaQueue->Forget(Near);
+	OwnedRuntime->PlanningAreaQueue->Observe(Near, Size, true);
 	FirstBinding->OccupancyProbability = 0.0f;
 	TestTrue(TEXT("Zero occupancy starts its bounded scan"), OwnedRuntime->PlanningAreaQueue->TakeNext(Centers, Area));
 	OwnedRuntime->SubmitPlanningAreaDiscovery(Area, FIntVector(8, 8, 0), FIntPoint(0), FIntPoint(15));
@@ -229,6 +310,9 @@ bool FLayoutPlanningAreaQueueTest::RunTest(const FString& Parameters)
 		OwnedRuntime->ObservedChunkLayers[0].Chunks.FindChecked(FIntVector::ZeroValue).Screening == ELayoutChunkScreening::Irrelevant);
 	FirstBinding->OccupancyProbability = 1.0f;
 	OwnedRuntime->PlanningAreaQueue->Reset();
+	TestFalse(TEXT("Occupancy changes cannot replay terminal terrain"), OwnedRuntime->PlanningAreaQueue->TakeNext(Centers, Area));
+	OwnedRuntime->PlanningAreaQueue->Forget(Near);
+	OwnedRuntime->PlanningAreaQueue->Observe(Near, Size, true);
 	Harness.World->WorldGenDef->WorldBiomesDT = NewObject<UDataTable>();
 	for (UObject* Input : TArray<UObject*>{Harness.World->WorldGenDef, Harness.World->WorldGenDef->WorldBiomesDT})
 	{
