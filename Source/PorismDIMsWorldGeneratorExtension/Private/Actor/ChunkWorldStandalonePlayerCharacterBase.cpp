@@ -46,6 +46,7 @@ void AChunkWorldStandalonePlayerCharacterBase::WalkerPositionInfo_Implementation
 void AChunkWorldStandalonePlayerCharacterBase::BeginPlay()
 {
 	Super::BeginPlay();
+	StartupFreezeComponent->OnOwningClientRuntimeReady.AddUniqueDynamic(this, &AChunkWorldStandalonePlayerCharacterBase::AcknowledgeLocalReadiness);
 
 	ChunkWorldSetupRetryAttempts = 0;
 	UE_LOG(
@@ -68,6 +69,7 @@ void AChunkWorldStandalonePlayerCharacterBase::EndPlay(const EEndPlayReason::Typ
 		*GetNameSafe(this),
 		static_cast<int32>(EndPlayReason));
 
+	StartupFreezeComponent->OnOwningClientRuntimeReady.RemoveDynamic(this, &AChunkWorldStandalonePlayerCharacterBase::AcknowledgeLocalReadiness);
 	CancelChunkWorldSetupRetry();
 	UnregisterFromChunkWorlds();
 	BoundChunkWorlds.Reset();
@@ -87,10 +89,27 @@ void AChunkWorldStandalonePlayerCharacterBase::OnRep_Controller()
 	InitializeChunkWorldPlayerSetup();
 }
 
+void AChunkWorldStandalonePlayerCharacterBase::AcknowledgeLocalReadiness(const FGuid SessionId, const FGuid ReadinessId)
+{
+	if (!IsLocallyControlled() || !ReadinessId.IsValid() || ReadinessId == LastAcknowledgedReadinessId) return;
+	LastAcknowledgedReadinessId = ReadinessId;
+	ServerAcknowledgeReadiness(SessionId, ReadinessId);
+}
+
+void AChunkWorldStandalonePlayerCharacterBase::ServerAcknowledgeReadiness_Implementation(const FGuid SessionId, const FGuid ReadinessId)
+{
+	StartupFreezeComponent->AcknowledgeOwningClientRuntimeReady(GetController(), SessionId, ReadinessId);
+}
+
 void AChunkWorldStandalonePlayerCharacterBase::InitializeChunkWorldPlayerSetup()
 {
 	const bool bRegistered = RegisterWithChunkWorlds();
 	const bool bBound = BindChunkWorldClients();
+	if (StartupFreezeComponent->IsLocalRuntimeReadyForAcknowledgement())
+	{
+		const auto Session = StartupFreezeComponent->GetRuntimeReadinessSession();
+		AcknowledgeLocalReadiness(Session.SessionId, Session.ReadinessId);
+	}
 	const bool bNeedsAuthorityBinding = HasAuthority() && GetNetMode() != NM_Standalone;
 	const bool bRequiresRetryForBinding = bNeedsAuthorityBinding && Cast<APlayerController>(GetController()) == nullptr;
 

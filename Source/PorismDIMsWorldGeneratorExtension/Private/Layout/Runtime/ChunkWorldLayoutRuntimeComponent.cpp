@@ -3778,6 +3778,7 @@ void UChunkWorldLayoutRuntimeComponent::SetExplicitPreviewWorkGateForTesting(
 
 void UChunkWorldLayoutRuntimeComponent::ProcessQueuedLayoutWork()
 {
+	TGuardValue<bool> ProcessingScope(bProcessingQueuedLayoutWork, true);
 	TGuardValue<TOptional<TArray<FIntVector>>> CentersForPass(
 		PlanningCenterSnapshot, TOptional<TArray<FIntVector>>(CollectPlanningWindowCenters()));
 	decltype(PendingChunkLoads) ChunkLoadsToProcess;
@@ -4163,6 +4164,135 @@ bool UChunkWorldLayoutRuntimeComponent::IsAutomaticRootOriginCurrent(const FStri
 {
 	const auto* Origin = AutomaticRootCreationOrigins.Find(RecordKey);
 	return Origin && Origin->IsCurrent(ObservedChunkLayers);
+}
+
+void UChunkWorldLayoutRuntimeComponent::NotifyAutomaticLayoutWriteAttempt(const TSet<FIntVector>& RequiredChunkOrigins)
+{
+	AChunkWorldExtended* const World = GetOwningChunkWorld();
+	if (!World || !OnAutomaticLayoutWriteAttempt.IsBound()) return;
+	FBox Bounds(ForceInit);
+	const FVector ChunkExtent = World->BlockWorldPosToUEWorldPos(ObservedCoverageTileSize)
+		- World->BlockWorldPosToUEWorldPos(FIntVector::ZeroValue);
+	for (const FIntVector& Origin : RequiredChunkOrigins)
+	{
+		const FVector Min = World->BlockWorldPosToUEWorldPos(Origin);
+		Bounds += Min;
+		Bounds += Min + ChunkExtent;
+	}
+	if (Bounds.IsValid) OnAutomaticLayoutWriteAttempt.Broadcast(World, Bounds);
+}
+
+bool UChunkWorldLayoutRuntimeComponent::HasPendingAutomaticLayoutWork(const FBox& WorldBounds) const
+{
+	check(IsInGameThread());
+	AChunkWorldExtended* const World = GetOwningChunkWorld();
+	if (!World || !World->HasAuthority()) return false;
+	if (!WorldBounds.IsValid || WorldBounds.Min.ContainsNaN() || WorldBounds.Max.ContainsNaN()) return true;
+	if (bProcessingQueuedLayoutWork) return true;
+	const FBox Bounds(FVector(World->UEWorldPosToBlockWorldPos(WorldBounds.Min)),
+		FVector(World->UEWorldPosToBlockWorldPos(WorldBounds.Max)));
+	FVector Reach = FVector::ZeroVector;
+	for (const ULayoutWorldBindingAsset* Binding : LayoutWorldBindings)
+	{
+		if (!Binding) continue;
+		const FVector Cell(Binding->BaseCellDimensionsBlocks);
+		const double Search = FMath::Max(0, Binding->DefaultPlacementPolicy.SurfaceSearch.TerrainSearchDepthBlocks)
+			+ double(FMath::Max(0, Binding->DefaultPlacementPolicy.SurfaceSearch.CavityDomainBoundarySearchBlocks));
+		auto IncludeProfile = [&](const ULayoutProfileAsset* Profile, const FLayoutWorldBindingTerrainTransitionPolicy& Transition,
+			const double RouteCells)
+		{
+			if (!Profile) return;
+			// Whole footprint rather than half also covers snapped anchors and perimeter transitions.
+			const double Terrain = Search + FMath::Max(0, Transition.MaxFoundationDepth)
+				+ FMath::Abs(double(Binding->TemplatePlacementZOffsetBlocks));
+			Reach.X = FMath::Max(Reach.X, (FMath::Max(1, Profile->MaximumFootprintInCells.X) + RouteCells + 1) * Cell.X + Terrain);
+			Reach.Y = FMath::Max(Reach.Y, (FMath::Max(1, Profile->MaximumFootprintInCells.Y) + RouteCells + 1) * Cell.Y + Terrain);
+			Reach.Z = FMath::Max(Reach.Z, FMath::Max(1, Profile->LevelCount) * Cell.Z + Terrain);
+		};
+		for (const auto& Candidate : Binding->Candidates)
+			IncludeProfile(Candidate.LayoutProfile, Candidate.bOverrideTerrainTransitionPolicy
+				? Candidate.TerrainTransitionPolicyOverride : Binding->DefaultPlacementPolicy.TerrainTransition, 0);
+		for (const auto& Family : Binding->ContinuationFamilies)
+			for (const auto& Candidate : Family.Candidates)
+				IncludeProfile(Candidate.LayoutProfile, Family.bOverrideTerrainTransitionPolicy
+					? Family.TerrainTransitionPolicyOverride : Binding->DefaultPlacementPolicy.TerrainTransition,
+					double(FMath::Max(0, Family.MaxConnectionDistanceInCells)) + FMath::Max(0, Family.ContinuationPolicy.PathPaddingCells));
+	}
+	if (bEnablePlanningWindowRuntimeUpdates && !LayoutWorldBindings.IsEmpty())
+	{
+		// Inspect queued Created intent, not loaded terrain. Distant/Updated/duplicate events add no gate.
+		FScopeLock Lock(&PendingChunkLoadsMutex);
+		for (const auto& Pair : PendingChunkLoads)
+		{
+			const FObservedChunkLoad& Event = Pair.Value;
+			if (Event.bUnloaded || Event.EventType != EChunkWorldChunkLifecycleEventType::Created
+				|| Event.DetailLevel < 0 || Event.DetailLevel >= World->GetChunkLayerCount()) continue;
+			const CChunkData* Data = World->WorldChunks[Event.DetailLevel];
+			if (!Data || Data->ChunkBlockFactor.GetMin() <= 0) continue;
+			const FIntVector Origin = FLayoutStreamingWindow::BlockWorldPosToChunkOrigin(Event.ChunkBlockWorldPos, Data->ChunkBlockFactor);
+			const auto* Existing = ObservedChunkLayers.IsValidIndex(Event.DetailLevel)
+				? ObservedChunkLayers[Event.DetailLevel].Chunks.Find(Origin) : nullptr;
+			if (Existing && Existing->bCreated && !Event.bResetBeforeObservation) continue;
+			const FVector Min(Origin), Max = Min + FVector(Data->ChunkBlockFactor) - FVector(1.0);
+			if (Bounds.Intersect(FBox(Min - Reach, Max + Reach))) return true;
+		}
+		if (!PlanningPriorityCenters.IsEmpty() && PlanningAreaQueue
+			&& PlanningAreaQueue->HasPendingCreatedWork(Bounds, Reach)) return true;
+	}
+
+	auto TouchesOwner = [&](const FLayoutCreatedChunkIdentity& Origin)
+	{
+		if (!Origin.IsCurrent(ObservedChunkLayers)) return false;
+		const FVector Min(Origin.Origin);
+		const FVector Max = Min + FVector(ObservedChunkLayers[Origin.DetailLevel].ChunkSizeInBlocks) - FVector(1.0);
+		return Bounds.Intersect(FBox(Min - Reach, Max + Reach));
+	};
+	auto TouchesChunks = [&](const TSet<FIntVector>& Origins)
+	{
+		for (const FIntVector& Origin : Origins)
+		{
+			const FVector Min(Origin), Max = Min + FVector(ObservedCoverageTileSize) - FVector(1.0);
+			if (Bounds.Intersect(FBox(Min, Max))) return true;
+		}
+		return false;
+	};
+	// Once solved, use the same template + terrain coverage required by the write boundary.
+	TSet<FString> RootsWithKnownBounds;
+	for (const auto& Pair : PlanningRecordKeysBySiteRecordKey)
+	{
+		const auto* Site = ResolvedSiteRecords.Find(Pair.Key);
+		if (!Site || !IsAutomaticRootOriginCurrent(Pair.Value) || !ShouldAttemptRealization(*Site)) continue;
+		const auto Origins = CollectRequiredChunkOrigins(*Site);
+		if (Origins.IsEmpty()) continue;
+		RootsWithKnownBounds.Add(Pair.Value);
+		if (TouchesChunks(Origins)) return true;
+	}
+	for (const auto& Pair : AutomaticRootCreationOrigins)
+	{
+		if (RootsWithKnownBounds.Contains(Pair.Key)) continue;
+		const auto* Record = PlanningWindowStore ? PlanningWindowStore->FindPlannedLayoutSiteRecord(Pair.Key) : nullptr;
+		if (Record && (Record->State == EPlannedLayoutSiteState::Pending || Record->State == EPlannedLayoutSiteState::Accepted)
+			&& TouchesOwner(Pair.Value)) return true;
+	}
+	for (const auto& Pair : PendingAutomaticContinuationPreparations)
+		if (const auto* Origin = AutomaticPreparationCreationOrigins.Find(Pair.Key); Origin && TouchesOwner(*Origin)) return true;
+	for (const auto& Pair : ContinuationRouteReservations)
+	{
+		const auto& Route = Pair.Value;
+		if (!Route.bAutomatic || Route.bReleased || Route.IsSettled() || !Route.CreationOrigin.IsCurrent(ObservedChunkLayers)) continue;
+		bool bUnknownBounds = Route.bAwaitingSubmission;
+		for (const uint64 Key : Route.SegmentKeys)
+		{
+			if (Route.CommittedSegmentKeys.Contains(Key) || Route.FailedSegmentKeys.Contains(Key)) continue;
+			const auto* Segment = ResolvedConnectorRecords.Find(Key);
+			if (!Segment || !ShouldAttemptConnectorRealization(*Segment)) { bUnknownBounds = true; continue; }
+			const auto Origins = CollectRequiredChunkOrigins(*Segment);
+			bUnknownBounds |= Origins.IsEmpty();
+			if (TouchesChunks(Origins)) return true;
+		}
+		if (bUnknownBounds && TouchesOwner(Route.CreationOrigin)) return true;
+	}
+	return false;
 }
 
 int32 UChunkWorldLayoutRuntimeComponent::CountAutomaticPlanningWork() const
@@ -9651,7 +9781,9 @@ void UChunkWorldLayoutRuntimeComponent::TryRealizeEligibleSites()
 		}
 
 		FString FailureReason;
-		if (TryRealizeSite(SiteRecord, &FailureReason, FrozenTerrainContractOverride))
+		const bool bRealized = TryRealizeSite(SiteRecord, &FailureReason, FrozenTerrainContractOverride);
+		if (PlanningRecordKeysBySiteRecordKey.Contains(It.Key())) NotifyAutomaticLayoutWriteAttempt(RequiredChunkOrigins);
+		if (bRealized)
 		{
 			MarkResolvedSiteRealizedAndCommitted(SiteRecord);
 			const FString* RootPlanningKey = PlanningRecordKeysBySiteRecordKey.Find(It.Key());
@@ -11568,7 +11700,10 @@ void UChunkWorldLayoutRuntimeComponent::TryRealizeEligibleConnectors()
 		const FLayoutFrozenTerrainContract* FrozenTerrainContractOverride =
 			ResolvedConnectorFrozenTerrainContracts.Find(ConnectorKey);
 		FString FailureReason;
-		if (TryRealizeConnector(*ConnectorRecord, &FailureReason, FrozenTerrainContractOverride))
+		const bool bRealized = TryRealizeConnector(*ConnectorRecord, &FailureReason, FrozenTerrainContractOverride);
+		if (const auto* Route = ContinuationRouteReservations.Find(ConnectorRecord->ContinuationRouteId); Route && Route->bAutomatic)
+			NotifyAutomaticLayoutWriteAttempt(RequiredChunkOrigins);
+		if (bRealized)
 		{
 			MarkResolvedConnectorRealizedAndCommitted(*ConnectorRecord);
 			ConsumeContinuationReservationForConnector(ConnectorKey);

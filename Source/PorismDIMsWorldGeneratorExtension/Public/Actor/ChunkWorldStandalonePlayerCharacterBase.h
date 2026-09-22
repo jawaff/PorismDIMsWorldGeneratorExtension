@@ -106,6 +106,16 @@ protected:
 	int32 MaxChunkWorldSetupRetryAttempts = 20;
 
 private:
+	/** Bridges local native readiness through this possessed pawn's owning connection. */
+	UFUNCTION()
+	void AcknowledgeLocalReadiness(FGuid SessionId, FGuid ReadinessId);
+
+	/** Authority reuses the component's exact controller, operation and receipt validation. */
+	UFUNCTION(Server, Reliable)
+	void ServerAcknowledgeReadiness(FGuid SessionId, FGuid ReadinessId);
+
+	FGuid LastAcknowledgedReadinessId;
+
 	/** Most recent walker info reported by Porism for this actor. */
 	FChunkWorldWalkerInfo LastWalkerPositionInfo;
 

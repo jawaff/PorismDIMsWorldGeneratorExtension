@@ -89,6 +89,45 @@ bool FLayoutCreatedLifetimeQueueTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLayoutReadinessPendingBoundsTest,
+	"PorismExtension.Layout.Runtime.PlanningAreaQueue.ReadinessBounds",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+/** Pure-data readiness ownership: inspecting work never creates or resumes discovery. */
+bool FLayoutReadinessPendingBoundsTest::RunTest(const FString& Parameters)
+{
+	TArray<FLayoutLoadedChunkLayer> Directory;
+	FLayoutPlanningAreaQueue Queue(Directory);
+	const auto Owner = MakeTuple(0, FIntVector::ZeroValue);
+	const FBox Nearby(FVector(9, 0, 0), FVector(10, 1, 1));
+	const FBox Distant(FVector(100), FVector(101));
+	const FVector Reach(2, 0, 0);
+	Queue.Configure(4, 2);
+	Queue.Observe(Owner, FIntVector(8), false);
+	TestFalse(TEXT("Restored coverage is not pending work"), Queue.HasPendingCreatedWork(Nearby, Reach));
+	Queue.Observe(Owner, FIntVector(8), true);
+	TestFalse(TEXT("Origin bounds alone do not touch the spawn"), Queue.HasPendingCreatedWork(Nearby, FVector::ZeroVector));
+	TestTrue(TEXT("Reach includes layouts originating outside the spawn box"), Queue.HasPendingCreatedWork(Nearby, Reach));
+	TestFalse(TEXT("Distant work does not hold spawn"), Queue.HasPendingCreatedWork(Distant, Reach));
+	FIntPoint Area;
+	Queue.TakeNext({FIntVector::ZeroValue}, Area);
+	Queue.MarkCoverageWaiting(Area);
+	Queue.FinishScan(Area, false, Queue.GetScanId(Area));
+	TestTrue(TEXT("Parked discovery retains spatial ownership"), Queue.HasPendingCreatedWork(Nearby, Reach));
+	Queue.RetireWorkingSet();
+	TestFalse(TEXT("Retirement releases spatial ownership"), Queue.HasPendingCreatedWork(Nearby, Reach));
+	Queue.Forget(Owner);
+	Queue.Observe(Owner, FIntVector(8), true);
+	Queue.TakeNext({FIntVector::ZeroValue}, Area);
+	Queue.FinishScan(Area, false, Queue.GetScanId(Area));
+	TestFalse(TEXT("Completed traversal does not hold spawn"), Queue.HasPendingCreatedWork(Nearby, Reach));
+	Queue.Observe(MakeTuple(1, FIntVector::ZeroValue), FIntVector(8), true);
+	TestTrue(TEXT("New layer owns independent pending work"), Queue.HasPendingCreatedWork(Nearby, Reach));
+	Queue.ResizeLoadedLayers(1);
+	TestFalse(TEXT("Layer removal retires its pending ownership"), Queue.HasPendingCreatedWork(Nearby, Reach));
+	return true;
+}
+
 bool FLayoutPlanningAreaQueueTest::RunTest(const FString& Parameters)
 {
 	TArray<FLayoutLoadedChunkLayer> Directory;

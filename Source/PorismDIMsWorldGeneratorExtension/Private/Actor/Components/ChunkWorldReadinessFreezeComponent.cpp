@@ -3,12 +3,14 @@
 #include "Actor/Components/ChunkWorldReadinessFreezeComponent.h"
 
 #include "ChunkWorld/Actors/ChunkWorldExtended.h"
+#include "Layout/Runtime/ChunkWorldLayoutRuntimeComponent.h"
 #include "ChunkWorldExtended/ChunkWorldWalker.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Engine/CollisionProfile.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/Controller.h"
+#include "GameFramework/PlayerController.h"
 #include "GameFramework/MovementComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
@@ -75,6 +77,7 @@ void UChunkWorldReadinessFreezeComponent::EndPlay(const EEndPlayReason::Type End
 		}
 	}
 	StopLocalRuntimeWalkerTracking();
+	StopObservingLayoutWrites();
 	ObservedChunkWorldStates.Reset();
 	SetComponentTickEnabled(false);
 	Super::EndPlay(EndPlayReason);
@@ -100,10 +103,7 @@ void UChunkWorldReadinessFreezeComponent::TickComponent(float DeltaTime, ELevelT
 			UE_LOG(LogChunkWorldReadinessFreeze, Warning, TEXT("Startup freeze Owner=%s still has no registered chunk walker after %.2fs."), *GetNameSafe(GetOwner()), StartupFreezeElapsedSeconds);
 			bLoggedMissingRegistrationWarning = true;
 		}
-		if (AreObservedChunkWorldsReady())
-		{
-			ReleaseStartupFreeze();
-		}
+		TryFinishStartupFreeze();
 	}
 
 	if (bRuntimeFreezeActive && GetOwner() != nullptr && GetOwner()->HasAuthority() && !IsRuntimeSessionTerminal())
@@ -128,6 +128,10 @@ void UChunkWorldReadinessFreezeComponent::TickComponent(float DeltaTime, ELevelT
 		RuntimeSession.State = EChunkWorldRuntimeReadinessState::WaitingForWalker;
 	}
 
+	if (bRuntimeFreezeActive && GetOwner() != nullptr && GetOwner()->HasAuthority() && !IsRuntimeSessionTerminal())
+	{
+		TrySettleRuntimeSession();
+	}
 	if (bRuntimeFreezeActive && GetOwner() != nullptr && GetOwner()->HasAuthority()
 		&& RuntimeSession.State == EChunkWorldRuntimeReadinessState::WaitingForClientReady)
 	{
@@ -153,14 +157,20 @@ FGuid UChunkWorldReadinessFreezeComponent::StartRuntimeReadinessSession(
 	const FChunkWorldSpawnRegion& CandidateRegion,
 	const bool bRequireOwningClientReady)
 {
-	if (GetOwner() == nullptr || !GetOwner()->HasAuthority() || ChunkWorld == nullptr || ChunkWorld->GetWorld() != GetWorld()
+	if (bStartingRuntimeSession || GetOwner() == nullptr || !GetOwner()->HasAuthority() || ChunkWorld == nullptr || ChunkWorld->GetWorld() != GetWorld()
 		|| !ChunkWorldReadinessFreeze::IsFiniteRegion(CandidateRegion)
-		|| (RuntimeSession.SessionId.IsValid() && !IsRuntimeSessionTerminal()))
+		|| (RuntimeSession.SessionId.IsValid() && !IsRuntimeSessionTerminal() && !bAutomaticStartupSession))
 	{
 		return FGuid();
 	}
 
+	TGuardValue<bool> StartingScope(bStartingRuntimeSession, true);
+	if (bAutomaticStartupSession && RuntimeSession.SessionId.IsValid() && !IsRuntimeSessionTerminal())
+		SetRuntimeTerminal(EChunkWorldRuntimeReadinessState::Canceled, EChunkWorldRuntimeReadinessFailure::None,
+			TEXT("Automatic startup session superseded by an explicit spawn request."));
+	bAutomaticStartupSession = false;
 	StopLocalRuntimeWalkerTracking();
+	StopObservingLayoutWrites();
 	if (!bFreezeStateCaptured)
 	{
 		FrozenActorTransform = GetOwner()->GetActorTransform();
@@ -170,12 +180,16 @@ FGuid UChunkWorldReadinessFreezeComponent::StartRuntimeReadinessSession(
 	bRuntimeFreezeActive = true;
 	RuntimeSession = FChunkWorldRuntimeReadinessSession();
 	RuntimeSession.SessionId = FGuid::NewGuid();
+	RuntimeSession.ReadinessId = FGuid::NewGuid();
+	RuntimeLayoutWaitStartTimeSeconds = -1.0;
 	RuntimeSession.ChunkWorld = ChunkWorld;
 	RuntimeSession.CandidateRegion = CandidateRegion;
 	RuntimeSession.bRequiresOwningClientReady = bRequireOwningClientReady;
 	RuntimeSession.State = EChunkWorldRuntimeReadinessState::WaitingForWalker;
 	RuntimeSessionStartTimeSeconds = GetWorld() != nullptr ? GetWorld()->GetTimeSeconds() : 0.0;
 	bLocalClientReadyBroadcast = false;
+	ObserveLayoutWrites(ChunkWorld);
+	for (const auto& State : ObservedChunkWorldStates) ObserveLayoutWrites(State.ChunkWorld.Get());
 
 	RefreshOwnerWalkers();
 	UObject* RegisteredWalker = nullptr;
@@ -188,6 +202,8 @@ FGuid UChunkWorldReadinessFreezeComponent::StartRuntimeReadinessSession(
 		}
 	}
 	RuntimeSession.TrackedWalker = RegisteredWalker;
+	NotifyRuntimeStartedOnce();
+	if (IsRuntimeSessionTerminal()) return RuntimeSession.SessionId;
 	if (RegisteredWalker != nullptr)
 	{
 		StartLocalRuntimeWalkerTracking();
@@ -210,14 +226,15 @@ bool UChunkWorldReadinessFreezeComponent::CancelRuntimeReadinessSession(const FG
 	return true;
 }
 
-bool UChunkWorldReadinessFreezeComponent::AcknowledgeOwningClientRuntimeReady(AController* Controller, const FGuid SessionId)
+bool UChunkWorldReadinessFreezeComponent::AcknowledgeOwningClientRuntimeReady(AController* Controller, const FGuid SessionId, const FGuid ReadinessId)
 {
 	if (GetOwner() == nullptr || !GetOwner()->HasAuthority())
 	{
 		return false;
 	}
 
-	const bool bMatchingSession = SessionId.IsValid() && RuntimeSession.SessionId == SessionId;
+	const bool bMatchingSession = SessionId.IsValid() && RuntimeSession.SessionId == SessionId
+		&& ReadinessId.IsValid() && RuntimeSession.ReadinessId == ReadinessId;
 	if (IsRuntimeSessionTerminal())
 	{
 		return bMatchingSession;
@@ -277,6 +294,44 @@ void UChunkWorldReadinessFreezeComponent::ApplyStartupFreeze()
 	bStartupFreezeActive = true;
 	RefreshFreezeTick();
 	OnStartupFreezeApplied.Broadcast();
+}
+
+void UChunkWorldReadinessFreezeComponent::TryFinishStartupFreeze()
+{
+	if (!bStartupFreezeActive || !GetOwner() || !AreObservedChunkWorldsReady()) return;
+	if (!GetOwner()->HasAuthority())
+	{
+		if (RuntimeSession.State == EChunkWorldRuntimeReadinessState::Settled) ReleaseStartupFreeze();
+		return;
+	}
+	if (RuntimeSession.SessionId.IsValid())
+	{
+		if (RuntimeSession.State == EChunkWorldRuntimeReadinessState::Settled) ReleaseStartupFreeze();
+		return;
+	}
+	APawn* Pawn = Cast<APawn>(GetOwner());
+	// Wait for possession so an initial player cannot accidentally start a server-only session.
+	if (Pawn && !Pawn->GetController()) return;
+	AChunkWorldExtended* PrimaryWorld = ObservedChunkWorldStates[0].ChunkWorld.Get();
+	if (!PrimaryWorld || !PrimaryWorld->WorldGenDef) return;
+	FVector BoundsOrigin, Extent;
+	GetOwner()->GetActorBounds(true, BoundsOrigin, Extent);
+	for (const auto& State : ObservedChunkWorldStates)
+	{
+		AChunkWorldExtended* World = State.ChunkWorld.Get();
+		if (!World || !World->WorldGenDef) return;
+		const FVector ChunkExtent = (World->BlockWorldPosToUEWorldPos(World->WorldGenDef->ChunkBlockSize)
+			- World->BlockWorldPosToUEWorldPos(FIntVector::ZeroValue)).GetAbs();
+		Extent.X = FMath::Max(Extent.X, ChunkExtent.X);
+		Extent.Y = FMath::Max(Extent.Y, ChunkExtent.Y);
+	}
+	FChunkWorldSpawnRegion Region;
+	Region.Minimum = FrozenActorTransform.GetLocation() - Extent;
+	Region.Maximum = FrozenActorTransform.GetLocation() + Extent;
+	Region.Minimum.Z -= FMath::Max(0.0f, RuntimeSettlementDownwardScanDistance);
+	Region.Maximum.Z += FMath::Max(0.0f, RuntimeSettlementUpwardScanDistance);
+	bAutomaticStartupSession = StartRuntimeReadinessSession(PrimaryWorld, Region,
+		Pawn && Cast<APlayerController>(Pawn->GetController())).IsValid();
 }
 
 void UChunkWorldReadinessFreezeComponent::ReleaseStartupFreeze()
@@ -468,7 +523,8 @@ bool UChunkWorldReadinessFreezeComponent::AreObservedChunkWorldsReady() const
 	}
 	for (const FObservedChunkWorldState& State : ObservedChunkWorldStates)
 	{
-		if (!State.ChunkWorld.IsValid() || State.bHasLateRegistrationConflict || !State.bReady)
+		// Late walkers now receive their own runtime handshake instead of relying on the startup latch.
+		if (!State.ChunkWorld.IsValid() || !State.bReady)
 		{
 			return false;
 		}
@@ -483,7 +539,6 @@ void UChunkWorldReadinessFreezeComponent::UpdateObservedChunkWorldState(AChunkWo
 		return;
 	}
 	bool bRelevant = false;
-	bool bLate = false;
 	const bool bReady = ChunkWorld->IsWorldReady();
 	for (const TWeakObjectPtr<UObject>& Walker : OwnerWalkers)
 	{
@@ -494,7 +549,6 @@ void UChunkWorldReadinessFreezeComponent::UpdateObservedChunkWorldState(AChunkWo
 		const bool bWalkerRegistered = ChunkWorld->HasRegisteredChunkWorldWalker(Walker.Get());
 		const bool bIncluded = ChunkWorld->WasChunkWorldWalkerIncludedInStartupReady(Walker.Get());
 		bRelevant |= bWalkerRegistered || bIncluded;
-		bLate |= bWalkerRegistered && bReady && !bIncluded;
 	}
 	const int32 ExistingIndex = ObservedChunkWorldStates.IndexOfByPredicate([ChunkWorld](const FObservedChunkWorldState& State) { return State.ChunkWorld.Get() == ChunkWorld; });
 	if (!bRelevant)
@@ -510,10 +564,10 @@ void UChunkWorldReadinessFreezeComponent::UpdateObservedChunkWorldState(AChunkWo
 	FObservedChunkWorldState* State = ExistingIndex != INDEX_NONE ? &ObservedChunkWorldStates[ExistingIndex] : &ObservedChunkWorldStates.AddDefaulted_GetRef();
 	State->ChunkWorld = ChunkWorld;
 	State->bReady = bReady;
-	State->bHasLateRegistrationConflict = bLate;
 	if (ExistingIndex == INDEX_NONE)
 	{
 		ChunkWorld->OnWorldReady.AddUniqueDynamic(this, &UChunkWorldReadinessFreezeComponent::HandleObservedChunkWorldReady);
+		if (bRuntimeFreezeActive && !IsRuntimeSessionTerminal()) ObserveLayoutWrites(ChunkWorld);
 	}
 }
 
@@ -546,7 +600,7 @@ void UChunkWorldReadinessFreezeComponent::StartLocalRuntimeWalkerTracking()
 	}
 
 	if (RuntimeTrackedWalker.Get() == SelectedWalker && RuntimeTrackedChunkWorld.Get() == ChunkWorld
-		&& RuntimeTrackedSessionId == RuntimeSession.SessionId)
+		&& RuntimeTrackedReadinessId == RuntimeSession.ReadinessId)
 	{
 		return;
 	}
@@ -557,10 +611,11 @@ void UChunkWorldReadinessFreezeComponent::StartLocalRuntimeWalkerTracking()
 		ChunkWorld->OnRuntimeWalkerReady.AddUniqueDynamic(this, &UChunkWorldReadinessFreezeComponent::HandleRuntimeWalkerReady);
 	}
 
+	bLocalClientReadyBroadcast = false;
 	RuntimeTrackedWalker = SelectedWalker;
 	RuntimeTrackedChunkWorld = ChunkWorld;
-	RuntimeTrackedSessionId = RuntimeSession.SessionId;
-	if (!ChunkWorld->StartRuntimeReadinessTracking(SelectedWalker, RuntimeSession.SessionId))
+	RuntimeTrackedReadinessId = RuntimeSession.ReadinessId;
+	if (!ChunkWorld->StartRuntimeReadinessTracking(SelectedWalker, RuntimeSession.ReadinessId))
 	{
 		if (GetOwner() != nullptr && GetOwner()->HasAuthority())
 		{
@@ -586,17 +641,17 @@ void UChunkWorldReadinessFreezeComponent::StopLocalRuntimeWalkerTracking()
 		ChunkWorld->OnRuntimeWalkerReady.RemoveDynamic(this, &UChunkWorldReadinessFreezeComponent::HandleRuntimeWalkerReady);
 		if (RuntimeTrackedWalker.IsValid())
 		{
-			ChunkWorld->StopRuntimeReadinessTracking(RuntimeTrackedWalker.Get(), RuntimeTrackedSessionId);
+			ChunkWorld->StopRuntimeReadinessTracking(RuntimeTrackedWalker.Get(), RuntimeTrackedReadinessId);
 		}
 	}
 	RuntimeTrackedWalker.Reset();
 	RuntimeTrackedChunkWorld.Reset();
-	RuntimeTrackedSessionId.Invalidate();
+	RuntimeTrackedReadinessId.Invalidate();
 }
 
-void UChunkWorldReadinessFreezeComponent::HandleRuntimeWalkerReady(AChunkWorldExtended* ChunkWorld, UObject* Walker, const FGuid SessionId)
+void UChunkWorldReadinessFreezeComponent::HandleRuntimeWalkerReady(AChunkWorldExtended* ChunkWorld, UObject* Walker, const FGuid ReadinessId)
 {
-	if (ChunkWorld == nullptr || SessionId != RuntimeSession.SessionId || Walker != RuntimeTrackedWalker.Get())
+	if (ChunkWorld == nullptr || ReadinessId != RuntimeSession.ReadinessId || Walker != RuntimeTrackedWalker.Get())
 	{
 		return;
 	}
@@ -604,7 +659,7 @@ void UChunkWorldReadinessFreezeComponent::HandleRuntimeWalkerReady(AChunkWorldEx
 	if (!bLocalClientReadyBroadcast && OwnerPawn != nullptr && OwnerPawn->IsLocallyControlled() && RuntimeSession.bRequiresOwningClientReady)
 	{
 		bLocalClientReadyBroadcast = true;
-		OnOwningClientRuntimeReady.Broadcast(SessionId);
+		OnOwningClientRuntimeReady.Broadcast(RuntimeSession.SessionId, RuntimeSession.ReadinessId);
 	}
 	if (GetOwner() != nullptr && GetOwner()->HasAuthority())
 	{
@@ -613,16 +668,82 @@ void UChunkWorldReadinessFreezeComponent::HandleRuntimeWalkerReady(AChunkWorldEx
 	}
 }
 
+void UChunkWorldReadinessFreezeComponent::ObserveLayoutWrites(AChunkWorldExtended* ChunkWorld)
+{
+	if (!GetOwner() || !GetOwner()->HasAuthority() || !ChunkWorld) return;
+	UChunkWorldLayoutRuntimeComponent* Layout = ChunkWorld->GetLayoutRuntimeComponent();
+	if (!Layout || ObservedLayoutWriters.Contains(Layout)) return;
+	ObservedLayoutWriters.Add(Layout);
+	Layout->OnAutomaticLayoutWriteAttempt.AddUObject(this, &UChunkWorldReadinessFreezeComponent::HandleAutomaticLayoutWrite);
+}
+
+void UChunkWorldReadinessFreezeComponent::StopObservingLayoutWrites()
+{
+	for (const auto& Writer : ObservedLayoutWriters)
+		if (UChunkWorldLayoutRuntimeComponent* Layout = Writer.Get()) Layout->OnAutomaticLayoutWriteAttempt.RemoveAll(this);
+	ObservedLayoutWriters.Reset();
+}
+
+void UChunkWorldReadinessFreezeComponent::HandleAutomaticLayoutWrite(AChunkWorldExtended* ChunkWorld, const FBox& WorldBounds)
+{
+	if (!bRuntimeFreezeActive || IsRuntimeSessionTerminal() || !GetOwner() || !GetOwner()->HasAuthority()) return;
+	if (ChunkWorld != RuntimeSession.ChunkWorld && !ObservedChunkWorldStates.ContainsByPredicate(
+		[ChunkWorld](const FObservedChunkWorldState& State) { return State.ChunkWorld == ChunkWorld; })) return;
+	if (WorldBounds.Intersect(FBox(RuntimeSession.CandidateRegion.Minimum, RuntimeSession.CandidateRegion.Maximum)))
+		RearmRuntimeReadiness();
+}
+
+void UChunkWorldReadinessFreezeComponent::RearmRuntimeReadiness()
+{
+	StopLocalRuntimeWalkerTracking();
+	RuntimeSession.ReadinessId = FGuid::NewGuid();
+	RuntimeSession.bServerWalkerReady = false;
+	RuntimeSession.bOwningClientReady = false;
+	bLocalClientReadyBroadcast = false;
+	RuntimeSession.State = EChunkWorldRuntimeReadinessState::WaitingForServerReady;
+	StartLocalRuntimeWalkerTracking();
+}
+
 void UChunkWorldReadinessFreezeComponent::TrySettleRuntimeSession()
 {
-	if (GetOwner() == nullptr || !GetOwner()->HasAuthority() || IsRuntimeSessionTerminal() || !RuntimeSession.bServerWalkerReady)
+	if (GetOwner() == nullptr || !GetOwner()->HasAuthority() || IsRuntimeSessionTerminal()) return;
+	AChunkWorldExtended* ChunkWorld = RuntimeSession.ChunkWorld;
+	if (!ChunkWorld) return;
+	const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+	const UChunkWorldLayoutRuntimeComponent* Layout = ChunkWorld->GetLayoutRuntimeComponent();
+	const FBox Region(RuntimeSession.CandidateRegion.Minimum, RuntimeSession.CandidateRegion.Maximum);
+	bool bPendingLayouts = Layout && Layout->HasPendingAutomaticLayoutWork(Region);
+	if (bStartupFreezeActive)
 	{
+		for (const auto& State : ObservedChunkWorldStates)
+		{
+			AChunkWorldExtended* StartupWorld = State.ChunkWorld.Get();
+			if (StartupWorld && StartupWorld != ChunkWorld && StartupWorld->GetLayoutRuntimeComponent())
+				bPendingLayouts |= StartupWorld->GetLayoutRuntimeComponent()->HasPendingAutomaticLayoutWork(Region);
+		}
+	}
+	if (bPendingLayouts)
+	{
+		if (RuntimeLayoutWaitStartTimeSeconds < 0.0) RuntimeLayoutWaitStartTimeSeconds = Now;
+		RuntimeSession.State = EChunkWorldRuntimeReadinessState::WaitingForLayouts;
+		if (Now - RuntimeLayoutWaitStartTimeSeconds >= FMath::Max(0.0f, RuntimeLayoutWaitTimeoutSeconds))
+		{
+			SetRuntimeTerminal(EChunkWorldRuntimeReadinessState::Failed, EChunkWorldRuntimeReadinessFailure::LayoutWaitTimeout,
+				TEXT("Nearby automatic layout work did not settle before timeout; freeze retained."));
+		}
 		return;
 	}
+	if (RuntimeSession.State == EChunkWorldRuntimeReadinessState::WaitingForLayouts)
+	{
+		RearmRuntimeReadiness();
+		return;
+	}
+	if (!RuntimeSession.bServerWalkerReady) return;
 	if (RuntimeSession.bRequiresOwningClientReady && !RuntimeSession.bOwningClientReady)
 	{
+		if (RuntimeSession.State != EChunkWorldRuntimeReadinessState::WaitingForClientReady)
+			RuntimeSessionStartTimeSeconds = Now;
 		RuntimeSession.State = EChunkWorldRuntimeReadinessState::WaitingForClientReady;
-		RuntimeSessionStartTimeSeconds = GetWorld() != nullptr ? GetWorld()->GetTimeSeconds() : 0.0;
 		return;
 	}
 	FTransform SettledTransform;
@@ -639,7 +760,7 @@ void UChunkWorldReadinessFreezeComponent::TrySettleRuntimeSession()
 bool UChunkWorldReadinessFreezeComponent::HasBoundRuntimeWalker() const
 {
 	AChunkWorldExtended* ChunkWorld = RuntimeTrackedChunkWorld.Get();
-	if (ChunkWorld == nullptr || RuntimeTrackedSessionId != RuntimeSession.SessionId)
+	if (ChunkWorld == nullptr || RuntimeTrackedReadinessId != RuntimeSession.ReadinessId)
 	{
 		return false;
 	}
@@ -711,6 +832,7 @@ void UChunkWorldReadinessFreezeComponent::SetRuntimeTerminal(
 	const FTransform* SettledTransform)
 {
 	StopLocalRuntimeWalkerTracking();
+	StopObservingLayoutWrites();
 	RuntimeSession.State = TerminalState;
 	RuntimeSession.Failure = Failure;
 	RuntimeSession.DebugReason = DebugReason;
@@ -751,6 +873,7 @@ bool UChunkWorldReadinessFreezeComponent::IsRuntimeFreezeActive() const
 	return RuntimeSession.State == EChunkWorldRuntimeReadinessState::WaitingForWalker
 		|| RuntimeSession.State == EChunkWorldRuntimeReadinessState::WaitingForServerReady
 		|| RuntimeSession.State == EChunkWorldRuntimeReadinessState::WaitingForClientReady
+		|| RuntimeSession.State == EChunkWorldRuntimeReadinessState::WaitingForLayouts
 		|| RuntimeSession.State == EChunkWorldRuntimeReadinessState::Failed
 		|| RuntimeSession.State == EChunkWorldRuntimeReadinessState::Canceled;
 }
@@ -762,6 +885,15 @@ bool UChunkWorldReadinessFreezeComponent::IsRuntimeSessionTerminal() const
 		|| RuntimeSession.State == EChunkWorldRuntimeReadinessState::Canceled;
 }
 
+void UChunkWorldReadinessFreezeComponent::NotifyRuntimeStartedOnce()
+{
+	if (!bRuntimeFreezeActive || IsRuntimeSessionTerminal() || !RuntimeSession.SessionId.IsValid()
+		|| LastRuntimeStartedNotificationId == RuntimeSession.SessionId) return;
+	LastRuntimeStartedNotificationId = RuntimeSession.SessionId;
+	const FChunkWorldRuntimeReadinessSession Snapshot = RuntimeSession;
+	OnRuntimeReadinessStarted.Broadcast(Snapshot);
+}
+
 void UChunkWorldReadinessFreezeComponent::NotifyRuntimeTerminalOnce()
 {
 	if (!IsRuntimeSessionTerminal() || !RuntimeSession.SessionId.IsValid() || LastRuntimeTerminalNotificationId == RuntimeSession.SessionId)
@@ -769,23 +901,22 @@ void UChunkWorldReadinessFreezeComponent::NotifyRuntimeTerminalOnce()
 		return;
 	}
 	LastRuntimeTerminalNotificationId = RuntimeSession.SessionId;
-	if (RuntimeSession.State == EChunkWorldRuntimeReadinessState::Settled)
+	// A listener may start another operation; remaining listeners still receive this terminal result.
+	const FChunkWorldRuntimeReadinessSession Snapshot = RuntimeSession;
+	if (Snapshot.State == EChunkWorldRuntimeReadinessState::Settled)
 	{
-		OnRuntimeReadinessSettled.Broadcast(RuntimeSession);
+		OnRuntimeReadinessSettled.Broadcast(Snapshot);
 	}
 	else
 	{
-		OnRuntimeReadinessFailed.Broadcast(RuntimeSession);
+		OnRuntimeReadinessFailed.Broadcast(Snapshot);
 	}
 }
 
 void UChunkWorldReadinessFreezeComponent::HandleObservedChunkWorldReady(AChunkWorldExtended* ChunkWorld)
 {
 	UpdateObservedChunkWorldState(ChunkWorld);
-	if (AreObservedChunkWorldsReady())
-	{
-		ReleaseStartupFreeze();
-	}
+	TryFinishStartupFreeze();
 }
 
 void UChunkWorldReadinessFreezeComponent::OnRep_RuntimeSession()
@@ -810,6 +941,7 @@ void UChunkWorldReadinessFreezeComponent::OnRep_RuntimeSession()
 			GetOwner()->SetActorTransform(FrozenActorTransform, false, nullptr, ETeleportType::TeleportPhysics);
 		}
 		bRuntimeFreezeActive = false;
+		TryFinishStartupFreeze();
 		if (!bStartupFreezeActive && bFreezeStateCaptured)
 		{
 			RestoreFrozenState();
@@ -826,6 +958,7 @@ void UChunkWorldReadinessFreezeComponent::OnRep_RuntimeSession()
 		}
 		bRuntimeFreezeActive = true;
 	}
+	NotifyRuntimeStartedOnce();
 	NotifyRuntimeTerminalOnce();
 	RefreshFreezeTick();
 }

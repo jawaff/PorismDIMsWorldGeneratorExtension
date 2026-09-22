@@ -16,6 +16,9 @@
 #include "Layout/Async/LayoutSolveExecution.h"
 #include "ChunkWorldLayoutRuntimeComponent.generated.h"
 
+class AChunkWorldExtended;
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnAutomaticLayoutWriteAttempt, AChunkWorldExtended*, const FBox&);
+
 class ULayoutProfileAsset;
 class ULayoutWorldBindingAsset;
 class FLayoutActiveBiomeSampler;
@@ -360,6 +363,16 @@ public:
 	/** Drains queued chunk observations and runs planning import plus eligible site/connector realization once. */
 	UFUNCTION(BlueprintCallable, Category = "Layout")
 	void ProcessQueuedLayoutWorkNow();
+
+	/** Game-thread read-only spawn gate over event-owned automatic work.
+	 * Uses a finite world-space box, conservative authored write reach and existing lifetime owners.
+	 * Relevant queued Created intent blocks until drained; Updated/distant/duplicate events do not.
+	 * Explicit previews and terminal omissions do not block. Invalid bounds fail closed on authority. */
+	bool HasPendingAutomaticLayoutWork(const FBox& WorldBounds) const;
+
+	/** Game-thread write-attempt boundary, including failures that may have partially written.
+	 * Receivers invalidate old native receipts; this is not a native collision-complete signal. */
+	FOnAutomaticLayoutWriteAttempt OnAutomaticLayoutWriteAttempt;
 
 	/** Queues loaded coverage from any thread using a zero-based native layer index; grants no Created authority. */
 	void QueueObservedLoadedChunk(const FIntVector& ChunkBlockWorldPos, int32 DetailLevel);
@@ -812,6 +825,12 @@ private:
 
 	/** Returns the owning extension chunk world, or nullptr when the component is detached. */
 	class AChunkWorldExtended* GetOwningChunkWorld() const;
+
+	/** Publishes conservative world-space write coverage after an automatic application attempt. */
+	void NotifyAutomaticLayoutWriteAttempt(const TSet<FIntVector>& RequiredChunkOrigins);
+
+	/** Prevents reentrant readiness queries from observing a partial game-thread handoff. */
+	bool bProcessingQueuedLayoutWork = false;
 
 	/** Queued chunk observations forwarded from worker-thread chunk events. */
 	mutable FCriticalSection PendingChunkLoadsMutex;

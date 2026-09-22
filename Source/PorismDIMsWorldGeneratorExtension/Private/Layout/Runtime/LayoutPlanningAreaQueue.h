@@ -107,10 +107,13 @@ public:
 		DirectoryChanges.SetNum(FMath::Max(DirectoryChanges.Num(), Directory.Num()));
 		for (int32 Level = Count; Level < Directory.Num(); ++Level)
 			DirectoryChanges[Level].Removed += Directory[Level].Chunks.Num();
-		if (Count < Directory.Num()) LastResetReason = TEXT("native layer count shrank");
+		if (Count < Directory.Num())
+		{
+			LastResetReason = TEXT("native layer count shrank");
+			for (auto It = PendingCreatedChunks.CreateIterator(); It; ++It)
+				if (It->Get<0>() >= Count) It.RemoveCurrent();
+		}
 		Directory.SetNum(Count);
-		for (auto It = PendingCreatedChunks.CreateIterator(); It; ++It)
-			if (It->Get<0>() >= Count) It.RemoveCurrent();
 	}
 
 	/** Updates one native observation. Repeated Created/Updated notifications do not restart a settled scan. */
@@ -469,6 +472,20 @@ public:
 		for (const FChunkKey& Key : PendingCreatedChunks)
 			if (!Parked.Contains(Key)) ++Queued;
 		for (const auto& Pair : Areas) if (Pair.Value.Failures.Num() >= 3) ++Exhausted;
+	}
+
+	/** Readiness inspects only event-owned unfinished work, including parked owners.
+	 * Reach conservatively includes writes extending beyond the originating native chunk. */
+	bool HasPendingCreatedWork(const FBox& BoundsInBlocks, const FVector& ReachInBlocks) const
+	{
+		for (const FChunkKey& Key : PendingCreatedChunks)
+		{
+			if (!FindChunk(Key)) continue;
+			const FVector Min(Key.Get<1>());
+			const FVector Max = Min + FVector(Directory[Key.Get<0>()].ChunkSizeInBlocks) - FVector(1.0);
+			if (BoundsInBlocks.Intersect(FBox(Min - ReachInBlocks, Max + ReachInBlocks))) return true;
+		}
+		return false;
 	}
 
 	/** Rejected diagnostics live only as long as the bounded canonical failure allowance. */

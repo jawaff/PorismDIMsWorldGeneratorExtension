@@ -107,13 +107,16 @@ bool FChunkWorldRuntimeReadinessInvalidAcknowledgementTest::RunTest(const FStrin
 	const FGuid SessionId = Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), true);
 	TestTrue(TEXT("Authority starts a bounded player session"), SessionId.IsValid());
 	TestEqual(TEXT("Session binds exact registered owner walker"), Freeze->GetRuntimeReadinessSession().TrackedWalker.Get(), static_cast<UObject*>(Context.Pawn->GetTestWalker()));
-	TestFalse(TEXT("Wrong session acknowledgement is rejected without poisoning active session"), Freeze->AcknowledgeOwningClientRuntimeReady(Context.Controller, FGuid::NewGuid()));
+	TestFalse(TEXT("Wrong session acknowledgement is rejected without poisoning active session"), Freeze->AcknowledgeOwningClientRuntimeReady(Context.Controller, FGuid::NewGuid(), Freeze->GetRuntimeReadinessSession().ReadinessId));
 	TestEqual(TEXT("Wrong session leaves active session waiting"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::WaitingForServerReady);
-	TestFalse(TEXT("Invalid matching acknowledgement is rejected"), Freeze->AcknowledgeOwningClientRuntimeReady(nullptr, SessionId));
+	TestFalse(TEXT("Operation id cannot stand in for the readiness receipt"),
+		Freeze->AcknowledgeOwningClientRuntimeReady(Context.Controller, SessionId, SessionId));
+	TestEqual(TEXT("Wrong readiness receipt leaves active session waiting"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::WaitingForServerReady);
+	TestFalse(TEXT("Invalid matching acknowledgement is rejected"), Freeze->AcknowledgeOwningClientRuntimeReady(nullptr, SessionId, Freeze->GetRuntimeReadinessSession().ReadinessId));
 	const FChunkWorldRuntimeReadinessSession FailedSession = Freeze->GetRuntimeReadinessSession();
 	TestEqual(TEXT("Invalid acknowledgement records terminal failure"), FailedSession.State, EChunkWorldRuntimeReadinessState::Failed);
 	TestEqual(TEXT("Invalid acknowledgement preserves structured cause"), FailedSession.Failure, EChunkWorldRuntimeReadinessFailure::InvalidClientAcknowledgement);
-	TestTrue(TEXT("Repeated acknowledgement for terminal session is idempotent"), Freeze->AcknowledgeOwningClientRuntimeReady(Context.Controller, SessionId));
+	TestTrue(TEXT("Repeated acknowledgement for terminal session is idempotent"), Freeze->AcknowledgeOwningClientRuntimeReady(Context.Controller, SessionId, Freeze->GetRuntimeReadinessSession().ReadinessId));
 	TestEqual(TEXT("Terminal failure remains frozen rather than releasing"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Failed);
 	return true;
 }
@@ -149,13 +152,13 @@ bool FChunkWorldRuntimeReadinessServerSettlementTest::RunTest(const FString& Par
 	TestTrue(TEXT("Startup freeze is active before runtime settlement"), Freeze->IsStartupFreezeActive());
 	const FGuid SessionId = Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), false);
 	TestTrue(TEXT("Authority starts server-only session"), SessionId.IsValid());
-	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), SessionId);
+	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Freeze->GetRuntimeReadinessSession().ReadinessId);
 	const FChunkWorldRuntimeReadinessSession SettledSession = Freeze->GetRuntimeReadinessSession();
 	TestEqual(TEXT("One ready event settles server-only session"), SettledSession.State, EChunkWorldRuntimeReadinessState::Settled);
 	TestTrue(TEXT("Server stores re-anchored transform"), SettledSession.SettledTransform.GetLocation().Z > 0.0f);
 	TestTrue(TEXT("Owner applies server settled transform"), Context.Pawn->GetActorLocation().Equals(SettledSession.SettledTransform.GetLocation()));
 	TestFalse(TEXT("Runtime settlement releases lingering startup freeze"), Freeze->IsStartupFreezeActive());
-	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), SessionId);
+	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Freeze->GetRuntimeReadinessSession().ReadinessId);
 	TestEqual(TEXT("Duplicate ready event cannot reopen or release twice"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Settled);
 	return true;
 }
@@ -180,11 +183,11 @@ bool FChunkWorldRuntimeReadinessClientAcknowledgementTest::RunTest(const FString
 	UChunkWorldReadinessTestFreezeComponent* const Freeze = Context.Pawn->GetTestFreeze();
 	const FGuid SessionId = Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), true);
 	TestTrue(TEXT("Authority starts client-acknowledged player session"), SessionId.IsValid());
-	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), SessionId);
+	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Freeze->GetRuntimeReadinessSession().ReadinessId);
 	TestEqual(TEXT("Server remains frozen while waiting for client acknowledgement"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::WaitingForClientReady);
-	TestTrue(TEXT("Matching possessed controller acknowledgement succeeds"), Freeze->AcknowledgeOwningClientRuntimeReady(Context.Controller, SessionId));
+	TestTrue(TEXT("Matching possessed controller acknowledgement succeeds"), Freeze->AcknowledgeOwningClientRuntimeReady(Context.Controller, SessionId, Freeze->GetRuntimeReadinessSession().ReadinessId));
 	TestEqual(TEXT("Server settles only after matching acknowledgement"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Settled);
-	TestTrue(TEXT("Duplicate valid acknowledgement is idempotent after settlement"), Freeze->AcknowledgeOwningClientRuntimeReady(Context.Controller, SessionId));
+	TestTrue(TEXT("Duplicate valid acknowledgement is idempotent after settlement"), Freeze->AcknowledgeOwningClientRuntimeReady(Context.Controller, SessionId, Freeze->GetRuntimeReadinessSession().ReadinessId));
 	TestEqual(TEXT("Duplicate valid acknowledgement cannot reopen settled session"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Settled);
 	return true;
 }
@@ -207,7 +210,7 @@ bool FChunkWorldRuntimeReadinessInvalidTraceProfileTest::RunTest(const FString& 
 	Freeze->SetSettlementCollisionProfile(TEXT("MissingRuntimeSettlementProfile"));
 	const FGuid SessionId = Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), false);
 	TestTrue(TEXT("Authority starts invalid-profile session"), SessionId.IsValid());
-	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), SessionId);
+	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Freeze->GetRuntimeReadinessSession().ReadinessId);
 	TestEqual(TEXT("Invalid profile retains structured trace failure"), Freeze->GetRuntimeReadinessSession().Failure, EChunkWorldRuntimeReadinessFailure::InvalidTraceProfile);
 	TestEqual(TEXT("Invalid profile retains terminal frozen state"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Failed);
 	return true;
@@ -230,7 +233,7 @@ bool FChunkWorldRuntimeReadinessNoSurfaceTest::RunTest(const FString& Parameters
 	UChunkWorldReadinessTestFreezeComponent* const Freeze = Context.Pawn->GetTestFreeze();
 	const FGuid SessionId = Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), false);
 	TestTrue(TEXT("Authority starts no-surface session"), SessionId.IsValid());
-	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), SessionId);
+	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Freeze->GetRuntimeReadinessSession().ReadinessId);
 	TestEqual(TEXT("No surface retains structured failure"), Freeze->GetRuntimeReadinessSession().Failure, EChunkWorldRuntimeReadinessFailure::NoSettledSurface);
 	TestEqual(TEXT("No surface retains freeze terminal state"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Failed);
 	return true;
@@ -254,7 +257,7 @@ bool FChunkWorldRuntimeReadinessTimeoutTest::RunTest(const FString& Parameters)
 	Freeze->SetClientReadyTimeout(0.0f);
 	const FGuid SessionId = Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), true);
 	TestTrue(TEXT("Authority starts timeout session"), SessionId.IsValid());
-	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), SessionId);
+	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Freeze->GetRuntimeReadinessSession().ReadinessId);
 	Freeze->Advance();
 	TestEqual(TEXT("Timeout records structured failure"), Freeze->GetRuntimeReadinessSession().Failure, EChunkWorldRuntimeReadinessFailure::ClientAcknowledgementTimeout);
 	TestEqual(TEXT("Timeout retains terminal frozen state"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Failed);
