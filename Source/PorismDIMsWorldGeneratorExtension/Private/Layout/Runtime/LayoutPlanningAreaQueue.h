@@ -5,7 +5,8 @@
 #include "Layout/Streaming/LayoutStreamingWindow.h"
 
 /** Game-thread bookkeeping over the component-owned loaded directory.
- * Native chunks own resumable scan cursors, not layout boundaries or quotas. The
+ * Each LOD/origin is admitted to discovery once per generation, even across unload/recreation.
+ * Native lifetimes own resumable scan cursors, not layout boundaries or quotas. The
  * bounded canonical frontier shares failure allowance across overlapping LODs, not completion.
  * Workers capture values only; this queue and its borrowed directory never cross threads.
  */
@@ -14,6 +15,19 @@ class FLayoutPlanningAreaQueue
 public:
 	using FChunkKey = TTuple<int32, FIntVector>;
 
+	/** Required-layer priority is a bounded union of conservative layout-reach boxes, not a new queue. */
+	void SetStartupBounds(const TArray<FBox>& Bounds, const int32 FirstRequiredDetailLevel)
+	{
+		if (StartupBounds == Bounds && StartupFirstDetailLevel == FirstRequiredDetailLevel) return;
+		StartupBounds = Bounds;
+		StartupFirstDetailLevel = FirstRequiredDetailLevel;
+		bNeedsWork = true;
+	}
+	bool IsStartupPosition(const FIntVector& Position) const
+	{
+		for (const FBox& Bounds : StartupBounds) if (Bounds.IsInsideOrOn(FVector(Position))) return true;
+		return false;
+	}
 	/** Queued root/route priority uses nearest-center Chebyshev distance, saturating at far-world coordinates.
 	 * No centers means lowest priority; chunk admission separately measures distance to native coverage. */
 	static int32 ComputePriority(const FIntVector& SiteCenter, const TConstArrayView<FIntVector> Centers)
@@ -48,7 +62,7 @@ public:
 			Chunk->InputRevision = InputRevision;
 			if (bRetireStarted && Chunk->bScanStarted)
 			{
-				Settle(*Chunk, true);
+				Settle(*It, *Chunk, true);
 				It.RemoveCurrent();
 			}
 			// Revision changes fence captures, not the completed prefix or terminal state.
@@ -56,7 +70,7 @@ public:
 		bNeedsWork = true;
 	}
 
-	/** Ends generation coverage; monotonic lifetime/scan identities still fence old callbacks. */
+	/** Starts a new generation's coverage and discovery history; lifetime/scan ids still fence old callbacks. */
 	void ResetLoadedDirectory()
 	{
 		Reset(TEXT("generation lifetime"));
@@ -66,6 +80,9 @@ public:
 			DirectoryChanges[Level].Removed += Directory[Level].Chunks.Num();
 		Directory.Reset();
 		PendingCreatedChunks.Reset();
+		DiscoveryAdmittedChunks.Reset();
+		StartupBounds.Reset();
+		RecreatedDiscoverySkipped = 0;
 		EvictedChunks = 0;
 	}
 
@@ -78,7 +95,7 @@ public:
 			if (!Chunk) { It.RemoveCurrent(); continue; }
 			if (Chunk->bScanStarted)
 			{
-				Settle(*Chunk, true);
+				Settle(*It, *Chunk, true);
 				It.RemoveCurrent();
 			}
 		}
@@ -116,7 +133,8 @@ public:
 		Directory.SetNum(Count);
 	}
 
-	/** Updates one native observation. Repeated Created/Updated notifications do not restart a settled scan. */
+	/** Updates native lifetime authority. Only the first Created for a LOD/origin in this generation
+	 * admits discovery; recreation restores coverage but never retries abandoned or completed discovery. */
 	bool Observe(const FChunkKey& Key, const FIntVector Size, const bool bCreated)
 	{
 		if (Key.Get<0>() < 0 || Size.GetMin() <= 0) return false;
@@ -129,7 +147,7 @@ public:
 			if (bChanged)
 			{
 				++CreatedGrants;
-				PendingCreatedChunks.Add(Key);
+				AdmitCreatedDiscovery(Key, *Chunk);
 				Chunk->InputRevision = InputRevision;
 			}
 			else if (bCreated) ++DuplicateCreated;
@@ -143,21 +161,22 @@ public:
 		Chunk.bCreated = bCreated;
 		Chunk.Lifetime = ++NextLifetime;
 		Chunk.InputRevision = InputRevision;
+		if (bCreated)
+		{
+			++CreatedGrants;
+			AdmitCreatedDiscovery(Key, Chunk);
+		}
+		else ++UpdatedOnly;
 		Layer.Chunks.Add(Key.Get<1>(), Chunk);
 		DirectoryChanges.SetNum(FMath::Max(DirectoryChanges.Num(), Key.Get<0>() + 1));
 		++DirectoryChanges[Key.Get<0>()].Added;
 		bNeedsWork |= bCreated;
-		if (bCreated)
-		{
-			++CreatedGrants;
-			PendingCreatedChunks.Add(Key);
-		}
-		else ++UpdatedOnly;
 		WakeCoverageWaits(Key);
 		return true;
 	}
 
-	/** Removes just this LOD's lifetime. Pending scan results cannot attach to a later recreation. */
+	/** Ends this native lifetime and its pending work, retaining generation-wide discovery history.
+	 * Pending scan results cannot attach to a later recreation, nor can recreation enqueue another scan. */
 	bool Forget(const FChunkKey& Key)
 	{
 		if (!Directory.IsValidIndex(Key.Get<0>()) || Directory[Key.Get<0>()].Chunks.Remove(Key.Get<1>()) == 0) return false;
@@ -199,9 +218,10 @@ public:
 		int32 Parked = 0;
 		for (const auto& Pair : Areas)
 			Parked += !Pair.Value.bCompleted && !Pair.Value.bQueued && !Pair.Value.bScanning;
-		return FString::Printf(TEXT("generation=%llu inputRevision=%llu reset=%s loaded=%d backlog=%d screening=%d frontier=%d working=%d parked=%d created=%llu duplicateCreated=%llu updatedOnly=%llu completed=%llu retired=%llu%s"),
+		return FString::Printf(TEXT("generation=%llu inputRevision=%llu reset=%s loaded=%d backlog=%d screening=%d frontier=%d working=%d parked=%d created=%llu duplicateCreated=%llu updatedOnly=%llu completed=%llu retired=%llu discoveryAdmitted=%d recreatedDiscoverySkipped=%llu%s"),
 			Generation, InputRevision, *LastResetReason, Loaded, Backlog, Screening, Areas.Num(), WorkingChunks.Num(),
-			Parked, CreatedGrants, DuplicateCreated, UpdatedOnly, CompletedTraversals, RetiredTraversals, *Layers);
+			Parked, CreatedGrants, DuplicateCreated, UpdatedOnly, CompletedTraversals, RetiredTraversals,
+			DiscoveryAdmittedChunks.Num(), RecreatedDiscoverySkipped, *Layers);
 	}
 
 	/** Selects one nearest useful native chunk per rotating center turn. No per-player queues or captures. */
@@ -221,6 +241,7 @@ public:
 			TOptional<FChunkKey> Best;
 			FIntPoint BestArea = FIntPoint::ZeroValue, BestStart = FIntPoint::ZeroValue;
 			int64 BestOffset = 0, BestDistance = MAX_int64;
+			bool bBestStartup = false;
 			// Created callbacks alone enqueue work; loaded coverage is never searched for candidates.
 			for (auto It = PendingCreatedChunks.CreateIterator(); It; ++It)
 			{
@@ -242,7 +263,7 @@ public:
 				const int64 Count = Columns * (int64(Last.Y) - First.Y + 1);
 				if (Offset >= Count)
 				{
-					Settle(Chunk);
+					Settle(Key, Chunk);
 					WorkingChunks.Remove(Key);
 					It.RemoveCurrent();
 					continue;
@@ -265,8 +286,11 @@ public:
 					if (!bSameOwner && (!State->InFlight.IsEmpty() || (!State->bCompleted && IsOwnerCurrent(*State)))) continue;
 				}
 				const int64 Distance = DistanceToChunk(Key, Center);
-				if (!Best.IsSet() || Distance < BestDistance || (Distance == BestDistance && KeyBefore(Key, Best.GetValue())))
+				const bool bStartup = IsStartupKey(Key);
+				if (!Best.IsSet() || (bStartup != bBestStartup ? bStartup
+					: Distance < BestDistance || (Distance == BestDistance && KeyBefore(Key, Best.GetValue()))))
 				{
+					bBestStartup = bStartup;
 					Best = Key;
 					BestArea = Area;
 					BestStart = Start;
@@ -289,7 +313,7 @@ public:
 			State.ScanId = ++NextScanId;
 			State.bScanning = true;
 			State.bQueued = false;
-			State.bCompleted = State.bDeferred = State.bWaitingCoverage = State.bWakeDuringScan = false;
+			State.bCompleted = State.bDeferred = State.bWaitingCoverage = State.bWakeDuringScan = State.bCapacityReleasedDuringScan = false;
 			State.BlockingReservations.Reset();
 			OutArea = BestArea;
 			SelectedCenter = Center;
@@ -343,8 +367,10 @@ public:
 		FState& State = Areas.FindChecked(Area);
 		State.bScanning = false;
 		State.bDeferred = bDeferred;
-		State.bQueued = bCanceled || State.bWakeDuringScan;
-		State.bWakeDuringScan = false;
+		// Preserve capacity released before publication without polling genuinely blocked work
+		// or reopening a completed empty scan.
+		State.bQueued = bCanceled || State.bWakeDuringScan || (bDeferred && State.bCapacityReleasedDuringScan);
+		State.bWakeDuringScan = State.bCapacityReleasedDuringScan = false;
 		State.bCompleted = (!State.bQueued && !bDeferred && !State.bWaitingCoverage && State.BlockingReservations.IsEmpty())
 			|| State.Failures.Num() >= 3;
 		FLayoutLoadedChunkState& Chunk = *FindChunk(State.Owner);
@@ -356,7 +382,7 @@ public:
 			GetChunkAreas(State.Owner, First, Last);
 			if (Chunk.ScanOffset >= (int64(Last.X) - First.X + 1) * (int64(Last.Y) - First.Y + 1))
 			{
-				Settle(Chunk);
+				Settle(State.Owner, Chunk);
 				WorkingChunks.Remove(State.Owner);
 				PendingCreatedChunks.Remove(State.Owner);
 			}
@@ -444,7 +470,9 @@ public:
 		for (auto& Pair : Areas)
 		{
 			FState& Candidate = Pair.Value;
-			if (Candidate.bDeferred || Candidate.bScanning) Wake(Candidate);
+			// Publication consumes this edge only if it reports deferred work.
+			Candidate.bCapacityReleasedDuringScan |= Candidate.bScanning;
+			if (Candidate.bDeferred) Wake(Candidate);
 		}
 		bNeedsWork = true;
 	}
@@ -474,16 +502,44 @@ public:
 		for (const auto& Pair : Areas) if (Pair.Value.Failures.Num() >= 3) ++Exhausted;
 	}
 
-	/** Readiness inspects only event-owned unfinished work, including parked owners.
-	 * Reach conservatively includes writes extending beyond the originating native chunk. */
-	bool HasPendingCreatedWork(const FBox& BoundsInBlocks, const FVector& ReachInBlocks) const
+	/** Readiness inspects only the unprocessed cursor suffix, including active/parked areas.
+	 * Completed nearby areas never wait for a coarse owner's distant remainder. Reach still
+	 * includes writes extending beyond candidate-center ownership; submitted roots are tracked separately. */
+	bool HasPendingCreatedWork(const FBox& BoundsInBlocks, const FVector& ReachInBlocks, const int32 FirstRequiredDetailLevel) const
 	{
 		for (const FChunkKey& Key : PendingCreatedChunks)
 		{
-			if (!FindChunk(Key)) continue;
+			if (Key.Get<0>() < FirstRequiredDetailLevel) continue;
+			const FLayoutLoadedChunkState* Chunk = FindChunk(Key);
+			if (!Chunk) continue;
 			const FVector Min(Key.Get<1>());
 			const FVector Max = Min + FVector(Directory[Key.Get<0>()].ChunkSizeInBlocks) - FVector(1.0);
-			if (BoundsInBlocks.Intersect(FBox(Min - ReachInBlocks, Max + ReachInBlocks))) return true;
+			const FBox Query = BoundsInBlocks.ExpandBy(ReachInBlocks).Overlap(FBox(Min, Max));
+			if (!Query.IsValid) continue;
+			if (!Chunk->bScanStarted) return true;
+
+			FIntPoint First, Last;
+			GetChunkAreas(Key, First, Last);
+			const int64 Columns = int64(Last.X) - First.X + 1;
+			const int64 Count = Columns * (int64(Last.Y) - First.Y + 1);
+			if (Chunk->ScanOffset >= Count) continue;
+			const int64 Width = int64(SampleSpacing) * 4;
+			const int64 Left = FMath::FloorToInt64(Query.Min.X / Width) - First.X;
+			const int64 Right = FMath::FloorToInt64(Query.Max.X / Width) - First.X;
+			const int64 Top = FMath::FloorToInt64(Query.Min.Y / Width) - First.Y;
+			const int64 Bottom = FMath::FloorToInt64(Query.Max.Y / Width) - First.Y;
+			const int64 Start = (int64(Chunk->ScanStartArea.Y) - First.Y) * Columns + Chunk->ScanStartArea.X - First.X;
+			const int64 Begin = (Start + Chunk->ScanOffset) % Count;
+			const int64 End = Begin + Count - Chunk->ScanOffset - 1;
+			// Intersect a row-major interval with the query rectangle in constant time.
+			const auto Intersects = [&](const int64 Lower, const int64 Upper)
+			{
+				int64 Row = FMath::Max(Top, Lower / Columns);
+				int64 Column = FMath::Max(Left, Lower - Row * Columns);
+				if (Column > Right) { ++Row; Column = Left; }
+				return Row <= Bottom && Row * Columns + Column <= Upper;
+			};
+			if (Intersects(Begin, FMath::Min(End, Count - 1)) || (End >= Count && Intersects(0, End - Count))) return true;
 		}
 		return false;
 	}
@@ -508,11 +564,25 @@ private:
 		int64 OwnerOffset = 0;
 		bool bQueued = true, bScanning = false, bDeferred = false, bCompleted = false;
 		TSet<FString> BlockingReservations;
-		bool bWaitingCoverage = false, bWakeDuringScan = false;
+		bool bWaitingCoverage = false, bWakeDuringScan = false, bCapacityReleasedDuringScan = false;
 		TSet<FString> Failures, InFlight;
 	};
 
-	void Settle(FLayoutLoadedChunkState& Chunk, const bool bRetired = false)
+	/** Consumes discovery admission before any worker starts. Delete/eviction may abandon that attempt;
+	 * a later Created lifetime still retains write authority, but must not refill discovery or screening. */
+	void AdmitCreatedDiscovery(const FChunkKey& Key, FLayoutLoadedChunkState& Chunk)
+	{
+		if (DiscoveryAdmittedChunks.Contains(Key))
+		{
+			Chunk.Screening = ELayoutChunkScreening::Settled;
+			++RecreatedDiscoverySkipped;
+			return;
+		}
+		DiscoveryAdmittedChunks.Add(Key);
+		PendingCreatedChunks.Add(Key);
+	}
+
+	void Settle(const FChunkKey& Key, FLayoutLoadedChunkState& Chunk, const bool bRetired = false)
 	{
 		if (Chunk.Screening == ELayoutChunkScreening::Settled || Chunk.Screening == ELayoutChunkScreening::Irrelevant) return;
 		Chunk.Screening = ELayoutChunkScreening::Settled;
@@ -582,7 +652,7 @@ private:
 	{
 		int64 Distance = MAX_int64;
 		for (const FIntVector Center : LastCenters) Distance = FMath::Min(Distance, DistanceToChunk(Key, Center));
-		return Distance;
+		return IsStartupKey(Key) ? MIN_int64 / 2 + FMath::Min<int64>(Distance, MAX_int32) : Distance;
 	}
 	bool Promote(const FChunkKey& Key)
 	{
@@ -597,6 +667,7 @@ private:
 		int64 Distance = IncomingDistance;
 		for (const FChunkKey& Key : WorkingChunks)
 		{
+			if (IsStartupKey(Key)) continue;
 			bool bBusy = false;
 			for (const auto& Pair : Areas)
 				bBusy |= Pair.Value.Owner == Key && (Pair.Value.bScanning || !Pair.Value.InFlight.IsEmpty());
@@ -610,7 +681,7 @@ private:
 		}
 		if (!Victim.IsSet()) return false;
 		WorkingChunks.Remove(Victim.GetValue());
-		if (FLayoutLoadedChunkState* Chunk = FindChunk(Victim.GetValue())) Settle(*Chunk, true);
+		if (FLayoutLoadedChunkState* Chunk = FindChunk(Victim.GetValue())) Settle(Victim.GetValue(), *Chunk, true);
 		PendingCreatedChunks.Remove(Victim.GetValue());
 		++EvictedChunks;
 		return true;
@@ -622,7 +693,8 @@ private:
 		uint64 Oldest = MAX_uint64;
 		for (const auto& Pair : Areas)
 		{
-			if (!Pair.Value.bScanning && Pair.Value.InFlight.IsEmpty() && Pair.Value.ScanId < Oldest)
+			if (!Pair.Value.bScanning && Pair.Value.InFlight.IsEmpty() && Pair.Value.ScanId < Oldest
+				&& (Pair.Value.bCompleted || !IsStartupKey(Pair.Value.Owner)))
 			{
 				Victim = Pair.Key;
 				Oldest = Pair.Value.ScanId;
@@ -632,7 +704,7 @@ private:
 		const FState& State = Areas.FindChecked(Victim.GetValue());
 		if (!State.bCompleted && IsOwnerCurrent(State))
 		{
-			Settle(*FindChunk(State.Owner), true);
+			Settle(State.Owner, *FindChunk(State.Owner), true);
 			WorkingChunks.Remove(State.Owner);
 			PendingCreatedChunks.Remove(State.Owner);
 		}
@@ -645,6 +717,20 @@ private:
 	uint64 Generation = 0;
 	FString LastResetReason = TEXT("none");
 	TArray<FLayoutLoadedChunkLayer>& Directory;
+	/** Generation-wide admission ledger, populated only by Created. Never evict entries on unload or cache pressure:
+	 * exact once-only discovery requires memory proportional to unique LOD/origins visited until generation reset. */
+	TSet<FChunkKey> DiscoveryAdmittedChunks;
+	TArray<FBox> StartupBounds;
+	int32 StartupFirstDetailLevel = 0;
+	bool IsStartupKey(const FChunkKey& Key) const
+	{
+		if (Key.Get<0>() < StartupFirstDetailLevel || !Directory.IsValidIndex(Key.Get<0>())) return false;
+		const FVector Min(Key.Get<1>());
+		const FBox ChunkBounds(Min, Min + FVector(Directory[Key.Get<0>()].ChunkSizeInBlocks) - FVector(1.0));
+		for (const FBox& Bounds : StartupBounds) if (Bounds.Intersect(ChunkBounds)) return true;
+		return false;
+	}
+	uint64 RecreatedDiscoverySkipped = 0;
 	/** Event-owned discovery backlog, removed on completion/retirement; never rebuilt from coverage. */
 	TSet<FChunkKey> PendingCreatedChunks;
 	TSet<FChunkKey> WorkingChunks;

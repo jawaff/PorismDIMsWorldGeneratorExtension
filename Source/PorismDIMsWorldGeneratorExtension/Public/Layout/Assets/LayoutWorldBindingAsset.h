@@ -152,6 +152,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Layout|Metrics", meta = (ToolTip = "Request-owned template placement offset in block units. Use this to align the intended floor plane with terrain so the first realized block layer overlaps the sampled surface cleanly instead of hovering apart."))
 	int32 TemplatePlacementZOffsetBlocks = 0;
 
+	/** One automatic candidate per XY bucket, measured in normal binding cells rather than chunks. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Layout|Planning", meta = (ClampMin = "1", UIMin = "1", ToolTip = "Automatic candidate pitch in normal binding cells. Multiply XY by Base Cell Dimensions Blocks for block spacing: (10,10) with (5,5) block cells gives 50x50-block buckets. Larger pitch reduces discovery work and density; small biome pockets may be missed. Minimum Root Gap still enforces footprint clearance."))
+	FIntPoint SiteSpacingInCells = FIntPoint(1, 1);
+
+	/** Deterministic in-bucket positional variation; candidates remain normal-cell aligned. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Layout|Planning", meta = (ClampMin = "0", ClampMax = "1", UIMin = "0", UIMax = "1", ToolTip = "Automatic candidate jitter within each spacing bucket: 0 selects its central normal cell, 1 permits the full bucket. Pitch one has no jitter room. Start sparse bindings near 0.8 and inspect appearance. World seed and binding identity determine offsets; biome checks use the final position, with no reroll on rejection."))
+	float SiteJitterFraction = 0.8f;
+
 	/** All automatic root candidates share this edge-to-edge XY gap in normal binding cells. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Layout|Planning", meta = (ClampMin = "0", UIMin = "0", DisplayName = "Minimum Root Gap (Cells)", ToolTip = "Minimum free XY gap between authored root footprints across all candidates in this binding. Uses Base Cell Dimensions Blocks, so 5 cells at 5 blocks means 25 free blocks. Zero adds no clearance beyond overlap protection. Direct Layout Generator placement is not constrained by this setting."))
 	int32 MinimumRootGapCells = 0;

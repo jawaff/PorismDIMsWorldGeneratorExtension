@@ -137,9 +137,17 @@ Create a `ULayoutWorldBindingAsset`. Set `BiomeRowNames`, weighted `Candidates` 
 3. Enable **Enable Automatic Layout Planning**. Possessed characters set priorities; **Follow Editor Camera** also includes the same-world perspective editor camera.
 4. Start terrain generation and enable **Show Debug Stats** to inspect admission and placement.
 
-Automatic planning considers eligible loaded terrain at every LOD. Centers set priority, not an admission radius. A loaded coarse chunk can become useful as a character approaches without another Created event. Discovery samples neighboring biome space across chunk boundaries; one chunk can hold several roots and one root can span several chunks.
+Automatic planning admits each native `Created` LOD/origin once per generation. Centers set priority, not an admission radius; current finest-LOD areas retain priority after startup. Discovery can sample neighboring biome space across chunk boundaries, but the final candidate position must remain inside its Created owner. One chunk can hold several roots and one root can span several chunks.
 
-`MaxCachedPlanningChunks` defaults to **256**, shared by the whole chunk world. It limits working chunks and, separately, unfinished automatic root/route owners, including solved-waiting results and canceled captures awaiting retirement. Compact current-loaded metadata is separate; this is not a RAM-byte limit. Under pressure, farther unstarted work yields before farther waiting results. Running work finishes. Eviction can lose an opportunity; revisiting can permit another solve. No centers retires automatic work while preserving loaded-root protection and explicit previews.
+Configure automatic candidate spacing on the binding:
+
+- `SiteSpacingInCells`: positive XY pitch in normal binding cells, default `(1,1)`. Multiply by `BaseCellDimensionsBlocks` for block spacing. Pitch `(10,10)` with 5-by-5-block cells gives 50-by-50-block buckets.
+- `SiteJitterFraction`: finite `0..1`, default `0.8`. Zero uses the bucket's central normal cell; one permits offsets throughout the bucket. Pitch one has no jitter room. Positions remain cell-aligned and repeat from world seed, binding identity and bucket coordinates, including negative coordinates.
+- `MinimumRootGapCells` still enforces footprint clearance; pitch does not guarantee it. `OccupancyProbability` remains a separate final-XYZ acceptance draw.
+
+Each bucket supplies one candidate before biome/terrain qualification. Rejection leaves a hole; there is no dense fallback or reroll. Sparse settings reduce candidate work but may miss small biome pockets. Inspect appearance before choosing production values. Empty candidate areas skip capture and worker submission.
+
+`MaxCachedPlanningChunks` defaults to **256**, shared by the whole chunk world. It limits working chunks and, separately, unfinished automatic root/route owners, including solved-waiting results and canceled captures awaiting retirement. Compact current-loaded metadata is separate; this is not a RAM-byte limit. Under pressure, farther unstarted work yields before farther waiting results. Running work finishes. Eviction can lose an opportunity; unload/recreation or revisiting cannot readmit that owner's completed or retired discovery. No centers retires automatic work while preserving loaded-root protection and explicit previews.
 
 Fresh eligibility trusts native `Created` intent at every LOD. `Updated` alone neither grants fresh authority nor proves restoration. Realization requires full template/write/support coverage, rejects explicit restore marks and resolves support materials from actual available layer data before writing. The extension does not replace native save provenance. Accepted roots retain world-coordinate duplicate protection through overlapping LOD changes. Coarse visual output and finer-layer refresh still need validation in your world.
 

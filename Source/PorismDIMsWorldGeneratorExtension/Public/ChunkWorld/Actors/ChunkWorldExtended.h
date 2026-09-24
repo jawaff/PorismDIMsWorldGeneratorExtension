@@ -109,6 +109,13 @@ public:
 	 */
 	AChunkWorldExtended();
 
+	/** Validate a storage identity without normalizing it into a different name or touching disk.
+	 *  Accepts 1-64 ASCII letters/digits/underscore/hyphen, excluding Windows device names. */
+	static bool ValidateWorldStorageName(const FString& Name, FString& OutError);
+
+	/** Authored identity; the storage lifecycle captures its own immutable copy for each run. */
+	const FString& GetWorldStorageName() const { return WorldStorageName; }
+
 	/**
 	 * Sizes chunk-world custom-data storage from the active schema registry before Porism compiles runtime config.
 	 */
@@ -282,6 +289,9 @@ protected:
 	virtual TArray<FInstanceMeshInfos> OnChunkUpdateEdit_Implementation(FIntVector chunkBlockWorldPos, int detailLevel, UPARAM(ref) TArray<FInstanceMeshInfos>& newMeshInstances) override;
 
 #if WITH_EDITOR
+	/** Storage identity is authored only while generation is stopped. */
+	virtual bool CanEditChange(const FProperty* InProperty) const override;
+
 	/** Debug switches do not reconstruct the actor, so their pre-edit must not unregister its ticking/rendering components. */
 	virtual void PreEditChange(FProperty* PropertyThatWillChange) override;
 
@@ -293,6 +303,9 @@ protected:
 	virtual void PostLoad() override;
 
 private:
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chunk World|Storage", meta = (AllowPrivateAccess = "true", ToolTip = "Storage policy identity: Default selects a disposable session; another valid name selects a retained world. Default cleanup includes a real editor regeneration. Use 1-64 ASCII letters, digits, underscores or hyphens, excluding Windows device names. Changing names is not Save As and copies no terrain. Stop generation before editing. Retention requires the session-storage lifecycle; name validation alone does not change existing save/cache behavior."))
+	FString WorldStorageName = TEXT("Default");
+
 	struct FChunkWorldWalkerReadyState
 	{
 		TWeakObjectPtr<UObject> Walker;

@@ -411,7 +411,7 @@ namespace
 
 		ProbeHarness.RuntimeComponent->SetLayoutWorldBindings({WorldBinding});
 		ProbeHarness.TrackPlanningCharacter(FIntVector(8, 8, 0));
-		ProbeHarness.World->OnChunkCreate(FIntVector::ZeroValue, ProbeHarness.World->GetChunkLayerCount() - 1, {});
+		ProbeHarness.World->OnChunkCreate(FIntVector::ZeroValue, ProbeHarness.World->GetChunkLayerCount(), {});
 		ProbeHarness.RuntimeComponent->RunQueuedLayoutWorkForTesting();
 		const TArray<FResolvedLayoutSiteRecord> SiteRecords = ProbeHarness.RuntimeComponent->GetResolvedLayoutSiteRecords();
 		if (!Test.TestEqual(TEXT("Required-chunk-origin probe imports one resolved site"), SiteRecords.Num(), 1))
@@ -1160,7 +1160,7 @@ bool FLayoutRuntimePlanningWindowSolveDiagnosticsTest::RunTest(const FString& Pa
 	for (const TCHAR* Origin : {TEXT("automatic"), TEXT("explicit")})
 		AddExpectedMessage(FString::Printf(TEXT("\\[LayoutSolveDiag\\] origin=%s .* event=terrain-writes fill="), Origin), ELogVerbosity::Display);
 	Harness.TrackPlanningCharacter(FIntVector(8, 8, 49));
-	Harness.World->OnChunkCreate(FIntVector(0, 0, 48), Harness.World->GetChunkLayerCount() - 1, {});
+	Harness.World->OnChunkCreate(FIntVector(0, 0, 48), Harness.World->GetChunkLayerCount(), {});
 	Harness.RuntimeComponent->ProcessQueuedLayoutWorkNow();
 	for (int32 Index = 0; Index < 200; ++Index) Harness.RuntimeComponent->PumpBackgroundLayoutSolves();
 	const auto Records = Store->GetPlannedLayoutSiteRecords();
@@ -1397,10 +1397,7 @@ bool FLayoutRuntimePlanningWindowPreparationTest::RunTest(const FString& Paramet
 	Created.DetailLevel = Harness.World->GetChunkLayerCount() - 1;
 	Created.EventType = EChunkWorldChunkLifecycleEventType::Created;
 	Harness.RuntimeComponent->HandleObservedLoadedChunk(Created);
-	FIntPoint Area, Min, Max;
-	TestTrue(TEXT("Area preparation is selected"), Harness.RuntimeComponent->PlanningAreaQueue->TakeNext({FIntVector::ZeroValue}, Area));
-	Harness.RuntimeComponent->PlanningAreaQueue->GetBounds(Area, Min, Max);
-	Harness.RuntimeComponent->SubmitPlanningAreaDiscovery(Area, FIntVector::ZeroValue, Min, Max);
+	Harness.RuntimeComponent->SubmitPlanningAreaDiscovery({FIntVector::ZeroValue});
 	TestTrue(TEXT("Area preparation is admitted"), Harness.RuntimeComponent->PendingPlanningAreaDiscovery.IsSet());
 	TestEqual(TEXT("Admission does not run location or terrain preparation"), Observer->PreparationPhasesRan, 0);
 	TestEqual(TEXT("Admission does not sample dense selected-site terrain"),
@@ -1415,12 +1412,17 @@ bool FLayoutRuntimePlanningWindowPreparationTest::RunTest(const FString& Paramet
 	TestEqual(TEXT("Preparation longer than solve timeout still permits the captured root solve"),
 		Store->GetPlannedLayoutSiteRecordsByState(EPlannedLayoutSiteState::Accepted).Num(), 1);
 
-	// Scheduling-only suffix: a successful empty discovery must permit the next area
-	// on the next pass, even though priority housekeeping remains inside its interval.
+	// Scheduling-only suffix: publish a controlled completion and select its successor
+	// in one pass, without waiting for priority housekeeping or recursively pumping.
 	class FEmptyDiscoveryExecution : public FSynchronousLayoutSolveExecution
 	{
 	public:
 		int32 Submitted = 0;
+		bool bReleaseCompletions = false;
+		void ProcessCompletions() override
+		{
+			if (bReleaseCompletions) FSynchronousLayoutSolveExecution::ProcessCompletions();
+		}
 		void Enqueue(FLayoutBackgroundSolveWork Work, FLayoutSolveCancellationToken Token,
 			TFunction<void(FLayoutBackgroundSolveCompletion)> OnComplete) override
 		{
@@ -1430,9 +1432,11 @@ bool FLayoutRuntimePlanningWindowPreparationTest::RunTest(const FString& Paramet
 		}
 	};
 	Harness.RuntimeComponent->ResetResolvedLayoutRecords(true);
+	// Independent scheduling fixture cannot replay this generation's already-admitted owner.
+	Harness.RuntimeComponent->PlanningAreaQueue->ResetLoadedDirectory();
 	Harness.World->WorldGenDef->WorldBiomes = SourceRows;
 	auto EmptyExecution = MakeUnique<FEmptyDiscoveryExecution>();
-	const auto* EmptyObserver = EmptyExecution.Get();
+	auto* EmptyObserver = EmptyExecution.Get();
 	Harness.RuntimeComponent->BackgroundSolveDispatcher.Reset();
 	Harness.RuntimeComponent->SetLayoutSolveExecutionForTesting(MoveTemp(EmptyExecution));
 	Harness.RuntimeComponent->SetDisableAutoPumpForTesting(true);
@@ -1440,17 +1444,87 @@ bool FLayoutRuntimePlanningWindowPreparationTest::RunTest(const FString& Paramet
 	Harness.RuntimeComponent->LastPlanningWindowUpdateTimeSeconds = FPlatformTime::Seconds();
 	Harness.RuntimeComponent->UpdateLoadedChunkPlanning();
 	TestTrue(TEXT("Discovery admission does not wait for priority housekeeping"), Harness.RuntimeComponent->PendingPlanningAreaDiscovery.IsSet());
+	const auto FirstCapture = Harness.RuntimeComponent->CachedDiscoveryInputs;
+	TestTrue(TEXT("Discovery retains immutable static inputs"), FirstCapture.IsValid());
 	Harness.RuntimeComponent->UpdateLoadedChunkPlanning();
 	TestEqual(TEXT("Unfinished discovery cannot queue duplicate captures"), EmptyObserver->Submitted, 1);
-	Harness.RuntimeComponent->PumpBackgroundLayoutSolves();
-	TestFalse(TEXT("Publication never recursively admits the next discovery"), Harness.RuntimeComponent->PendingPlanningAreaDiscovery.IsSet());
+	EmptyObserver->bReleaseCompletions = true;
 	Harness.RuntimeComponent->UpdateLoadedChunkPlanning();
-	TestEqual(TEXT("Completed empty discovery wakes another area without a one-second wait"), EmptyObserver->Submitted, 2);
+	TestEqual(TEXT("Completion publishes and admits exactly one successor in the same pass"), EmptyObserver->Submitted, 2);
+	TestTrue(TEXT("Successor remains queued, not recursively completed"), Harness.RuntimeComponent->PendingPlanningAreaDiscovery.IsSet());
+	TestTrue(TEXT("Successor reuses unchanged captures"), Harness.RuntimeComponent->CachedDiscoveryInputs == FirstCapture);
+	Harness.RuntimeComponent->InvalidateAutomaticPlanningInputs();
+	TestFalse(TEXT("Input revision drops static captures"), Harness.RuntimeComponent->CachedDiscoveryInputs.IsValid());
+	Harness.RuntimeComponent->UpdateLoadedChunkPlanning();
+	TestTrue(TEXT("Replacement input captures fresh data"), Harness.RuntimeComponent->CachedDiscoveryInputs.IsValid()
+		&& Harness.RuntimeComponent->CachedDiscoveryInputs != FirstCapture);
 	AddInfo(FString::Printf(TEXT("Bounded discovery check: selection={%s} capture={%s} publication={%s}; empty worker suffix tests admission, not scene throughput."),
 		*Harness.RuntimeComponent->DiscoverySelectionTiming.Describe(), *Harness.RuntimeComponent->DiscoveryCaptureTiming.Describe(),
 		*Harness.RuntimeComponent->DiscoveryPublicationTiming.Describe()));
 	Harness.RuntimeComponent->CancelPlanningAreaDiscovery();
 	Harness.RuntimeComponent->PumpBackgroundLayoutSolves();
+
+	// Warm captures and several owners exercise bounded batching without timing the solver.
+	Harness.RuntimeComponent->PlanningAreaQueue->ResetLoadedDirectory();
+	for (int32 Index = 0; Index < 8; ++Index)
+		Harness.RuntimeComponent->PlanningAreaQueue->Observe(
+			MakeTuple(Created.DetailLevel, FIntVector(Index * 32, 0, 48)), FIntVector(16), true);
+	EmptyObserver->bReleaseCompletions = false;
+	const int32 SubmittedBeforeBatch = EmptyObserver->Submitted;
+	const uint64 CompletedBeforeBatch = Harness.RuntimeComponent->CompletedDiscoveryAreas;
+	const double BatchStart = FPlatformTime::Seconds();
+	Harness.RuntimeComponent->SubmitPlanningAreaDiscovery({FIntVector::ZeroValue});
+	const double BatchElapsed = FPlatformTime::Seconds() - BatchStart;
+	if (!TestTrue(TEXT("Selected batch is pending"), Harness.RuntimeComponent->PendingPlanningAreaDiscovery.IsSet())) return false;
+	const auto BatchScans = Harness.RuntimeComponent->PendingPlanningAreaDiscovery->Scans;
+	TestTrue(TEXT("Warm discovery batches multiple owners unless capture budget expires"), BatchScans.Num() > 1 || BatchElapsed >= 0.001);
+	TestTrue(TEXT("Discovery batch is capped at four areas"), BatchScans.Num() <= 4);
+	TestEqual(TEXT("Several areas share one worker submission"), EmptyObserver->Submitted, SubmittedBeforeBatch + 1);
+	Harness.RuntimeComponent->bLoadedInfluenceDirty = false;
+	EmptyObserver->bReleaseCompletions = true;
+	Harness.RuntimeComponent->PumpBackgroundLayoutSolves();
+	TestEqual(TEXT("One completion publishes all batch areas"), Harness.RuntimeComponent->CompletedDiscoveryAreas,
+		CompletedBeforeBatch + uint64(BatchScans.Num()));
+	TestFalse(TEXT("Empty publication leaves loaded coverage clean"), Harness.RuntimeComponent->bLoadedInfluenceDirty);
+	TestFalse(TEXT("Publication releases batch without recursive admission"), Harness.RuntimeComponent->PendingPlanningAreaDiscovery.IsSet());
+	for (const auto& Scan : BatchScans)
+		TestFalse(TEXT("Each area settles its own scan"), Harness.RuntimeComponent->PlanningAreaQueue->IsCurrentScan(Scan.Area, Scan.ScanId));
+
+	EmptyObserver->bReleaseCompletions = false;
+	Harness.RuntimeComponent->SubmitPlanningAreaDiscovery({FIntVector::ZeroValue});
+	if (!TestTrue(TEXT("Another batch can be canceled"), Harness.RuntimeComponent->PendingPlanningAreaDiscovery.IsSet())) return false;
+	const auto CanceledScans = Harness.RuntimeComponent->PendingPlanningAreaDiscovery->Scans;
+	const uint64 CompletedBeforeCancel = Harness.RuntimeComponent->CompletedDiscoveryAreas;
+	Harness.RuntimeComponent->CancelPlanningAreaDiscovery();
+	EmptyObserver->bReleaseCompletions = true;
+	Harness.RuntimeComponent->PumpBackgroundLayoutSolves();
+	TestEqual(TEXT("Canceled completion cannot publish stale areas"), Harness.RuntimeComponent->CompletedDiscoveryAreas, CompletedBeforeCancel);
+	for (const auto& Scan : CanceledScans)
+		TestFalse(TEXT("Cancellation releases every area scan"), Harness.RuntimeComponent->PlanningAreaQueue->IsCurrentScan(Scan.Area, Scan.ScanId));
+	EmptyObserver->bReleaseCompletions = false;
+	Harness.RuntimeComponent->SubmitPlanningAreaDiscovery({FIntVector::ZeroValue});
+	if (!TestTrue(TEXT("Canceled coverage remains retryable"), Harness.RuntimeComponent->PendingPlanningAreaDiscovery.IsSet())) return false;
+	const auto RetryScans = Harness.RuntimeComponent->PendingPlanningAreaDiscovery->Scans;
+	const auto StaleOwner = Harness.RuntimeComponent->PlanningAreaQueue->GetScanOrigin(RetryScans[0].Area);
+	Harness.RuntimeComponent->PlanningAreaQueue->Forget(MakeTuple(StaleOwner.DetailLevel, StaleOwner.Origin));
+	EmptyObserver->bReleaseCompletions = true;
+	Harness.RuntimeComponent->PumpBackgroundLayoutSolves();
+	TestEqual(TEXT("Retired owner is ignored without discarding other batch areas"), Harness.RuntimeComponent->CompletedDiscoveryAreas,
+		CompletedBeforeCancel + uint64(RetryScans.Num() - 1));
+
+	// Disabled occupancy settles without worker work. Drain several areas in one pass,
+	// but respect the wall-time exit on slow machines and never exceed the count bound.
+	Harness.RuntimeComponent->PlanningAreaQueue->ResetLoadedDirectory();
+	Binding->OccupancyProbability = 0.0f;
+	Harness.RuntimeComponent->PlanningAreaQueue->Observe(MakeTuple(Created.DetailLevel, FIntVector::ZeroValue),
+		FIntVector(256, 256, 16), true);
+	const double DrainStart = FPlatformTime::Seconds();
+	Harness.RuntimeComponent->UpdateLoadedChunkPlanning();
+	const double DrainElapsed = FPlatformTime::Seconds() - DrainStart;
+	const int64 Drained = Harness.RuntimeComponent->ObservedChunkLayers[Created.DetailLevel].Chunks.FindChecked(FIntVector::ZeroValue).ScanOffset;
+	TestTrue(TEXT("Empty scans share a pass unless its time budget expires"), Drained > 1 || DrainElapsed >= 0.001);
+	TestTrue(TEXT("Empty scan drain is count bounded"), Drained > 0 && Drained <= 16);
+	TestFalse(TEXT("Disabled occupancy does not submit discovery"), Harness.RuntimeComponent->PendingPlanningAreaDiscovery.IsSet());
 	return true;
 }
 
@@ -1768,7 +1842,7 @@ bool FLayoutRuntimePlanningWindowRejectsFiniteCenteredZCeilingOverflowBeforeAcce
 	const FIntVector Center(24, 24, 240);
 	Harness.TrackPlanningCharacter(Center);
 	Harness.World->OnChunkCreate(FLayoutStreamingWindow::BlockWorldPosToChunkOrigin(Center, Harness.World->WorldGenDef->ChunkBlockSize),
-		Harness.World->GetChunkLayerCount() - 1, {});
+		Harness.World->GetChunkLayerCount(), {});
 	Harness.RuntimeComponent->ProcessQueuedLayoutWorkNow();
 	for (int32 Index = 0; Index < 200; ++Index) Harness.RuntimeComponent->PumpBackgroundLayoutSolves();
 	TestEqual(
@@ -1889,7 +1963,7 @@ bool FLayoutRuntimePlanningWindowRealizesDirectChildRegionsTest::RunTest(const F
 	TestTrue(TEXT("Planning-window settings are valid"), Store != nullptr && Store->SetPlanningWindowSettings(Settings).IsValid());
 
 	Harness.TrackPlanningCharacter(FIntVector::ZeroValue);
-	Harness.World->OnChunkCreate(FIntVector::ZeroValue, Harness.World->GetChunkLayerCount() - 1, {});
+	Harness.World->OnChunkCreate(FIntVector::ZeroValue, Harness.World->GetChunkLayerCount(), {});
 	Harness.RuntimeComponent->ProcessQueuedLayoutWorkNow();
 	for (int32 Index = 0; Index < 200; ++Index) Harness.RuntimeComponent->PumpBackgroundLayoutSolves();
 	const TArray<FPlannedLayoutSiteRecord> AcceptedRecords = Store->GetPlannedLayoutSiteRecordsByState(EPlannedLayoutSiteState::Accepted);
@@ -2020,7 +2094,7 @@ bool FLayoutRuntimePlanningWindowRealizesCompositePlacementsTest::RunTest(const 
 	TestTrue(TEXT("Planning-window settings are valid"), Store != nullptr && Store->SetPlanningWindowSettings(Settings).IsValid());
 
 	Harness.TrackPlanningCharacter(FIntVector::ZeroValue);
-	Harness.World->OnChunkCreate(FIntVector::ZeroValue, Harness.World->GetChunkLayerCount() - 1, {});
+	Harness.World->OnChunkCreate(FIntVector::ZeroValue, Harness.World->GetChunkLayerCount(), {});
 	Harness.RuntimeComponent->ProcessQueuedLayoutWorkNow();
 	for (int32 Index = 0; Index < 200; ++Index) Harness.RuntimeComponent->PumpBackgroundLayoutSolves();
 	const TArray<FPlannedLayoutSiteRecord> AcceptedRecords = Store->GetPlannedLayoutSiteRecordsByState(EPlannedLayoutSiteState::Accepted);
@@ -2373,7 +2447,7 @@ bool FLayoutRuntimePlanningWindowAcceptsUndergroundPocketSiteTest::RunTest(const
 
 	Harness.TrackPlanningCharacter(SiteCenter);
 	Harness.World->OnChunkCreate(FLayoutStreamingWindow::BlockWorldPosToChunkOrigin(SiteCenter, Harness.World->WorldGenDef->ChunkBlockSize),
-		Harness.World->GetChunkLayerCount() - 1, {});
+		Harness.World->GetChunkLayerCount(), {});
 	// Hold the game-thread realization pass until the accepted cavity contract is inspected.
 	Harness.RuntimeComponent->SetDisableAutoPumpForTesting(true);
 	Harness.RuntimeComponent->ProcessQueuedLayoutWorkNow();
@@ -2554,7 +2628,7 @@ bool FLayoutRuntimePlanningWindowRejectsSurfaceProfileInsideCavityTest::RunTest(
 	const FIntVector SelectedSite(8, 8, 4);
 	Harness.TrackPlanningCharacter(SelectedSite);
 	Harness.World->OnChunkCreate(FLayoutStreamingWindow::BlockWorldPosToChunkOrigin(SelectedSite, Harness.World->WorldGenDef->ChunkBlockSize),
-		Harness.World->GetChunkLayerCount() - 1, {});
+		Harness.World->GetChunkLayerCount(), {});
 	Harness.RuntimeComponent->RunQueuedLayoutWorkForTesting();
 	TestEqual(
 		TEXT("Surface profile inside cavity publishes no resolved site"),

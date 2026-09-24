@@ -119,20 +119,48 @@ namespace
 
 namespace LayoutWorldBindingSitePlanner
 {
-	TArray<FIntPoint> BuildBoundedNormalCellSiteCenters(const FIntPoint Min, const FIntPoint Max, const FIntVector CellSize)
+	TArray<FIntPoint> BuildBoundedNormalCellSiteCenters(const FIntPoint Min, const FIntPoint Max,
+		const FIntVector CellSize, const FIntPoint SpacingInCells, const float JitterFraction,
+		const int32 WorldSeed, const FName BindingId)
 	{
 		TArray<FIntPoint> Sites;
-		if (CellSize.X <= 0 || CellSize.Y <= 0 || Min.X > Max.X || Min.Y > Max.Y) return Sites;
-		const int64 FirstX = FMath::CeilToInt64(double(Min.X) / CellSize.X);
-		const int64 FirstY = FMath::CeilToInt64(double(Min.Y) / CellSize.Y);
-		const int64 LastX = FMath::FloorToInt64(double(Max.X) / CellSize.X);
-		const int64 LastY = FMath::FloorToInt64(double(Max.Y) / CellSize.Y);
+		if (CellSize.X <= 0 || CellSize.Y <= 0 || SpacingInCells.X <= 0 || SpacingInCells.Y <= 0
+			|| Min.X > Max.X || Min.Y > Max.Y || !FMath::IsFinite(JitterFraction)
+			|| JitterFraction < 0.0f || JitterFraction > 1.0f) return Sites;
+		const int64 FirstCellX = FMath::CeilToInt64(double(Min.X) / CellSize.X);
+		const int64 FirstCellY = FMath::CeilToInt64(double(Min.Y) / CellSize.Y);
+		const int64 LastCellX = FMath::FloorToInt64(double(Max.X) / CellSize.X);
+		const int64 LastCellY = FMath::FloorToInt64(double(Max.Y) / CellSize.Y);
+		if (FirstCellX > LastCellX || FirstCellY > LastCellY) return Sites;
+		const auto Bucket = [](const int64 Cell, const int32 Pitch) { return Cell / Pitch - (Cell % Pitch < 0); };
+		const int64 FirstX = Bucket(FirstCellX, SpacingInCells.X), LastX = Bucket(LastCellX, SpacingInCells.X);
+		const int64 FirstY = Bucket(FirstCellY, SpacingInCells.Y), LastY = Bucket(LastCellY, SpacingInCells.Y);
 		const int64 Width = LastX - FirstX + 1, Height = LastY - FirstY + 1;
-		if (Width <= 0 || Height <= 0 || Width > 4 || Height > 4) return Sites;
+		if (Width > 4 || Height > 4) return Sites;
+		const bool bJitter = JitterFraction > 0.0f && (SpacingInCells.X > 1 || SpacingInCells.Y > 1);
+		const FString BindingText = bJitter ? BindingId.ToString().ToLower() : FString();
+		const auto Offset = [JitterFraction](const int32 Pitch, const uint32 Hash)
+		{
+			const int64 Draw = (uint64(Hash) * uint64(Pitch)) >> 32;
+			return FMath::RoundToInt64(FMath::Lerp(double(Pitch - 1) * 0.5, double(Draw), double(JitterFraction)));
+		};
 		Sites.Reserve(int32(Width * Height));
 		for (int64 Y = FirstY; Y <= LastY; ++Y)
-			for (int64 X = FirstX; X <= LastX; ++X)
-				Sites.Add(FIntPoint(int32(X * CellSize.X), int32(Y * CellSize.Y)));
+		for (int64 X = FirstX; X <= LastX; ++X)
+		{
+			uint32 HashX = 0, HashY = 0;
+			if (bJitter)
+			{
+				const FString Identity = FString::Printf(TEXT("LayoutSiteJitter|%d|%s|%lld|%lld"), WorldSeed, *BindingText, X, Y);
+				HashX = FCrc::StrCrc32(*Identity, 0x58u);
+				HashY = FCrc::StrCrc32(*Identity, 0x59u);
+			}
+			const int64 CellX = X * SpacingInCells.X + Offset(SpacingInCells.X, HashX);
+			const int64 CellY = Y * SpacingInCells.Y + Offset(SpacingInCells.Y, HashY);
+			// Check final ownership before multiplication/narrowing; products now fit authored int32 bounds.
+			if (CellX < FirstCellX || CellX > LastCellX || CellY < FirstCellY || CellY > LastCellY) continue;
+			Sites.Add(FIntPoint(int32(CellX * CellSize.X), int32(CellY * CellSize.Y)));
+		}
 		return Sites;
 	}
 
@@ -508,10 +536,12 @@ namespace LayoutWorldBindingSitePlanner
 
 	TArray<FPlannedLayoutSiteRecord> BuildPendingSiteRecordsFromPockets(
 		const TArray<FLayoutReservationPocket>& Pockets, const FSitePlanningSnapshot& Inputs,
-		const FLayoutActiveBiomeSampler& ActiveBiomeSampler, TSet<FString>* OutBlockingReservations, int32* OutOccupancyRejected)
+		const FLayoutActiveBiomeSampler& ActiveBiomeSampler, TSet<FString>* OutBlockingReservations, int32* OutOccupancyRejected,
+		int32* OutOwnerRejected)
 	{
 		if (OutBlockingReservations) OutBlockingReservations->Reset();
 		if (OutOccupancyRejected) *OutOccupancyRejected = 0;
+		if (OutOwnerRejected) *OutOwnerRejected = 0;
 		TArray<FPlannedLayoutSiteRecord> Records;
 		if (Inputs.Candidates.IsEmpty()) return Records;
 		const FName MatchingBiomeRowName = Inputs.MatchingBiomeRowName;
@@ -586,6 +616,12 @@ namespace LayoutWorldBindingSitePlanner
 				{
 					Candidate = SelectCandidate(SiteCenterBlockWorldPos);
 					if (Candidate == nullptr) continue;
+				}
+				if (Inputs.CandidateCenterBoundsInBlocks.IsValid
+					&& !Inputs.CandidateCenterBoundsInBlocks.IsInsideOrOn(FVector(SiteCenterBlockWorldPos)))
+				{
+					if (OutOwnerRejected) ++*OutOwnerRejected;
+					continue;
 				}
 				if (!PassesOccupancy(WorldSeed, Inputs.BindingId, SiteCenterBlockWorldPos, Inputs.OccupancyProbability))
 				{

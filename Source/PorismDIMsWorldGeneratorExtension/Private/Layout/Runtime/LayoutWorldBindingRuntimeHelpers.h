@@ -24,9 +24,6 @@ namespace LayoutWorldBindingRuntimeHelpers
 	PORISMDIMSWORLDGENERATOREXTENSION_API const FLayoutRegionContentEntry* FindFrozenPlacementSourceEntry(
 		const ULayoutRegionContentSetAsset* ContentSet, const FLayoutPlacedModule& Placement);
 
-	/** Maps the authored direct-root solve budget into the frozen solver execution settings carrier. */
-	PORISMDIMSWORLDGENERATOREXTENSION_API FLayoutSolverExecutionSettings BuildExecutionSettingsFromSolveBudget(const FLayoutRootSolveBudgetSettings& SolveBudget);
-
 	/** Returns the preferred profile-owned content set when the runtime path is not forced onto a legacy module-set override. */
 	PORISMDIMSWORLDGENERATOREXTENSION_API ULayoutRegionContentSetAsset* ResolveRuntimePreferredContentSet(const ULayoutProfileAsset* Profile);
 

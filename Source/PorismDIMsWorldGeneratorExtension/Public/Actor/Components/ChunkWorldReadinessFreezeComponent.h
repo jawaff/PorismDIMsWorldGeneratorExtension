@@ -44,7 +44,7 @@ enum class EChunkWorldRuntimeReadinessFailure : uint8
 	NoSettledSurface UMETA(DisplayName = "No Settled Surface"),
 	WorldTornDown UMETA(DisplayName = "World Torn Down"),
 	OwnerTornDown UMETA(DisplayName = "Owner Torn Down"),
-	LayoutWaitTimeout UMETA(DisplayName = "Layout Wait Timeout")
+	RequiredCoverageFailed UMETA(DisplayName = "Required Coverage Failed")
 };
 
 /** Replicated server-authoritative state for one character-owned runtime settlement session. */
@@ -219,10 +219,6 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ChunkWorld|Runtime Readiness", meta = (ClampMin = "0.0", UIMin = "0.0", ToolTip = "Maximum authority wait for required owning-client finest-detail acknowledgement. Zero fails immediately when acknowledgement is required."))
 	float RuntimeClientReadyTimeoutSeconds = 20.0f;
 
-	/** Bounds local layout waits without releasing into unfinished writes on failure. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ChunkWorld|Runtime Readiness", meta = (ClampMin = "0.0", UIMin = "0.0", ToolTip = "Maximum elapsed time from the first nearby layout wait in a spawn session. Expiry fails and retains freeze. Does not consume or extend the separate client-acknowledgement timeout."))
-	float RuntimeLayoutWaitTimeoutSeconds = 60.0f;
-
 private:
 	struct FObservedChunkWorldState
 	{
@@ -263,7 +259,12 @@ private:
 	/** Starts local per-walker tracking for replicated runtime session without global actor discovery. */
 	void StartLocalRuntimeWalkerTracking();
 	void StopLocalRuntimeWalkerTracking();
+	/** Pending terrain/layout work keeps the session retryable regardless of elapsed time; release still requires native receipts and safe settlement. */
 	void TrySettleRuntimeSession();
+	/** Defers owning-client acknowledgement until its local event-owned startup footprint is complete. */
+	void TryAcknowledgeLocalCoverage();
+	/** Joins world-shared coverage across participating worlds without widening the settlement sweep. */
+	bool IsRequiredCoverageReady(FString& OutFailure);
 	/** Discards server/client native receipts without changing gameplay's operation identity. */
 	void RearmRuntimeReadiness();
 	/** Subscribe only while a spawn session can still release; never refreeze settled actors. */
@@ -303,7 +304,6 @@ private:
 	FGuid RuntimeTrackedReadinessId;
 	float StartupFreezeElapsedSeconds = 0.0f;
 	double RuntimeSessionStartTimeSeconds = 0.0;
-	double RuntimeLayoutWaitStartTimeSeconds = -1.0;
 	FGuid LastRuntimeStartedNotificationId;
 	FGuid LastRuntimeTerminalNotificationId;
 	bool bStartupFreezeActive = false;
@@ -316,6 +316,7 @@ private:
 	bool bHasResolvedStartupChunkWorlds = false;
 	bool bLoggedMissingRegistrationWarning = false;
 	bool bLocalClientReadyBroadcast = false;
+	bool bLocalNativeWalkerReady = false;
 
 	/** Server-authoritative session state. Owner component replication distributes final transform and release state. */
 	UPROPERTY(ReplicatedUsing = OnRep_RuntimeSession)

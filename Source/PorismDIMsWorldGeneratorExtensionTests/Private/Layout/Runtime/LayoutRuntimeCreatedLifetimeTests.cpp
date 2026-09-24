@@ -22,13 +22,14 @@ bool FLayoutRuntimeCreatedLifetimeTest::RunTest(const FString& Parameters)
 	Event.ChunkBlockWorldPos = Origin;
 	Event.DetailLevel = Harness.World->GetChunkLayerCount() - 1;
 	Harness.World->ActivateChunkEditFunctions = false;
-	Harness.World->OnChunkUpdate(Origin, Event.DetailLevel, {});
+	// Native callbacks are one-based; direct layout observations below remain zero-based.
+	Harness.World->OnChunkUpdate(Origin, Event.DetailLevel + 1, {});
 	Runtime->ProcessQueuedLayoutWorkNow();
 	TestFalse(TEXT("Updated alone grants no Created authority"), Runtime->HasFreshCreatedChunkEligibility(Required));
 
 	Event.EventType = EChunkWorldChunkLifecycleEventType::Created;
-	Harness.World->OnChunkCreate(Origin, Event.DetailLevel, {});
-	Harness.World->OnChunkUpdate(Origin, Event.DetailLevel, {});
+	Harness.World->OnChunkCreate(Origin, Event.DetailLevel + 1, {});
+	Harness.World->OnChunkUpdate(Origin, Event.DetailLevel + 1, {});
 	TestEqual(TEXT("Repeated observations share one native-chunk queue entry"), Runtime->PendingChunkLoads.Num(), 1);
 	Runtime->ProcessQueuedLayoutWorkNow();
 	TestTrue(TEXT("Updated in the same batch preserves native Created intent"), Runtime->HasFreshCreatedChunkEligibility(Required));
@@ -51,13 +52,13 @@ bool FLayoutRuntimeCreatedLifetimeTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("A second root does not consume chunk authority"), Runtime->HasFreshCreatedChunkEligibility(Required));
 	TestFalse(TEXT("Every target/support chunk needs Created authority"),
 		Runtime->HasFreshCreatedChunkEligibility({Origin, FIntVector(16, 0, 0)}));
-	Harness.World->OnChunkDelete(Origin, Event.DetailLevel);
-	Harness.World->OnChunkCreate(Origin, Event.DetailLevel, {});
-	Harness.World->OnChunkUpdate(Origin, Event.DetailLevel, {});
+	Harness.World->OnChunkDelete(Origin, Event.DetailLevel + 1);
+	Harness.World->OnChunkCreate(Origin, Event.DetailLevel + 1, {});
+	Harness.World->OnChunkUpdate(Origin, Event.DetailLevel + 1, {});
 	Runtime->ProcessQueuedLayoutWorkNow();
 	TestTrue(TEXT("Delete/Create/Updated establishes a new Created lifetime"), Runtime->HasFreshCreatedChunkEligibility(Required));
-	Harness.World->OnChunkDelete(Origin, Event.DetailLevel);
-	Harness.World->OnChunkUpdate(Origin, Event.DetailLevel, {});
+	Harness.World->OnChunkDelete(Origin, Event.DetailLevel + 1);
+	Harness.World->OnChunkUpdate(Origin, Event.DetailLevel + 1, {});
 	Runtime->ProcessQueuedLayoutWorkNow();
 	TestFalse(TEXT("Delete/Updated cannot inherit prior Created authority"), Runtime->HasFreshCreatedChunkEligibility(Required));
 	TestEqual(TEXT("Unload preserves both root identities"), Runtime->GetChunkStampedRootCountForTesting(Origin), 2);

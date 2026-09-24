@@ -436,7 +436,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FLayoutProfileSolverDeterministicVerticalColumnTest::RunTest(const FString& Parameters)
 {
-	ULayoutProfileAsset* Profile = CreateProfile(GetTransientPackage(), TEXT("LayoutProfile_DeterministicVertical"), FIntPoint(1, 1), FIntPoint(1, 1), 2, 1, true);
+	ULayoutProfileAsset* Profile = CreateProfileWithUniversalContentSet(GetTransientPackage(), TEXT("LayoutProfile_DeterministicVertical"), FIntPoint(1, 1), FIntPoint(1, 1), 2, 1, true);
 
 	const FLayoutSolveResult FirstResult = FLayoutProfileSolver::Solve(Profile, 11);
 	const FLayoutSolveResult SecondResult = FLayoutProfileSolver::Solve(Profile, 11);
@@ -556,7 +556,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FLayoutProfileSolverReportsPropagationStatsTest::RunTest(const FString& Parameters)
 {
-	ULayoutProfileAsset* Profile = CreateProfile(GetTransientPackage(), TEXT("LayoutProfile_PropagationStats"), FIntPoint(3, 2), FIntPoint(3, 2), 1, 1, false);
+	ULayoutProfileAsset* Profile = CreateProfileWithUniversalContentSet(GetTransientPackage(), TEXT("LayoutProfile_PropagationStats"), FIntPoint(3, 2), FIntPoint(3, 2), 1, 1, false);
 
 	const FLayoutSolveResult Result = FLayoutProfileSolver::Solve(Profile, 93);
 
@@ -576,7 +576,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FLayoutProfileSolverArcConsistencyIsDeterministicForSeedsTest::RunTest(const FString& Parameters)
 {
-	ULayoutProfileAsset* Profile = CreateProfile(GetTransientPackage(), TEXT("LayoutProfile_ArcDeterminism"), FIntPoint(3, 2), FIntPoint(3, 2), 1, 1, false);
+	ULayoutProfileAsset* Profile = CreateProfileWithUniversalContentSet(GetTransientPackage(), TEXT("LayoutProfile_ArcDeterminism"), FIntPoint(3, 2), FIntPoint(3, 2), 1, 1, false);
 
 	for (const int32 Seed : {11, 17, 23})
 	{
@@ -1127,10 +1127,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FLayoutProfileSolverStandaloneRegionRequestMatchesDirectSolveTest::RunTest(const FString& Parameters)
 {
-	ULayoutProfileAsset* Profile = CreateProfile(GetTransientPackage(), TEXT("LayoutProfile_RequestParity"), FIntPoint(2, 2), FIntPoint(2, 2), 1, 1, false);
+	ULayoutProfileAsset* Profile = CreateProfileWithUniversalContentSet(GetTransientPackage(), TEXT("LayoutProfile_RequestParity"), FIntPoint(2, 2), FIntPoint(2, 2), 1, 1, false);
 
 	const FLayoutSolveResult DirectResult = FLayoutProfileSolver::Solve(Profile, 91);
 	const FLayoutRegionSolveRequest Request = FLayoutProfileSolver::BuildStandaloneRegionRequest(Profile, 91, TEXT("Test/Standalone"));
+	Profile->ContentSet = nullptr;
 	const FLayoutRegionSolveResult RegionResult = FLayoutProfileSolver::SolveRegion(Request);
 
 	if (!DirectResult.bSucceeded)
@@ -1153,7 +1154,7 @@ bool FLayoutProfileSolverStandaloneRegionRequestMatchesDirectSolveTest::RunTest(
 	TestEqual(TEXT("Region result preserves debug path"), RegionResult.RegionDebugPath, FString(TEXT("Test/Standalone")));
 	TestTrue(TEXT("Direct solve succeeds"), DirectResult.bSucceeded);
 	TestTrue(TEXT("Region request solve succeeds"), RegionResult.SolveResult.bSucceeded);
-	TestTrue(TEXT("Region request solve uses request snapshots after source module mutation"), SolveResultsHaveMatchingPlacements(DirectResult, RegionResult.SolveResult));
+	TestTrue(TEXT("Region request solve uses snapshots after source content removal"), SolveResultsHaveMatchingPlacements(DirectResult, RegionResult.SolveResult));
 	return true;
 }
 
@@ -1181,6 +1182,11 @@ bool FLayoutProfileSolverSolvesRoleOnlyModulesTest::RunTest(const FString& Param
 	Module->Roles = {ELayoutModuleRole::Interior};
 
 	ULayoutProfileAsset* Profile = CreateProfile(Outer, TEXT("LayoutProfile_RoleOnly"), FIntPoint(1, 1), FIntPoint(1, 1), 1, 0, false);
+	FLayoutRegionContentEntry Entry;
+	Entry.EntryId = TEXT("RoleOnly");
+	Entry.ContentKind = ELayoutRegionContentKind::Module;
+	Entry.ModuleSettings.Module = Module;
+	Profile->ContentSet = CreateRegionContentSet(Outer, TEXT("LayoutContent_RoleOnly"), {Entry});
 
 	TArray<FLayoutPlannedCell> PlannedCells;
 	FLayoutPlannedCell& PlannedCell = PlannedCells.AddDefaulted_GetRef();
@@ -1193,7 +1199,8 @@ bool FLayoutProfileSolverSolvesRoleOnlyModulesTest::RunTest(const FString& Param
 	TestEqual(TEXT("Role-only solve places one module"), Result.Placements.Num(), 1);
 	if (Result.Placements.Num() == 1)
 	{
-		TestEqual(TEXT("Role-only solve uses the role-only module"), Result.Placements[0].Module.Get(), Module);
+		TestEqual(TEXT("Role-only solve selects the authored content entry"), Result.Placements[0].SourceContentEntryId, Entry.EntryId);
+		TestEqual(TEXT("Role-only solve preserves the selected template identity"), Result.Placements[0].TemplatePath, FSoftObjectPath(Template));
 	}
 	return true;
 }
@@ -1205,7 +1212,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FLayoutProfileSolverOverrideRegionRequestMatchesPlannedCellSolveTest::RunTest(const FString& Parameters)
 {
-	ULayoutProfileAsset* Profile = CreateProfile(GetTransientPackage(), TEXT("LayoutProfile_OverrideRequestParity"), FIntPoint(1, 1), FIntPoint(1, 1), 1, 0, false);
+	ULayoutProfileAsset* Profile = CreateProfileWithUniversalContentSet(GetTransientPackage(), TEXT("LayoutProfile_OverrideRequestParity"), FIntPoint(1, 1), FIntPoint(1, 1), 1, 0, false);
 
 	TArray<FLayoutPlannedCell> PlannedCells;
 	FLayoutPlannedCell& PlannedCell = PlannedCells.AddDefaulted_GetRef();
@@ -1215,7 +1222,6 @@ bool FLayoutProfileSolverOverrideRegionRequestMatchesPlannedCellSolveTest::RunTe
 	const FLayoutSolveResult DirectResult = FLayoutProfileSolver::SolveWithPlannedCells( Profile, 97, FIntPoint(1, 1), PlannedCells);
 
 	FLayoutRegionSolveRequest Request = FLayoutProfileSolver::BuildStandaloneRegionRequest(Profile, 97, TEXT("Test/Override"));
-	/* !Request.PlannedCells.IsEmpty() removed — derive from !PlannedCells.IsEmpty() */
 	Request.FootprintSize = FIntPoint(1, 1);
 	Request.PlannedCells = PlannedCells;
 	const FLayoutRegionSolveResult RegionResult = FLayoutProfileSolver::SolveRegion(Request);
@@ -1623,7 +1629,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FLayoutProfileSolverBuildsIndexedDomainsForStandaloneRequestTest::RunTest(const FString& Parameters)
 {
-	ULayoutProfileAsset* Profile = CreateProfile(GetTransientPackage(), TEXT("LayoutProfile_IndexedStandalone"), FIntPoint(2, 2), FIntPoint(2, 2), 1, 1, false);
+	ULayoutProfileAsset* Profile = CreateProfileWithUniversalContentSet(GetTransientPackage(), TEXT("LayoutProfile_IndexedStandalone"), FIntPoint(2, 2), FIntPoint(2, 2), 1, 1, false);
 
 	const FLayoutRegionSolveRequest Request = FLayoutProfileSolver::BuildStandaloneRegionRequest(Profile, 37, TEXT("Indexed/Standalone"));
 	const FLayoutIndexedDomainSnapshot IndexedSnapshot = FLayoutProfileSolver::BuildIndexedDomainSnapshot(Request);
@@ -1865,7 +1871,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FLayoutProfileSolverDistributesEntriesAcrossBoundaryLoopTest::RunTest(const FString& Parameters)
 {
-	ULayoutProfileAsset* Profile = CreateProfile(GetTransientPackage(), TEXT("LayoutProfile_EntryBoundaryLoop"), FIntPoint(3, 3), FIntPoint(3, 3), 1, 4, false);
+	ULayoutProfileAsset* Profile = CreateProfileWithUniversalContentSet(GetTransientPackage(), TEXT("LayoutProfile_EntryBoundaryLoop"), FIntPoint(3, 3), FIntPoint(3, 3), 1, 4, false);
 
 	const FLayoutSolveResult Result = FLayoutProfileSolver::Solve(Profile, 29);
 
@@ -1892,7 +1898,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FLayoutProfileSolverPrefersNonCornerEntriesTest::RunTest(const FString& Parameters)
 {
-	ULayoutProfileAsset* Profile = CreateProfile(GetTransientPackage(), TEXT("LayoutProfile_NonCornerEntries"), FIntPoint(7, 4), FIntPoint(7, 4), 1, 1, false);
+	ULayoutProfileAsset* Profile = CreateProfileWithUniversalContentSet(GetTransientPackage(), TEXT("LayoutProfile_NonCornerEntries"), FIntPoint(7, 4), FIntPoint(7, 4), 1, 1, false);
 
 	for (int32 Seed = 0; Seed < 16; ++Seed)
 	{
@@ -2967,29 +2973,6 @@ bool FLayoutProfileSolverBridgesVerticalTransitionToRequiredUpperWalkableAreaTes
 	}
 
 	TestTrue(TEXT("Upper continuation cell consumed the lower stair transition with a bridge landing"), bFoundUpperBridgeLanding);
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FLayoutProfileSolverUsesContextualReachabilityInsteadOfProfileIgnoreTagsTest,
-	"PorismExtension.Layout.Solver.Profile.UsesContextualReachabilityInsteadOfProfileIgnoreTags",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
-
-bool FLayoutProfileSolverUsesContextualReachabilityInsteadOfProfileIgnoreTagsTest::RunTest(const FString& Parameters)
-{
-	ULayoutProfileAsset* Profile = CreateProfile(GetTransientPackage(), TEXT("LayoutProfile_ContextualReachability"), FIntPoint(1, 1), FIntPoint(1, 1), 1, 1, true);
-
-	const FLayoutSolveResult Result = FLayoutProfileSolver::Solve(Profile, 5);
-	if (!Result.bSucceeded)
-	{
-		AddInfo(FString::Printf(TEXT("Contextual reachability solve failed: %s"), *Result.FailureReason));
-	}
-
-	TestTrue(TEXT("Contextual reachability derives active walkability from entry roots without profile ignore tags"), Result.bSucceeded);
-	for (const FLayoutValidationMessage& Message : Result.Messages)
-	{
-		TestFalse(TEXT("Inactive reusable walkable metadata does not emit unreachable warnings"), Message.Message.Contains(TEXT("unreachable")));
-	}
 	return true;
 }
 

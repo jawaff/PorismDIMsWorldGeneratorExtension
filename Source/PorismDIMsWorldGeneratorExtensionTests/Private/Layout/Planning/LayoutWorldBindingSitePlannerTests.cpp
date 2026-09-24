@@ -192,16 +192,44 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLayoutPlanningFootprintBiomeAdmissionTest,
 bool FLayoutPlanningFootprintBiomeAdmissionTest::RunTest(const FString& Parameters)
 {
 	using LayoutWorldBindingSitePlanner::BuildBoundedNormalCellSiteCenters;
-	const auto NormalCenters = BuildBoundedNormalCellSiteCenters(FIntPoint(0), FIntPoint(15), FIntVector(5));
+	const FName BindingId(TEXT("SparseSites"));
+	const auto NormalCenters = BuildBoundedNormalCellSiteCenters(FIntPoint(0), FIntPoint(15), FIntVector(5), FIntPoint(1), 0, 42, BindingId);
 	TestEqual(TEXT("Normal-cell refinement stays bounded"), NormalCenters.Num(), 16);
 	TestTrue(TEXT("Refinement includes the viable cell missed by a four-block sample grid"), NormalCenters.Contains(FIntPoint(15, 15)));
-	const auto NegativeCenters = BuildBoundedNormalCellSiteCenters(FIntPoint(-16), FIntPoint(-1), FIntVector(5));
+	const auto NegativeCenters = BuildBoundedNormalCellSiteCenters(FIntPoint(-16), FIntPoint(-1), FIntVector(5), FIntPoint(1), 0, 42, BindingId);
 	TestEqual(TEXT("Negative regions enumerate lattice centers, not truncated aliases"), NegativeCenters.Num(), 9);
 	TestTrue(TEXT("Negative lattice starts inside ownership bounds"), NegativeCenters.Contains(FIntPoint(-15, -15)));
 	TestEqual(TEXT("Anisotropic cells preserve their separate XY strides"),
-		BuildBoundedNormalCellSiteCenters(FIntPoint(0), FIntPoint(15), FIntVector(4, 6, 1)).Num(), 12);
+		BuildBoundedNormalCellSiteCenters(FIntPoint(0), FIntPoint(15), FIntVector(4, 6, 1), FIntPoint(1), 0, 42, BindingId).Num(), 12);
 	TestTrue(TEXT("Oversized regions cannot allocate a whole coarse chunk"),
-		BuildBoundedNormalCellSiteCenters(FIntPoint(MIN_int32), FIntPoint(MAX_int32), FIntVector(1)).IsEmpty());
+		BuildBoundedNormalCellSiteCenters(FIntPoint(MIN_int32), FIntPoint(MAX_int32), FIntVector(1), FIntPoint(1), 0, 42, BindingId).IsEmpty());
+	TestTrue(TEXT("Pitch one has no jitter room"), NormalCenters == BuildBoundedNormalCellSiteCenters(
+		FIntPoint(0), FIntPoint(15), FIntVector(5), FIntPoint(1), 1, 42, BindingId));
+	struct FJitterCase { FIntPoint Bucket; float Jitter; };
+	for (const auto& Case : TArray<FJitterCase>{{FIntPoint(-1, -1), 0}, {FIntPoint(0, 0), 0.8f}, {FIntPoint(1, -2), 1}})
+	{
+		const FIntPoint Min(Case.Bucket.X * 15, Case.Bucket.Y * 28), Max = Min + FIntPoint(14, 27);
+		const auto Sites = BuildBoundedNormalCellSiteCenters(Min, Max, FIntVector(5, 7, 1), FIntPoint(3, 4), Case.Jitter, 42, BindingId);
+		TestEqual(TEXT("Exactly one sparse candidate per whole bucket"), Sites.Num(), 1);
+		if (Sites.Num() != 1) continue;
+		TestTrue(TEXT("Jitter repeats from stable inputs"), Sites == BuildBoundedNormalCellSiteCenters(
+			Min, Max, FIntVector(5, 7, 1), FIntPoint(3, 4), Case.Jitter, 42, BindingId));
+		TestTrue(TEXT("Final position is in-bucket and normal-cell aligned"), Sites[0].X >= Min.X && Sites[0].X <= Max.X
+			&& Sites[0].Y >= Min.Y && Sites[0].Y <= Max.Y && Sites[0].X % 5 == 0 && Sites[0].Y % 7 == 0);
+		if (Case.Jitter == 0) TestEqual(TEXT("Zero jitter chooses central normal cell"), Sites[0], Min + FIntPoint(5, 14));
+		const auto Left = BuildBoundedNormalCellSiteCenters(Min, FIntPoint(Min.X + 7, Max.Y),
+			FIntVector(5, 7, 1), FIntPoint(3, 4), Case.Jitter, 42, BindingId);
+		const auto Right = BuildBoundedNormalCellSiteCenters(FIntPoint(Min.X + 8, Min.Y), Max,
+			FIntVector(5, 7, 1), FIntPoint(3, 4), Case.Jitter, 42, BindingId);
+		TestEqual(TEXT("Final-position ownership neither loses nor duplicates boundary candidates"), Left.Num() + Right.Num(), 1);
+		TestTrue(TEXT("Owner subdivision does not reroll jitter"), Left.Contains(Sites[0]) || Right.Contains(Sites[0]));
+	}
+	TestEqual(TEXT("Wide bucket arithmetic safely clips extreme coordinates"), BuildBoundedNormalCellSiteCenters(
+		FIntPoint(MIN_int32), FIntPoint(MAX_int32), FIntVector(1), FIntPoint(MAX_int32), 0, 42, BindingId).Num(), 4);
+	TestTrue(TEXT("Invalid pitch fails closed"), BuildBoundedNormalCellSiteCenters(
+		FIntPoint(0), FIntPoint(15), FIntVector(1), FIntPoint(0), 0, 42, BindingId).IsEmpty());
+	TestTrue(TEXT("Nonfinite jitter fails closed"), BuildBoundedNormalCellSiteCenters(
+		FIntPoint(0), FIntPoint(15), FIntVector(1), FIntPoint(1), std::numeric_limits<float>::quiet_NaN(), 42, BindingId).IsEmpty());
 	auto Harness = CreateChunkWorldHarness(GetTransientPackage());
 	const FName RowName(TEXT("Reservation"));
 	ConfigurePlanningBiomeRow(Harness.World->WorldGenDef, RowName);
@@ -256,6 +284,19 @@ bool FLayoutPlanningFootprintBiomeAdmissionTest::RunTest(const FString& Paramete
 	if (!TestEqual(TEXT("Combined fragments admit the boundary-spanning footprint"), BoundaryRecords.Num(), 1)) return false;
 	TestEqual(TEXT("Core center survives neighboring-fragment admission"),
 		BoundaryRecords[0].GetPlannedSiteReservationSourceSelection().SiteCenterBlockWorldPos.X, 15);
+	const FVector FinalCenter(BoundaryRecords[0].GetPlannedSiteReservationSourceSelection().SiteCenterBlockWorldPos);
+	BoundaryInputs.CandidateCenterBoundsInBlocks = FBox(FinalCenter, FinalCenter);
+	TestEqual(TEXT("Inclusive final-center ownership preserves identity and does not clip the crossing footprint"),
+		LayoutWorldBindingSitePlanner::BuildPendingSiteRecordsFromPockets(BoundaryPockets, BoundaryInputs, Sampler).Num(), 1);
+	auto WrongHeightInputs = BoundaryInputs;
+	WrongHeightInputs.CandidateCenterBoundsInBlocks = FBox(FinalCenter + FVector(0, 0, 1), FinalCenter + FVector(0, 0, 2));
+	WrongHeightInputs.Candidates[0].FootprintProfile.MinimumFootprintInCells = FIntPoint(6);
+	WrongHeightInputs.Candidates[0].FootprintProfile.MaximumFootprintInCells = FIntPoint(6);
+	int32 OwnerRejected = 0;
+	TestTrue(TEXT("Foreign-height candidate is omitted"), LayoutWorldBindingSitePlanner::BuildPendingSiteRecordsFromPockets(
+		BoundaryPockets, WrongHeightInputs, Sampler, nullptr, nullptr, &OwnerRejected).IsEmpty());
+	TestEqual(TEXT("Owner rejection precedes the otherwise failing footprint check"), OwnerRejected, 1);
+	BoundaryInputs.CandidateCenterBoundsInBlocks = FBox(ForceInit);
 	BoundaryInputs.OccupancyProbability = 0.0f;
 	TestTrue(TEXT("Zero occupancy emits no automatic proposals"), LayoutWorldBindingSitePlanner::BuildPendingSiteRecordsFromPockets(
 		BoundaryPockets, BoundaryInputs, Sampler).IsEmpty());

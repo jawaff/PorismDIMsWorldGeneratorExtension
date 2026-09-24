@@ -104,7 +104,9 @@ bool FLayoutContinuationSettlementTest::RunTest(const FString& Parameters)
 	Prepared.Route.StartRootEndpoint.RootRecordKey = TEXT("PlacedA");
 	Prepared.Route.EndRootEndpoint.RootRecordKey = TEXT("PlacedB");
 	Runtime->RetainedPreparedContinuationRoutesById.Add(TEXT("LoadedPair"), Prepared);
-	TestTrue(TEXT("Both placed loaded roots permit route"), Runtime->IsContinuationRouteEligible(TEXT("LoadedPair")));
+	TestFalse(TEXT("Loaded roots cannot revive a missing route lifetime"), Runtime->IsContinuationRouteEligible(TEXT("LoadedPair")));
+	ReserveRoute(TEXT("LoadedPair"), 4, { 6 });
+	TestTrue(TEXT("Both placed loaded roots permit a live route"), Runtime->IsContinuationRouteEligible(TEXT("LoadedPair")));
 	Runtime->LastConnectorEndpointRevision = 99;
 	Runtime->RefreshPlacedContinuationRootReadiness();
 	TestEqual(TEXT("Duplicate readiness does not wake discovery"), Runtime->LastConnectorEndpointRevision, uint64(99));
@@ -112,6 +114,7 @@ bool FLayoutContinuationSettlementTest::RunTest(const FString& Parameters)
 	Runtime->RefreshPlacedContinuationRootReadiness();
 	TestFalse(TEXT("Root unload invalidates route despite nearby endpoints"), Runtime->IsContinuationRouteEligible(TEXT("LoadedPair")));
 	TestEqual(TEXT("Real readiness change wakes discovery"), Runtime->LastConnectorEndpointRevision, uint64(0));
+	Runtime->ReleaseContinuationRouteReservation(TEXT("LoadedPair"));
 	Runtime->RetainedPreparedContinuationRoutesById.Reset();
 	Runtime->PruneContinuationEndpointsOutsideExpandedWindows({}, {});
 	TestTrue(TEXT("Entry eviction releases root readiness payload"), Runtime->PlacedContinuationRootChunks.IsEmpty());

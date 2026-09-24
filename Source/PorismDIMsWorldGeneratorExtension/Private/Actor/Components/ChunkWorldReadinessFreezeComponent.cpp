@@ -145,6 +145,7 @@ void UChunkWorldReadinessFreezeComponent::TickComponent(float DeltaTime, ELevelT
 		}
 	}
 
+	TryAcknowledgeLocalCoverage();
 	if (bStartupFreezeActive || bRuntimeFreezeActive)
 	{
 		MaintainFrozenTransform();
@@ -170,7 +171,7 @@ FGuid UChunkWorldReadinessFreezeComponent::StartRuntimeReadinessSession(
 			TEXT("Automatic startup session superseded by an explicit spawn request."));
 	bAutomaticStartupSession = false;
 	StopLocalRuntimeWalkerTracking();
-	StopObservingLayoutWrites();
+	if (!bStartupFreezeActive) StopObservingLayoutWrites();
 	if (!bFreezeStateCaptured)
 	{
 		FrozenActorTransform = GetOwner()->GetActorTransform();
@@ -181,7 +182,6 @@ FGuid UChunkWorldReadinessFreezeComponent::StartRuntimeReadinessSession(
 	RuntimeSession = FChunkWorldRuntimeReadinessSession();
 	RuntimeSession.SessionId = FGuid::NewGuid();
 	RuntimeSession.ReadinessId = FGuid::NewGuid();
-	RuntimeLayoutWaitStartTimeSeconds = -1.0;
 	RuntimeSession.ChunkWorld = ChunkWorld;
 	RuntimeSession.CandidateRegion = CandidateRegion;
 	RuntimeSession.bRequiresOwningClientReady = bRequireOwningClientReady;
@@ -556,6 +556,13 @@ void UChunkWorldReadinessFreezeComponent::UpdateObservedChunkWorldState(AChunkWo
 		if (ExistingIndex != INDEX_NONE)
 		{
 			ChunkWorld->OnWorldReady.RemoveDynamic(this, &UChunkWorldReadinessFreezeComponent::HandleObservedChunkWorldReady);
+			if (ChunkWorld != RuntimeSession.ChunkWorld)
+				if (auto* Layout = ChunkWorld->GetLayoutRuntimeComponent())
+				{
+					Layout->SetStartupCoverageRequired(this, false);
+					Layout->OnAutomaticLayoutWriteAttempt.RemoveAll(this);
+					ObservedLayoutWriters.Remove(Layout);
+				}
 			ObservedChunkWorldStates.RemoveAt(ExistingIndex);
 		}
 		return;
@@ -564,10 +571,10 @@ void UChunkWorldReadinessFreezeComponent::UpdateObservedChunkWorldState(AChunkWo
 	FObservedChunkWorldState* State = ExistingIndex != INDEX_NONE ? &ObservedChunkWorldStates[ExistingIndex] : &ObservedChunkWorldStates.AddDefaulted_GetRef();
 	State->ChunkWorld = ChunkWorld;
 	State->bReady = bReady;
+	if (!IsRuntimeSessionTerminal()) ObserveLayoutWrites(ChunkWorld);
 	if (ExistingIndex == INDEX_NONE)
 	{
 		ChunkWorld->OnWorldReady.AddUniqueDynamic(this, &UChunkWorldReadinessFreezeComponent::HandleObservedChunkWorldReady);
-		if (bRuntimeFreezeActive && !IsRuntimeSessionTerminal()) ObserveLayoutWrites(ChunkWorld);
 	}
 }
 
@@ -579,6 +586,7 @@ void UChunkWorldReadinessFreezeComponent::StartLocalRuntimeWalkerTracking()
 	}
 	RefreshOwnerWalkers();
 	AChunkWorldExtended* ChunkWorld = RuntimeSession.ChunkWorld;
+	ObserveLayoutWrites(ChunkWorld);
 	ChunkWorld->OnRuntimeWalkerReady.AddUniqueDynamic(this, &UChunkWorldReadinessFreezeComponent::HandleRuntimeWalkerReady);
 
 	UObject* SelectedWalker = RuntimeSession.TrackedWalker;
@@ -636,6 +644,7 @@ void UChunkWorldReadinessFreezeComponent::StartLocalRuntimeWalkerTracking()
 
 void UChunkWorldReadinessFreezeComponent::StopLocalRuntimeWalkerTracking()
 {
+	bLocalNativeWalkerReady = false;
 	if (AChunkWorldExtended* ChunkWorld = RuntimeTrackedChunkWorld.Get())
 	{
 		ChunkWorld->OnRuntimeWalkerReady.RemoveDynamic(this, &UChunkWorldReadinessFreezeComponent::HandleRuntimeWalkerReady);
@@ -655,12 +664,8 @@ void UChunkWorldReadinessFreezeComponent::HandleRuntimeWalkerReady(AChunkWorldEx
 	{
 		return;
 	}
-	APawn* OwnerPawn = Cast<APawn>(GetOwner());
-	if (!bLocalClientReadyBroadcast && OwnerPawn != nullptr && OwnerPawn->IsLocallyControlled() && RuntimeSession.bRequiresOwningClientReady)
-	{
-		bLocalClientReadyBroadcast = true;
-		OnOwningClientRuntimeReady.Broadcast(RuntimeSession.SessionId, RuntimeSession.ReadinessId);
-	}
+	bLocalNativeWalkerReady = true;
+	TryAcknowledgeLocalCoverage();
 	if (GetOwner() != nullptr && GetOwner()->HasAuthority())
 	{
 		RuntimeSession.bServerWalkerReady = true;
@@ -668,19 +673,49 @@ void UChunkWorldReadinessFreezeComponent::HandleRuntimeWalkerReady(AChunkWorldEx
 	}
 }
 
+bool UChunkWorldReadinessFreezeComponent::IsRequiredCoverageReady(FString& OutFailure)
+{
+	OutFailure.Reset();
+	bool bReady = !ObservedLayoutWriters.IsEmpty();
+	for (const auto& Writer : ObservedLayoutWriters)
+	{
+		if (!Writer.IsValid()) { OutFailure = TEXT("A required terrain world was removed."); return false; }
+		bReady &= Writer->IsStartupCoverageReady(this);
+	}
+	return bReady;
+}
+
+void UChunkWorldReadinessFreezeComponent::TryAcknowledgeLocalCoverage()
+{
+	APawn* Pawn = Cast<APawn>(GetOwner());
+	if (bLocalClientReadyBroadcast || !bLocalNativeWalkerReady || IsRuntimeSessionTerminal()
+		|| !Pawn || !Pawn->IsLocallyControlled() || !RuntimeSession.bRequiresOwningClientReady) return;
+	FString Failure;
+	if (!IsRequiredCoverageReady(Failure)) return;
+	bLocalClientReadyBroadcast = true;
+	OnOwningClientRuntimeReady.Broadcast(RuntimeSession.SessionId, RuntimeSession.ReadinessId);
+}
+
 void UChunkWorldReadinessFreezeComponent::ObserveLayoutWrites(AChunkWorldExtended* ChunkWorld)
 {
-	if (!GetOwner() || !GetOwner()->HasAuthority() || !ChunkWorld) return;
+	if (!GetOwner() || !ChunkWorld) return;
 	UChunkWorldLayoutRuntimeComponent* Layout = ChunkWorld->GetLayoutRuntimeComponent();
-	if (!Layout || ObservedLayoutWriters.Contains(Layout)) return;
+	if (!Layout) return;
+	Layout->SetStartupCoverageRequired(this, true, OwnerWalkers);
+	if (ObservedLayoutWriters.Contains(Layout)) return;
 	ObservedLayoutWriters.Add(Layout);
-	Layout->OnAutomaticLayoutWriteAttempt.AddUObject(this, &UChunkWorldReadinessFreezeComponent::HandleAutomaticLayoutWrite);
+	if (GetOwner()->HasAuthority())
+		Layout->OnAutomaticLayoutWriteAttempt.AddUObject(this, &UChunkWorldReadinessFreezeComponent::HandleAutomaticLayoutWrite);
 }
 
 void UChunkWorldReadinessFreezeComponent::StopObservingLayoutWrites()
 {
 	for (const auto& Writer : ObservedLayoutWriters)
-		if (UChunkWorldLayoutRuntimeComponent* Layout = Writer.Get()) Layout->OnAutomaticLayoutWriteAttempt.RemoveAll(this);
+		if (UChunkWorldLayoutRuntimeComponent* Layout = Writer.Get())
+		{
+			Layout->OnAutomaticLayoutWriteAttempt.RemoveAll(this);
+			Layout->SetStartupCoverageRequired(this, false);
+		}
 	ObservedLayoutWriters.Reset();
 }
 
@@ -689,7 +724,8 @@ void UChunkWorldReadinessFreezeComponent::HandleAutomaticLayoutWrite(AChunkWorld
 	if (!bRuntimeFreezeActive || IsRuntimeSessionTerminal() || !GetOwner() || !GetOwner()->HasAuthority()) return;
 	if (ChunkWorld != RuntimeSession.ChunkWorld && !ObservedChunkWorldStates.ContainsByPredicate(
 		[ChunkWorld](const FObservedChunkWorldState& State) { return State.ChunkWorld == ChunkWorld; })) return;
-	if (WorldBounds.Intersect(FBox(RuntimeSession.CandidateRegion.Minimum, RuntimeSession.CandidateRegion.Maximum)))
+	if (WorldBounds.Intersect(FBox(RuntimeSession.CandidateRegion.Minimum, RuntimeSession.CandidateRegion.Maximum))
+		|| (ChunkWorld->GetLayoutRuntimeComponent() && ChunkWorld->GetLayoutRuntimeComponent()->DoesWriteAffectStartupCoverage(this, WorldBounds)))
 		RearmRuntimeReadiness();
 }
 
@@ -712,7 +748,14 @@ void UChunkWorldReadinessFreezeComponent::TrySettleRuntimeSession()
 	const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
 	const UChunkWorldLayoutRuntimeComponent* Layout = ChunkWorld->GetLayoutRuntimeComponent();
 	const FBox Region(RuntimeSession.CandidateRegion.Minimum, RuntimeSession.CandidateRegion.Maximum);
-	bool bPendingLayouts = Layout && Layout->HasPendingAutomaticLayoutWork(Region);
+	FString CoverageFailure;
+	bool bPendingLayouts = !IsRequiredCoverageReady(CoverageFailure);
+	if (!CoverageFailure.IsEmpty())
+	{
+		SetRuntimeTerminal(EChunkWorldRuntimeReadinessState::Failed, EChunkWorldRuntimeReadinessFailure::RequiredCoverageFailed, CoverageFailure);
+		return;
+	}
+	bPendingLayouts |= Layout && Layout->HasPendingAutomaticLayoutWork(Region);
 	if (bStartupFreezeActive)
 	{
 		for (const auto& State : ObservedChunkWorldStates)
@@ -724,13 +767,7 @@ void UChunkWorldReadinessFreezeComponent::TrySettleRuntimeSession()
 	}
 	if (bPendingLayouts)
 	{
-		if (RuntimeLayoutWaitStartTimeSeconds < 0.0) RuntimeLayoutWaitStartTimeSeconds = Now;
 		RuntimeSession.State = EChunkWorldRuntimeReadinessState::WaitingForLayouts;
-		if (Now - RuntimeLayoutWaitStartTimeSeconds >= FMath::Max(0.0f, RuntimeLayoutWaitTimeoutSeconds))
-		{
-			SetRuntimeTerminal(EChunkWorldRuntimeReadinessState::Failed, EChunkWorldRuntimeReadinessFailure::LayoutWaitTimeout,
-				TEXT("Nearby automatic layout work did not settle before timeout; freeze retained."));
-		}
 		return;
 	}
 	if (RuntimeSession.State == EChunkWorldRuntimeReadinessState::WaitingForLayouts)
@@ -928,6 +965,7 @@ void UChunkWorldReadinessFreezeComponent::OnRep_RuntimeSession()
 	if (IsRuntimeSessionTerminal())
 	{
 		StopLocalRuntimeWalkerTracking();
+		StopObservingLayoutWrites();
 	}
 	else
 	{

@@ -246,11 +246,6 @@ namespace
 
 namespace LayoutWorldBindingRuntimeHelpers
 {
-	FLayoutSolverExecutionSettings BuildExecutionSettingsFromSolveBudget(const FLayoutRootSolveBudgetSettings& SolveBudget)
-	{
-		return LayoutWorldBindingSolveRequestBuilder::BuildExecutionSettingsFromSolveBudget(SolveBudget);
-	}
-
 	ULayoutRegionContentSetAsset* ResolveRuntimePreferredContentSet(const ULayoutProfileAsset* const Profile)
 	{
 		return Profile != nullptr ? Profile->ContentSet.Get() : nullptr;

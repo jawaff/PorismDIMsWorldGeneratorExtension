@@ -73,12 +73,16 @@ bool FLayoutCreatedLifetimeQueueTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Delete then Updated fences the old creation"), Original.IsCurrent(Directory));
 	TestFalse(TEXT("Restored lifetime has no discovery"), Queue.TakeNext(Centers, Area));
 	Queue.Observe(Owner, FIntVector(8), true);
-	TestTrue(TEXT("A genuine later Created receives a new traversal"), Queue.TakeNext(Centers, Area));
+	TestFalse(TEXT("Recreated coordinates never repeat discovery within the generation"), Queue.TakeNext(Centers, Area));
+	TestTrue(TEXT("Recreation retains current Created coverage"), Directory[0].Chunks.FindChecked(Owner.Get<1>()).bCreated);
 	TestFalse(TEXT("Later Created does not revive the old identity"), Original.IsCurrent(Directory));
+	Queue.Forget(Owner);
+	Queue.Observe(Owner, FIntVector(8), true);
+	TestFalse(TEXT("Direct Created recreation also preserves admission history"), Queue.TakeNext(Centers, Area));
 	Queue.ResetLoadedDirectory();
 	Queue.Configure(4, 2);
 	Queue.Observe(Owner, FIntVector(32, 16, 16), true);
-	Queue.TakeNext(Centers, Area);
+	TestTrue(TEXT("A new generation admits the coordinate again"), Queue.TakeNext(Centers, Area));
 	Queue.FinishScan(Area, false, Queue.GetScanId(Area));
 	const int64 Prefix = Directory[0].Chunks.FindChecked(FIntVector::ZeroValue).ScanOffset;
 	Queue.Reset();
@@ -104,27 +108,77 @@ bool FLayoutReadinessPendingBoundsTest::RunTest(const FString& Parameters)
 	const FVector Reach(2, 0, 0);
 	Queue.Configure(4, 2);
 	Queue.Observe(Owner, FIntVector(8), false);
-	TestFalse(TEXT("Restored coverage is not pending work"), Queue.HasPendingCreatedWork(Nearby, Reach));
+	TestFalse(TEXT("Restored coverage is not pending work"), Queue.HasPendingCreatedWork(Nearby, Reach, 0));
 	Queue.Observe(Owner, FIntVector(8), true);
-	TestFalse(TEXT("Origin bounds alone do not touch the spawn"), Queue.HasPendingCreatedWork(Nearby, FVector::ZeroVector));
-	TestTrue(TEXT("Reach includes layouts originating outside the spawn box"), Queue.HasPendingCreatedWork(Nearby, Reach));
-	TestFalse(TEXT("Distant work does not hold spawn"), Queue.HasPendingCreatedWork(Distant, Reach));
+	TestFalse(TEXT("Origin bounds alone do not touch the spawn"), Queue.HasPendingCreatedWork(Nearby, FVector::ZeroVector, 0));
+	TestTrue(TEXT("Reach includes layouts originating outside the spawn box"), Queue.HasPendingCreatedWork(Nearby, Reach, 0));
+	TestFalse(TEXT("Distant work does not hold spawn"), Queue.HasPendingCreatedWork(Distant, Reach, 0));
 	FIntPoint Area;
 	Queue.TakeNext({FIntVector::ZeroValue}, Area);
 	Queue.MarkCoverageWaiting(Area);
 	Queue.FinishScan(Area, false, Queue.GetScanId(Area));
-	TestTrue(TEXT("Parked discovery retains spatial ownership"), Queue.HasPendingCreatedWork(Nearby, Reach));
+	TestTrue(TEXT("Parked discovery retains spatial ownership"), Queue.HasPendingCreatedWork(Nearby, Reach, 0));
 	Queue.RetireWorkingSet();
-	TestFalse(TEXT("Retirement releases spatial ownership"), Queue.HasPendingCreatedWork(Nearby, Reach));
+	TestFalse(TEXT("Retirement releases spatial ownership"), Queue.HasPendingCreatedWork(Nearby, Reach, 0));
 	Queue.Forget(Owner);
 	Queue.Observe(Owner, FIntVector(8), true);
+	TestFalse(TEXT("Recreated retired owner cannot reopen readiness or discovery"), Queue.HasPendingCreatedWork(Nearby, Reach, 0));
 	Queue.TakeNext({FIntVector::ZeroValue}, Area);
 	Queue.FinishScan(Area, false, Queue.GetScanId(Area));
-	TestFalse(TEXT("Completed traversal does not hold spawn"), Queue.HasPendingCreatedWork(Nearby, Reach));
+	TestFalse(TEXT("Completed traversal does not hold spawn"), Queue.HasPendingCreatedWork(Nearby, Reach, 0));
 	Queue.Observe(MakeTuple(1, FIntVector::ZeroValue), FIntVector(8), true);
-	TestTrue(TEXT("New layer owns independent pending work"), Queue.HasPendingCreatedWork(Nearby, Reach));
+	TestTrue(TEXT("New layer owns independent pending work"), Queue.HasPendingCreatedWork(Nearby, Reach, 0));
 	Queue.ResizeLoadedLayers(1);
-	TestFalse(TEXT("Layer removal retires its pending ownership"), Queue.HasPendingCreatedWork(Nearby, Reach));
+	TestFalse(TEXT("Layer removal retires its pending ownership"), Queue.HasPendingCreatedWork(Nearby, Reach, 0));
+
+	// A coarse owner starts at the player, then wraps through distant areas. Its completed
+	// prefix must not keep that player frozen until the entire coarse chunk is screened.
+	Queue.ResetLoadedDirectory();
+	Queue.Observe(MakeTuple(0, FIntVector(-32, -32, 0)), FIntVector(32, 32, 8), true);
+	TSet<FIntPoint> Completed;
+	for (int32 Step = 0; Step < 4; ++Step)
+	{
+		TestTrue(TEXT("Coarse owner advances through each area"), Queue.TakeNext({FIntVector(-1, -1, 0)}, Area));
+		for (int32 Y = 0; Y < 2; ++Y)
+			for (int32 X = 0; X < 2; ++X)
+			{
+				const FIntPoint Probe(X - 2, Y - 2);
+				const FVector Point(X * 16 - 24, Y * 16 - 24, 4);
+				TestEqual(TEXT("Only unprocessed areas hold readiness, including active scan and wrapped suffix"),
+					Queue.HasPendingCreatedWork(FBox(Point, Point), FVector::ZeroVector, 0), !Completed.Contains(Probe));
+			}
+		TestTrue(TEXT("Authored reach still includes writes from the remaining suffix"),
+			Queue.HasPendingCreatedWork(FBox(FVector(-8, -8, 4), FVector(-8, -8, 4)), FVector(32, 32, 0), 0));
+		Completed.Add(Area);
+		Queue.FinishScan(Area, false, Queue.GetScanId(Area));
+	}
+	TestFalse(TEXT("Finished coarse owner releases readiness"),
+		Queue.HasPendingCreatedWork(FBox(FVector(-32, -32, 0), FVector(-1, -1, 7)), FVector::ZeroVector, 0));
+
+	Queue.ResetLoadedDirectory();
+	const FBox RequiredBounds(FVector(-1), FVector(64));
+	Queue.SetStartupBounds({RequiredBounds}, 2);
+	Queue.Observe(MakeTuple(0, FIntVector::ZeroValue), FIntVector(8), true);
+	Queue.Observe(MakeTuple(1, FIntVector(16, 0, 0)), FIntVector(8), true);
+	Queue.Observe(MakeTuple(2, FIntVector(32, 0, 0)), FIntVector(8), true);
+	TestTrue(TEXT("Required finest owner takes priority over closer coarse owners"), Queue.TakeNext({FIntVector::ZeroValue}, Area));
+	TestEqual(TEXT("Count-one priority selects finest layer"), Queue.GetScanOrigin(Area).DetailLevel, 2);
+	Queue.FinishScan(Area, false, Queue.GetScanId(Area));
+	TestFalse(TEXT("Finest completion releases readiness while two coarse layers remain"),
+		Queue.HasPendingCreatedWork(RequiredBounds, FVector::ZeroVector, 2));
+	TestTrue(TEXT("Two-layer policy still waits for second finest"),
+		Queue.HasPendingCreatedWork(RequiredBounds, FVector::ZeroVector, 1));
+	Queue.SetStartupBounds({RequiredBounds}, 1);
+	TestTrue(TEXT("Policy change wakes and reprioritizes existing backlog"), Queue.TakeNext({FIntVector::ZeroValue}, Area));
+	TestEqual(TEXT("Count-two priority selects second finest"), Queue.GetScanOrigin(Area).DetailLevel, 1);
+	Queue.FinishScan(Area, false, Queue.GetScanId(Area));
+	TestFalse(TEXT("Second finest completion releases two-layer wait"),
+		Queue.HasPendingCreatedWork(RequiredBounds, FVector::ZeroVector, 1));
+	TestTrue(TEXT("All-layer policy still waits for coarse backlog"),
+		Queue.HasPendingCreatedWork(RequiredBounds, FVector::ZeroVector, 0));
+	TestTrue(TEXT("Nonrequired coarse layer continues after release"), Queue.TakeNext({FIntVector::ZeroValue}, Area));
+	TestEqual(TEXT("Remaining layer keeps discovery authority"), Queue.GetScanOrigin(Area).DetailLevel, 0);
+	Queue.FinishScan(Area, false, Queue.GetScanId(Area));
 	return true;
 }
 
@@ -151,8 +205,8 @@ bool FLayoutPlanningAreaQueueTest::RunTest(const FString& Parameters)
 
 	Queue.Reset();
 	TestFalse(TEXT("Input revision preserves terminal terrain"), Queue.TakeNext(Centers, Area));
-	// The remaining allowance scenarios need a genuinely new native lifetime under the Created-only contract.
-	Queue.Forget(Near);
+	// Independent allowance fixture needs a new generation, not recreation of an admitted owner.
+	Queue.ResetLoadedDirectory();
 	Queue.Observe(Near, Size, true);
 	TestTrue(TEXT("New creation starts allowance fixture"), Queue.TakeNext(Centers, Area));
 	TestTrue(TEXT("Positive evidence promotes a slot"), Queue.MarkEligible(Area, Queue.GetScanId(Area)));
@@ -226,7 +280,9 @@ bool FLayoutPlanningAreaQueueTest::RunTest(const FString& Parameters)
 		Queue.DescribeBookkeeping(), BeforeReplacement);
 	TestFalse(TEXT("Recreated chunk rejects old scan"), Queue.IsCurrentScan(Area, OldScan));
 	Queue.RetireWorkingSet();
-	TestTrue(TEXT("Same centers resume unfinished work after disable"), Queue.TakeNext(TwoCenters, Area));
+	TestFalse(TEXT("Disable retires old attempts without readmitting recreated owners"), Queue.TakeNext(TwoCenters, Area));
+	Queue.Observe(FKey(0, FIntVector(80, 0, 0)), Size, true);
+	TestTrue(TEXT("Previously unseen owner can start after retirement"), Queue.TakeNext(TwoCenters, Area));
 	const uint64 NewScan = Queue.GetScanId(Area);
 	Queue.FinishScan(Area, false, OldScan);
 	TestTrue(TEXT("Old callback cannot settle replacement scan"), Queue.IsCurrentScan(Area, NewScan));
@@ -325,32 +381,33 @@ bool FLayoutPlanningAreaQueueTest::RunTest(const FString& Parameters)
 		BindingId, FIntVector(8, 8, 0), FIntPoint(100), FirstBinding->BaseCellDimensionsBlocks, Exclusion));
 	OwnedRuntime->RootSpacingReservations.Add(TEXT("AreaBlocker"), Exclusion);
 	TestTrue(TEXT("Full-area exclusion starts a scan"), OwnedRuntime->PlanningAreaQueue->TakeNext(Centers, Area));
-	OwnedRuntime->SubmitPlanningAreaDiscovery(Area, FIntVector(8, 8, 0), FIntPoint(0), FIntPoint(15));
-	TestFalse(TEXT("Full exclusion creates no discovery worker"), OwnedRuntime->PendingPlanningAreaDiscovery.IsSet());
+	TestFalse(TEXT("Full exclusion creates no discovery work"),
+		OwnedRuntime->PreparePlanningAreaDiscovery(Area, FIntVector(8, 8, 0), FIntPoint(0), FIntPoint(15), 1).IsSet());
 	TestFalse(TEXT("Full exclusion remains dormant"), OwnedRuntime->PlanningAreaQueue->TakeNext(Centers, Area));
 	OwnedRuntime->FinishPlanningAreaAttempt(TEXT("AreaBlocker"), false, true);
 	TestFalse(TEXT("Clearing permanent exclusion never reopens completed discovery"), OwnedRuntime->PlanningAreaQueue->TakeNext(Centers, Area));
-	// Each later scenario now requires a new native lifetime, not a forbidden completed-area replay.
-	OwnedRuntime->PlanningAreaQueue->Forget(Near);
+	// Independent scenarios use new generations; same-generation recreation must never replay discovery.
+	OwnedRuntime->PlanningAreaQueue->ResetLoadedDirectory();
 	OwnedRuntime->PlanningAreaQueue->Observe(Near, Size, true);
 	OwnedRuntime->RootSpacingReservations.Add(TEXT("ClearedRoot"), Exclusion);
 	TestTrue(TEXT("Explicit reset fixture starts a scan"), OwnedRuntime->PlanningAreaQueue->TakeNext(Centers, Area));
-	OwnedRuntime->SubmitPlanningAreaDiscovery(Area, FIntVector(8, 8, 0), FIntPoint(0), FIntPoint(15));
+	TestFalse(TEXT("Permanent exclusion needs no prepared task"),
+		OwnedRuntime->PreparePlanningAreaDiscovery(Area, FIntVector(8, 8, 0), FIntPoint(0), FIntPoint(15), 1).IsSet());
 	OwnedRuntime->ResetResolvedLayoutSiteRecords(true);
 	TestFalse(TEXT("Explicit root clear preserves completed region"), OwnedRuntime->PlanningAreaQueue->TakeNext(Centers, Area));
-	OwnedRuntime->PlanningAreaQueue->Forget(Near);
+	OwnedRuntime->PlanningAreaQueue->ResetLoadedDirectory();
 	OwnedRuntime->PlanningAreaQueue->Observe(Near, Size, true);
 	FirstBinding->OccupancyProbability = 0.0f;
 	TestTrue(TEXT("Zero occupancy starts its bounded scan"), OwnedRuntime->PlanningAreaQueue->TakeNext(Centers, Area));
-	OwnedRuntime->SubmitPlanningAreaDiscovery(Area, FIntVector(8, 8, 0), FIntPoint(0), FIntPoint(15));
-	TestFalse(TEXT("Zero occupancy creates no discovery worker"), OwnedRuntime->PendingPlanningAreaDiscovery.IsSet());
+	TestFalse(TEXT("Zero occupancy creates no discovery work"),
+		OwnedRuntime->PreparePlanningAreaDiscovery(Area, FIntVector(8, 8, 0), FIntPoint(0), FIntPoint(15), 1).IsSet());
 	TestTrue(TEXT("Zero occupancy reserves no root spacing"), OwnedRuntime->RootSpacingReservations.IsEmpty());
 	TestFalse(TEXT("Zero occupancy does not label terrain biome-irrelevant"),
 		OwnedRuntime->ObservedChunkLayers[0].Chunks.FindChecked(FIntVector::ZeroValue).Screening == ELayoutChunkScreening::Irrelevant);
 	FirstBinding->OccupancyProbability = 1.0f;
 	OwnedRuntime->PlanningAreaQueue->Reset();
 	TestFalse(TEXT("Occupancy changes cannot replay terminal terrain"), OwnedRuntime->PlanningAreaQueue->TakeNext(Centers, Area));
-	OwnedRuntime->PlanningAreaQueue->Forget(Near);
+	OwnedRuntime->PlanningAreaQueue->ResetLoadedDirectory();
 	OwnedRuntime->PlanningAreaQueue->Observe(Near, Size, true);
 	Harness.World->WorldGenDef->WorldBiomesDT = NewObject<UDataTable>();
 	for (UObject* Input : TArray<UObject*>{Harness.World->WorldGenDef, Harness.World->WorldGenDef->WorldBiomesDT})
@@ -382,6 +439,18 @@ bool FLayoutPlanningAreaQueueTest::RunTest(const FString& Parameters)
 	const uint64 AfterTableReplacement = OwnedRuntime->PlanningAreaQueue->GetScanId(Area);
 	PreviousBiomeTable->HandleDataTableChanged();
 	TestTrue(TEXT("Detached biome table cannot invalidate current work"), OwnedRuntime->PlanningAreaQueue->IsCurrentScan(Area, AfterTableReplacement));
+	FirstBinding->SiteSpacingInCells = FIntPoint(100);
+	FirstBinding->SiteJitterFraction = 0;
+	OwnedRuntime->InvalidateAutomaticPlanningInputs();
+	OwnedRuntime->PlanningAreaQueue->ResetLoadedDirectory();
+	OwnedRuntime->PlanningAreaQueue->Observe(Near, Size, true);
+	TestTrue(TEXT("Sparse empty-area fixture starts a scan"), OwnedRuntime->PlanningAreaQueue->TakeNext(Centers, Area));
+	TestFalse(TEXT("Empty candidate geometry creates no discovery work"),
+		OwnedRuntime->PreparePlanningAreaDiscovery(Area, FIntVector(8, 8, 0), FIntPoint(0), FIntPoint(15), 1).IsSet());
+	TestFalse(TEXT("Empty candidate geometry skips static captures"), OwnedRuntime->CachedDiscoveryInputs.IsValid());
+	TestFalse(TEXT("Empty candidate geometry skips worker submission"), OwnedRuntime->PendingPlanningAreaDiscovery.IsSet());
+	FirstBinding->SiteSpacingInCells = FIntPoint(1);
+	FirstBinding->SiteJitterFraction = 0.8f;
 	FLayoutRootSpacingReservation Bounds;
 	TestTrue(TEXT("Retention fixture has valid bounds"), FLayoutRootSpacingReservation::TryBuild(
 		TEXT("Binding"), FIntVector::ZeroValue, FIntPoint(1, 1), FIntVector(1, 1, 1), Bounds));

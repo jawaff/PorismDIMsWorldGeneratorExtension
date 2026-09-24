@@ -23,6 +23,8 @@ class ULayoutProfileAsset;
 class ULayoutWorldBindingAsset;
 class FLayoutActiveBiomeSampler;
 class FLayoutPlanningAreaQueue;
+struct FLayoutStartupCoverage;
+struct FLayoutDiscoveryInputs;
 struct FLayoutFrozenSubmissionDescriptorSeed;
 struct FLayoutActiveBiomeNoiseSnapshot;
 namespace LayoutWorldBindingSitePlanner { struct FSitePlanningSnapshot; }
@@ -366,9 +368,19 @@ public:
 
 	/** Game-thread read-only spawn gate over event-owned automatic work.
 	 * Uses a finite world-space box, conservative authored write reach and existing lifetime owners.
-	 * Relevant queued Created intent blocks until drained; Updated/distant/duplicate events do not.
+	 * ReadinessLODCount limits discovery and unsolved owner obligations, not known overlapping writes.
+	 * Required-layer queued Created intent blocks until drained; Updated/distant/duplicate events do not.
 	 * Explicit previews and terminal omissions do not block. Invalid bounds fail closed on authority. */
 	bool HasPendingAutomaticLayoutWork(const FBox& WorldBounds) const;
+
+	/** Joins/leaves readiness observation for this consumer's walkers. Required-layer priority outlives observation. */
+	void SetStartupCoverageRequired(UObject* Consumer, bool bRequired, TConstArrayView<TWeakObjectPtr<UObject>> Walkers = {});
+	/** Tests admitted work in this consumer's configured finest-N-LOD envelopes, independently of other players.
+	 * Retired no-write attempts and omitted continuation segments do not block. Native receipts and
+	 * actor settlement remain separate requirements; no hypothetical chunk keys are required. Game thread only. */
+	bool IsStartupCoverageReady(UObject* Consumer);
+	/** True when a world-space write from any LOD intersects this consumer's configured readiness footprint. */
+	bool DoesWriteAffectStartupCoverage(UObject* Consumer, const FBox& WorldBounds) const;
 
 	/** Game-thread write-attempt boundary, including failures that may have partially written.
 	 * Receivers invalidate old native receipts; this is not a native collision-complete signal. */
@@ -513,6 +525,11 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Layout|Planning", meta = (AllowPrivateAccess = "true", DisplayName = "Enable Automatic Layout Planning", ToolTip = "Plan in eligible Created terrain across loaded LODs. Characters and the enabled editor camera set priority; ready accepted layouts apply on completion or coverage changes."))
 	bool bEnablePlanningWindowRuntimeUpdates = true;
 
+	/** Number of finest native layers whose admitted layout work holds readiness. World-scoped;
+	 * known overlapping writes from any layer still settle before release. Does not limit generation. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Layout|Readiness", meta = (AllowPrivateAccess = "true", ClampMin = "1", UIMin = "1", DisplayName = "Readiness LOD Count", ToolTip = "Wait for layout work in the finest N LODs around each walker: 1 waits for the finest, 2 includes the second-finest and its larger coverage. Clamped to 1 through this world's layer count. Required regions receive discovery priority; other LODs continue after release. Known overlapping writes still settle regardless of their origin LOD. Does not change native terrain readiness or generation."))
+	int32 ReadinessLODCount = 1;
+
 	/** World-shared working and unfinished-owner limits; compact native loaded metadata is separate. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Layout|Planning", meta = (AllowPrivateAccess = "true", ClampMin = "1", UIMin = "1", ToolTip = "Maximum working chunks, and separately unfinished automatic root/route owners, shared by all characters and the editor camera. Compact currently-loaded metadata is separate. Not a RAM byte limit; reduce for a smaller working set."))
 	int32 MaxCachedPlanningChunks = 256;
@@ -522,7 +539,7 @@ protected:
 	bool bFollowEditorCamera = true;
 
 	/** Cadence for queued-task priority refresh; discovery and realization do not wait for this interval. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Layout|Planning", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1", ToolTip = "Seconds between queued-task priority refreshes. Discovery admits at most one area per update after prior work settles, subject to shared capacity. Completion and chunk readiness apply accepted layouts without waiting for this interval."))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Layout|Planning", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1", ToolTip = "Seconds between queued-task priority refreshes. Discovery admits one bounded batch per update after prior work settles, subject to shared capacity. Completion and chunk readiness apply accepted layouts without waiting for this interval."))
 	float PlanningWindowUpdateIntervalSeconds = 1.0f;
 
 	/** Maximum layout solve tasks allowed to run at once. 0 uses a safe automatic value based on CPU cores. */
@@ -601,6 +618,7 @@ private:
 	FDelegateHandle EditorDebugDrawHandle;
 	mutable double EditorDebugStatsVisibleUntil = 0.0;
 	bool bReportedEditorStatsDraw = false;
+	friend class FChunkWorldRuntimeReadinessLODCountTest;
 	friend class FLayoutContinuationSettlementTest;
 	friend class FLayoutRootSpacingRuntimeTest;
 	friend class FLayoutPlanningAreaQueueTest;
@@ -649,10 +667,15 @@ private:
 	/** Cancels whole automatic root groups without charging area failures. */
 	void CancelAutomaticRootWork();
 
-	/** Dispatches one selected area using copied inputs. Serial area discovery preserves admission order while root jobs remain concurrent. */
-	void SubmitPlanningAreaDiscovery(FIntPoint Area, FIntVector Center, FIntPoint Min, FIntPoint Max);
+	/** Captures one selected area; empty/excluded areas settle synchronously. Returned work has no UObject reads. */
+	TOptional<FLayoutBackgroundSolveSubmission> PreparePlanningAreaDiscovery(
+		FIntPoint Area, FIntVector Center, FIntPoint Min, FIntPoint Max, uint64 GroupId);
 
-	/** Cancels the selected area's group and returns unsampled coverage without spending its failure allowance. */
+	/** Selects up to four areas for one worker task, with bounded capture and ordered per-area publication.
+	 * Each scan retains its own lifetime, cursor and failure allowance. No completion recursively selects work. */
+	void SubmitPlanningAreaDiscovery(const TArray<FIntVector>& Centers);
+
+	/** Cancels the selected batch and returns unfinished coverage without spending its failure allowance. */
 	void CancelPlanningAreaDiscovery();
 
 	/** Prunes endpoint and route influence outside loaded bounds plus family reach. Explicit previews retain their endpoints until Apply or Clear. */
@@ -775,7 +798,7 @@ private:
 	bool ConsumeContinuationReservationForConnector(uint64 ConnectorKey);
 
 	/** Realizes ready sites using current Created authority and per-root stamp integrity. */
-	void TryRealizeEligibleSites();
+	void TryRealizeEligibleSites(bool bStartupOnly = false);
 
 	/**
 	 * Converts one world-binding-driven auto-discovered site realization failure into
@@ -788,7 +811,7 @@ private:
 		const FString& RejectionReason);
 
 	/** Realizes ready connectors without consuming eligibility needed by other roots or connectors. */
-	void TryRealizeEligibleConnectors();
+	void TryRealizeEligibleConnectors(bool bStartupOnly = false);
 
 	/** Returns true when one solved site should only realize after a fresh chunk-creation event. */
 	bool RequiresFreshCreatedChunkRealizationGate(const FResolvedLayoutSiteRecord& SiteRecord) const;
@@ -921,12 +944,26 @@ private:
 	/** Game-thread-scoped priority centers; never retained by worker jobs. */
 	TArray<FIntVector> PlanningPriorityCenters;
 	TSharedPtr<FLayoutPlanningAreaQueue> PlanningAreaQueue;
+	TSharedPtr<FLayoutStartupCoverage> StartupCoverage;
+	/** Immutable static discovery inputs; existing input/generation invalidation fences outstanding users. */
+	TSharedPtr<const FLayoutDiscoveryInputs, ESPMode::ThreadSafe> CachedDiscoveryInputs;
+	/** Rebuilds only when effective native demand changes, using configuration rather than chunk pointers. */
+	/** Resolves the coarsest required zero-based layer; authored counts clamp to the running world's layers. */
+	int32 GetFirstReadinessDetailLevel() const;
+	void RefreshStartupCoverage();
+	void InvalidateStartupCoverage();
+	FVector GetAutomaticLayoutReachInBlocks() const;
+	int32 ComputeAutomaticPlanningPriority(const FIntVector& Center, TConstArrayView<FIntVector> Centers) const;
 	TMap<FString, FIntPoint> PlanningAreasByRecordKey;
-	struct FPlanningAreaDiscoveryJob
+	struct FPlanningAreaDiscoveryScan
 	{
 		FIntPoint Area = FIntPoint::ZeroValue;
 		FIntVector Center = FIntVector::ZeroValue;
 		uint64 ScanId = 0;
+	};
+	struct FPlanningAreaDiscoveryJob
+	{
+		TArray<FPlanningAreaDiscoveryScan> Scans;
 		FLayoutBackgroundSolveHandle Handle;
 	};
 	TOptional<FPlanningAreaDiscoveryJob> PendingPlanningAreaDiscovery;

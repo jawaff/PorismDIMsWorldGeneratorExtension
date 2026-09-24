@@ -6,6 +6,11 @@
 #include "ChunkWorld/Support/ChunkWorldReadinessTestTypes.h"
 #include "GameFramework/Controller.h"
 #include "Layout/Testing/LayoutTestWorldSupport.h"
+#include "Layout/Runtime/ChunkWorldLayoutRuntimeComponent.h"
+#include "Layout/Runtime/LayoutPlanningAreaQueue.h"
+#include "Layout/Runtime/LayoutStartupCoverage.h"
+#include "Layout/Assets/LayoutWorldBindingAsset.h"
+#include "ChunkWorldStructs/ChunkWorldStructs.h"
 #include "Misc/AutomationTest.h"
 
 namespace
@@ -152,6 +157,19 @@ bool FChunkWorldRuntimeReadinessServerSettlementTest::RunTest(const FString& Par
 	TestTrue(TEXT("Startup freeze is active before runtime settlement"), Freeze->IsStartupFreezeActive());
 	const FGuid SessionId = Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), false);
 	TestTrue(TEXT("Authority starts server-only session"), SessionId.IsValid());
+	auto* Layout = Context.ChunkWorld->GetLayoutRuntimeComponent();
+	Layout->QueueObservedLoadedChunk(Context.ChunkWorld->UEWorldPosToBlockWorldPos(Context.Pawn->GetActorLocation()), 0);
+	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Freeze->GetRuntimeReadinessSession().ReadinessId);
+	TestEqual(TEXT("Nearby work holds native-ready session"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::WaitingForLayouts);
+	const double WaitStarted = Context.World->GetTimeSeconds();
+	// World settings clamp a single large delta; advance normal frames to exercise the old deadline.
+	for (int32 Frame = 0; Frame < 480; ++Frame) Context.World->Tick(LEVELTICK_TimeOnly, 0.25f);
+	TestTrue(TEXT("Wait exceeds former layout deadline"), Context.World->GetTimeSeconds() - WaitStarted > 60.0);
+	Freeze->Advance();
+	TestEqual(TEXT("Slow layout work remains retryable"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::WaitingForLayouts);
+	TestEqual(TEXT("Elapsed layout time is not a failure"), Freeze->GetRuntimeReadinessSession().Failure, EChunkWorldRuntimeReadinessFailure::None);
+	Layout->ProcessQueuedLayoutWorkNow();
+	Freeze->Advance();
 	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Freeze->GetRuntimeReadinessSession().ReadinessId);
 	const FChunkWorldRuntimeReadinessSession SettledSession = Freeze->GetRuntimeReadinessSession();
 	TestEqual(TEXT("One ready event settles server-only session"), SettledSession.State, EChunkWorldRuntimeReadinessState::Settled);
@@ -160,6 +178,130 @@ bool FChunkWorldRuntimeReadinessServerSettlementTest::RunTest(const FString& Par
 	TestFalse(TEXT("Runtime settlement releases lingering startup freeze"), Freeze->IsStartupFreezeActive());
 	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Freeze->GetRuntimeReadinessSession().ReadinessId);
 	TestEqual(TEXT("Duplicate ready event cannot reopen or release twice"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Settled);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FChunkWorldRuntimeReadinessLODCountTest,
+	"PorismExtension.ChunkWorld.ReadinessFreeze.Runtime.LODCount",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+/** Exercises the same count for queued events, admitted discovery, coverage and priority. */
+bool FChunkWorldRuntimeReadinessLODCountTest::RunTest(const FString& Parameters)
+{
+	FRuntimeReadinessTestContext Context;
+	if (!TestTrue(TEXT("Authority world initializes"), Context.Initialize())) return false;
+	Context.ChunkWorld->StopGen();
+	FChunkDataParams Finest = Context.ChunkWorld->WorldGenDef->WorldChunks[0];
+	FChunkDataParams Middle = Finest, Coarse = Finest;
+	Middle.BlockSizeMulti = 2.0;
+	Middle.SectorCount = FIntVector(2);
+	Coarse.BlockSizeMulti = 4.0;
+	Coarse.SectorCount = FIntVector(3);
+	Context.ChunkWorld->WorldGenDef->WorldChunks = {Coarse, Middle, Finest};
+	// A different native layer layout requires its own save namespace.
+	Context.ChunkWorld->SaveTarget += TEXT("/ThreeLODs");
+	Context.ChunkWorld->StartGen();
+	if (!TestEqual(TEXT("Three native layers available"), Context.ChunkWorld->GetChunkLayerCount(), 3)) return false;
+	Context.Pawn->SetActorLocation(FVector(8));
+	if (!Context.ChunkWorld->HasRegisteredChunkWorldWalker(Context.Pawn->GetTestWalker()))
+		Context.ChunkWorld->AddChunkWorldWalker(Context.Pawn->GetTestWalker());
+	auto* Layout = Context.ChunkWorld->GetLayoutRuntimeComponent();
+	TestEqual(TEXT("New worlds default to finest only"), Layout->ReadinessLODCount, 1);
+	Layout->SetLayoutWorldBindings({NewObject<ULayoutWorldBindingAsset>()});
+	// No discovery center during event drain; preserve admitted work for explicit queue completion.
+	Layout->PlanningCenterSnapshot.Emplace(TArray<FIntVector>{});
+	Layout->PlanningAreaQueue->Configure(4, 256);
+	const TArray<TWeakObjectPtr<UObject>> Walkers{Context.Pawn->GetTestWalker()};
+	Layout->SetStartupCoverageRequired(Context.Pawn, true, Walkers);
+	TestTrue(TEXT("Empty finest coverage is ready"), Layout->IsStartupCoverageReady(Context.Pawn));
+	const FBox FinestBounds = Layout->StartupCoverage->BoundsInBlocks[0];
+
+	FChunkWorldObservedChunkLifecycleEvent Event;
+	Event.ChunkBlockWorldPos = FIntVector::ZeroValue;
+	Event.DetailLevel = 1;
+	Event.EventType = EChunkWorldChunkLifecycleEventType::Created;
+	Layout->QueueObservedChunkLifecycle(Event);
+	TestTrue(TEXT("Count one ignores queued second-finest discovery"), Layout->IsStartupCoverageReady(Context.Pawn));
+	TestFalse(TEXT("Settlement-box query also ignores nonrequired discovery"), Layout->HasPendingAutomaticLayoutWork(FinestBounds));
+	Layout->ReadinessLODCount = 2;
+	TestFalse(TEXT("Count two waits for second-finest queued event"), Layout->IsStartupCoverageReady(Context.Pawn));
+	const FBox MiddleBounds = Layout->StartupCoverage->BoundsInBlocks[0];
+	TestTrue(TEXT("Second-finest count includes its larger coverage"), MiddleBounds.GetVolume() > FinestBounds.GetVolume());
+	const FVector OuterPoint(MiddleBounds.Max.X, MiddleBounds.GetCenter().Y, MiddleBounds.GetCenter().Z);
+	TestFalse(TEXT("Outer write lies beyond finest coverage"), FinestBounds.IsInsideOrOn(OuterPoint));
+	TestTrue(TEXT("Outer overlapping write rearms two-layer readiness"),
+		Layout->DoesWriteAffectStartupCoverage(Context.Pawn, FBox(OuterPoint, OuterPoint)));
+	Layout->ProcessQueuedLayoutWorkNow();
+	TestFalse(TEXT("Drained event retains required admitted work"), Layout->IsStartupCoverageReady(Context.Pawn));
+	Layout->ReadinessLODCount = 1;
+	TestTrue(TEXT("Count one releases with second-finest backlog remaining"), Layout->IsStartupCoverageReady(Context.Pawn));
+	TestFalse(TEXT("Count change removes obsolete outer write footprint"),
+		Layout->DoesWriteAffectStartupCoverage(Context.Pawn, FBox(OuterPoint, OuterPoint)));
+
+	Event.DetailLevel = 2;
+	Layout->QueueObservedChunkLifecycle(Event);
+	TestFalse(TEXT("Finest queued work still holds readiness"), Layout->IsStartupCoverageReady(Context.Pawn));
+	Layout->ProcessQueuedLayoutWorkNow();
+	TestFalse(TEXT("Finest admitted work still holds readiness"), Layout->IsStartupCoverageReady(Context.Pawn));
+	// A count change wakes priority without changing discovery admission or replaying completed work.
+	Layout->ReadinessLODCount = 3;
+	Layout->RefreshStartupCoverage();
+	TestTrue(TEXT("All-layer count expands coverage again"), Layout->StartupCoverage->BoundsInBlocks[0].GetVolume() > MiddleBounds.GetVolume());
+	Layout->ReadinessLODCount = 1;
+	Layout->RefreshStartupCoverage();
+	FIntPoint Area;
+	TestTrue(TEXT("Required discovery is selected"), Layout->PlanningAreaQueue->TakeNext({FIntVector::ZeroValue}, Area));
+	TestEqual(TEXT("Finest owner wins over coarse backlog"), Layout->PlanningAreaQueue->GetScanOrigin(Area).DetailLevel, 2);
+	Layout->PlanningAreaQueue->FinishScan(Area, false, Layout->PlanningAreaQueue->GetScanId(Area));
+	TestTrue(TEXT("Finest completion releases while coarse work remains"), Layout->IsStartupCoverageReady(Context.Pawn));
+	TestTrue(TEXT("Coarse backlog remains admitted"), Layout->PlanningAreaQueue->HasPendingCreatedWork(MiddleBounds, FVector::ZeroVector, 1));
+
+	Layout->ReadinessLODCount = 0;
+	TestTrue(TEXT("Zero clamps to finest, not all layers"), Layout->IsStartupCoverageReady(Context.Pawn));
+	TestEqual(TEXT("Lower clamp resolves last layer"), Layout->GetFirstReadinessDetailLevel(), 2);
+	Layout->ReadinessLODCount = MAX_int32;
+	TestFalse(TEXT("Oversized count waits for all available layers"), Layout->IsStartupCoverageReady(Context.Pawn));
+	TestEqual(TEXT("Upper clamp resolves first layer"), Layout->GetFirstReadinessDetailLevel(), 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FChunkWorldRuntimeReadinessFinestCoverageTest,
+	"PorismExtension.ChunkWorld.ReadinessFreeze.Runtime.FinestCoverage",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+/** Finest footprints belong to each consumer and move without accumulating old event obligations. */
+bool FChunkWorldRuntimeReadinessFinestCoverageTest::RunTest(const FString& Parameters)
+{
+	FRuntimeReadinessTestContext Context;
+	if (!TestTrue(TEXT("Transient authority world initializes"), Context.Initialize())) return false;
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	auto* Remote = Context.World->SpawnActor<AChunkWorldReadinessTestPawn>(
+		AChunkWorldReadinessTestPawn::StaticClass(), FTransform(FVector(10000, 0, 100)), SpawnParameters);
+	if (!TestNotNull(TEXT("Distant walker spawns"), Remote)) return false;
+	Context.ChunkWorld->AddChunkWorldWalker(Remote->GetTestWalker());
+	auto* Layout = Context.ChunkWorld->GetLayoutRuntimeComponent();
+	const TArray<TWeakObjectPtr<UObject>> LocalWalkers{ Context.Pawn->GetTestWalker() };
+	const TArray<TWeakObjectPtr<UObject>> RemoteWalkers{ Remote->GetTestWalker() };
+	Layout->SetStartupCoverageRequired(Context.Pawn, true, LocalWalkers);
+	Layout->SetStartupCoverageRequired(Remote, true, RemoteWalkers);
+	TestTrue(TEXT("No synthetic native keys are required"), Layout->IsStartupCoverageReady(Context.Pawn));
+	const FVector Position = Context.Pawn->GetActorLocation();
+	const FBox Candidate(Position - FVector(0.1), Position + FVector(0.1));
+	const FBox NearbyWrite(Position + FVector(1, 0, 0), Position + FVector(2, 1, 1));
+	TestFalse(TEXT("Write lies outside small settlement box"), Candidate.Intersect(NearbyWrite));
+	TestTrue(TEXT("Finest-area write still rearms local receipt"), Layout->DoesWriteAffectStartupCoverage(Context.Pawn, NearbyWrite));
+	TestFalse(TEXT("Distant player's receipt is independent"), Layout->DoesWriteAffectStartupCoverage(Remote, NearbyWrite));
+	Layout->QueueObservedLoadedChunk(Context.ChunkWorld->UEWorldPosToBlockWorldPos(Position), 0);
+	TestFalse(TEXT("Local queued event must drain"), Layout->IsStartupCoverageReady(Context.Pawn));
+	TestTrue(TEXT("Other player's distant queue does not block"), Layout->IsStartupCoverageReady(Remote));
+	Context.Pawn->SetActorLocation(Remote->GetActorLocation());
+	TestTrue(TEXT("Movement replaces footprint rather than accumulating old obligations"), Layout->IsStartupCoverageReady(Context.Pawn));
+	TestFalse(TEXT("Old footprint no longer rearms receipt"), Layout->DoesWriteAffectStartupCoverage(Context.Pawn, NearbyWrite));
+	Layout->SetStartupCoverageRequired(Context.Pawn, false);
+	TestTrue(TEXT("Removing one consumer preserves another"), Layout->IsStartupCoverageReady(Remote));
+	Layout->SetStartupCoverageRequired(Remote, false);
 	return true;
 }
 

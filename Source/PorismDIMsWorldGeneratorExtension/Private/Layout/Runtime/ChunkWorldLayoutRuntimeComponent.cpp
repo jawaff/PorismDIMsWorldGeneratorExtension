@@ -64,6 +64,7 @@
 #include "Layout/Diagnostics/LayoutGenerationProfiling.h"
 #include "Layout/Runtime/LayoutWorldBindingRuntimeHelpers.h"
 #include "Layout/Runtime/LayoutPlanningAreaQueue.h"
+#include "Layout/Runtime/LayoutStartupCoverage.h"
 #include "Layout/Solver/LayoutStandaloneRegionRequestBuilder.h"
 #include "Misc/ScopeExit.h"
 #include "Layout/Runtime/LayoutRealizationWritePlan.h"
@@ -78,8 +79,20 @@
 #include "Layout/Terrain/LayoutWorldBindingTerrainFit.h"
 #include "Layout/Types/LayoutGameplayTags.h"
 
-#if WITH_EDITOR
-#endif
+/** Static game-thread captures reused until authored inputs change. Area jobs copy only the
+ * binding metadata they use, then attach their own reference Z and reservation snapshot. */
+struct FLayoutDiscoveryInputs
+{
+	struct FBinding
+	{
+		TWeakObjectPtr<ULayoutWorldBindingAsset> Binding;
+		LayoutWorldBindingSitePlanner::FSitePlanningSnapshot Inputs;
+	};
+	TWeakObjectPtr<UWorldGenDef> Definition;
+	TSharedPtr<const FLayoutActiveBiomeNoiseSnapshot, ESPMode::ThreadSafe> Noise;
+	TArray<FBinding> Bindings;
+	FString Failure;
+};
 
 namespace
 {
@@ -3673,6 +3686,12 @@ void UChunkWorldLayoutRuntimeComponent::RunEligibleRealizationPasses(const bool 
 		RefreshConnectorRecords();
 	}
 
+	// Keep current finest-area roots and continuations ahead of distant work after startup too.
+	if (StartupCoverage && !StartupCoverage->BoundsInBlocks.IsEmpty())
+	{
+		TryRealizeEligibleSites(true);
+		TryRealizeEligibleConnectors(true);
+	}
 	TryRealizeEligibleSites();
 	TryRealizeEligibleConnectors();
 }
@@ -3779,6 +3798,7 @@ void UChunkWorldLayoutRuntimeComponent::SetExplicitPreviewWorkGateForTesting(
 void UChunkWorldLayoutRuntimeComponent::ProcessQueuedLayoutWork()
 {
 	TGuardValue<bool> ProcessingScope(bProcessingQueuedLayoutWork, true);
+	RefreshStartupCoverage();
 	TGuardValue<TOptional<TArray<FIntVector>>> CentersForPass(
 		PlanningCenterSnapshot, TOptional<TArray<FIntVector>>(CollectPlanningWindowCenters()));
 	decltype(PendingChunkLoads) ChunkLoadsToProcess;
@@ -3796,9 +3816,10 @@ void UChunkWorldLayoutRuntimeComponent::ProcessQueuedLayoutWork()
 		HandleObservedLoadedChunk(Pair.Value);
 	}
 
+	// Clients account for received terrain events but never discover, solve or realize layouts.
+	if (GetOwner() && !GetOwner()->HasAuthority()) return;
 	if (bContinuationReadinessDirty) RefreshPlacedContinuationRootReadiness();
 	UpdateLoadedChunkPlanning();
-	PumpBackgroundLayoutSolves();
 	if (bRealizationDirty)
 	{
 		bRealizationDirty = false;
@@ -3818,8 +3839,9 @@ void UChunkWorldLayoutRuntimeComponent::ProcessQueuedLayoutWork()
 			UE_LOG(LogTemp, Log, TEXT("[LayoutBookkeeping] component=%s world=%s received=%llu coalesced=%llu before={%s} after={%s}"),
 				*GetPathName(), *GetPathNameSafe(GetWorld()), ReceivedEvents - LastReportedChunkEvents,
 				ProcessedChunkObservations - LastReportedChunkObservations, *LastBookkeepingDiagnostic, *Current);
-			UE_LOG(LogTemp, Log, TEXT("[LayoutDiscoveryTiming] component=%s completed=%llu active=%d gameThreadSelection={%s} gameThreadCapture={%s} gameThreadPublication={%s}"),
+			UE_LOG(LogTemp, Log, TEXT("[LayoutDiscoveryTiming] component=%s completed=%llu active=%d activeAreas=%d gameThreadSelection={%s} gameThreadCapture={%s} gameThreadPublication={%s}"),
 				*GetPathName(), CompletedDiscoveryAreas, PendingPlanningAreaDiscovery.IsSet(),
+				PendingPlanningAreaDiscovery.IsSet() ? PendingPlanningAreaDiscovery->Scans.Num() : 0,
 				*DiscoverySelectionTiming.Describe(), *DiscoveryCaptureTiming.Describe(), *DiscoveryPublicationTiming.Describe());
 			DiscoverySelectionTiming = {};
 			DiscoveryCaptureTiming = {};
@@ -3881,6 +3903,8 @@ TArray<FIntVector> UChunkWorldLayoutRuntimeComponent::CollectPlanningWindowCente
 	{
 		return Centers;
 	}
+	if (StartupCoverage)
+		for (const auto& Target : StartupCoverage->Targets) Centers.AddUnique(Target.Position);
 	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 	{
 		const APawn* const Pawn = It->Get() != nullptr ? It->Get()->GetPawn() : nullptr;
@@ -3916,11 +3940,11 @@ void UChunkWorldLayoutRuntimeComponent::CancelPlanningAreaDiscovery()
 	const auto Job = PendingPlanningAreaDiscovery.GetValue();
 	PendingPlanningAreaDiscovery.Reset();
 	if (BackgroundSolveDispatcher.IsValid()) BackgroundSolveDispatcher->CancelGroup(Job.Handle.LayoutGroupId);
-	PlanningAreaQueue->FinishScan(Job.Area, true, Job.ScanId, true);
+	for (const auto& Scan : Job.Scans) PlanningAreaQueue->FinishScan(Scan.Area, true, Scan.ScanId, true);
 }
 
-void UChunkWorldLayoutRuntimeComponent::SubmitPlanningAreaDiscovery(
-	const FIntPoint Area, const FIntVector Center, const FIntPoint Min, const FIntPoint Max)
+TOptional<FLayoutBackgroundSolveSubmission> UChunkWorldLayoutRuntimeComponent::PreparePlanningAreaDiscovery(
+	const FIntPoint Area, const FIntVector Center, const FIntPoint Min, const FIntPoint Max, const uint64 GroupId)
 {
 	check(IsInGameThread());
 	check(!PendingPlanningAreaDiscovery.IsSet());
@@ -3929,16 +3953,18 @@ void UChunkWorldLayoutRuntimeComponent::SubmitPlanningAreaDiscovery(
 	ON_SCOPE_EXIT { if (bTimeCapture) DiscoveryCaptureTiming.Record((FPlatformTime::Seconds() - CaptureStart) * 1000.0); };
 	const uint64 ScanId = PlanningAreaQueue->GetScanId(Area);
 	FIntVector OwnerMin, OwnerMax;
-	if (!PlanningAreaQueue->GetScanBounds(Area, OwnerMin, OwnerMax)) return;
+	if (!PlanningAreaQueue->GetScanBounds(Area, OwnerMin, OwnerMax)) return {};
 	AChunkWorldExtended* const ChunkWorld = GetOwningChunkWorld();
 	if (ChunkWorld == nullptr || ChunkWorld->WorldGenDef == nullptr)
 	{
 		PlanningAreaQueue->FinishScan(Area, false, ScanId);
-		return;
+		return {};
 	}
 	// Read small resident metrics only. One retained root must exclude every center for
 	// each candidate; partial overlap or an inconclusive envelope still gets worker discovery.
-	TSet<ULayoutWorldBindingAsset*> ExcludedBindings, DisabledBindings;
+	const int32 WorldSeed = ResolveLayoutWorldSeed();
+	TSet<ULayoutWorldBindingAsset*> ExcludedBindings, DisabledBindings, EmptyBindings;
+	TMap<ULayoutWorldBindingAsset*, TArray<FIntPoint>> CandidateCenters;
 	for (ULayoutWorldBindingAsset* Binding : LayoutWorldBindings)
 	{
 		if (!Binding || Binding->Candidates.IsEmpty()) continue;
@@ -3965,66 +3991,86 @@ void UChunkWorldLayoutRuntimeComponent::SubmitPlanningAreaDiscovery(
 			bAllExcluded &= bExcluded;
 		}
 		if (bAllExcluded) ExcludedBindings.Add(Binding);
+		else
+		{
+			auto Centers = LayoutWorldBindingSitePlanner::BuildBoundedNormalCellSiteCenters(
+				FIntPoint(OwnerMin.X, OwnerMin.Y), FIntPoint(OwnerMax.X, OwnerMax.Y), Binding->BaseCellDimensionsBlocks,
+				Binding->SiteSpacingInCells, Binding->SiteJitterFraction, WorldSeed, BindingId);
+			if (Centers.IsEmpty()) EmptyBindings.Add(Binding);
+			else CandidateCenters.Add(Binding, MoveTemp(Centers));
+		}
 	}
-	if (!LayoutWorldBindings.IsEmpty() && ExcludedBindings.Num() + DisabledBindings.Num() == LayoutWorldBindings.Num())
+	if (CandidateCenters.IsEmpty())
 	{
 		if (GetDetailedDiagnostics())
-			UE_LOG(LogTemp, Display, TEXT("[LayoutSolveDiag] origin=automatic-area area=(%d,%d) spacingBindings=%d occupancyBindings=%d captureSkipped=1"),
-				Area.X, Area.Y, ExcludedBindings.Num(), DisabledBindings.Num());
+			UE_LOG(LogTemp, Display, TEXT("[LayoutSolveDiag] origin=automatic-area area=(%d,%d) spacingBindings=%d occupancyBindings=%d emptyBindings=%d captureSkipped=1"),
+				Area.X, Area.Y, ExcludedBindings.Num(), DisabledBindings.Num(), EmptyBindings.Num());
 		PlanningAreaQueue->FinishScan(Area, false, ScanId);
-		return;
+		return {};
 	}
 	const auto Reservations = MakeShared<const TMap<FString, FLayoutRootSpacingReservation>, ESPMode::ThreadSafe>(RootSpacingReservations);
-	const int32 WorldSeed = ResolveLayoutWorldSeed();
-	FString Failure;
-	const auto Noise = FLayoutActiveBiomeNoiseSnapshot::CaptureFromWorldDefinition(this, ChunkWorld->WorldGenDef, WorldSeed, Failure);
+	if (!CachedDiscoveryInputs)
+	{
+		auto Captured = MakeShared<FLayoutDiscoveryInputs, ESPMode::ThreadSafe>();
+		Captured->Definition = ChunkWorld->WorldGenDef;
+		Captured->Noise = FLayoutActiveBiomeNoiseSnapshot::CaptureFromWorldDefinition(
+			this, ChunkWorld->WorldGenDef, WorldSeed, Captured->Failure);
+		const auto Coordinates = MakeCoordinateSettings(ChunkWorld->WorldGenDef);
+		for (ULayoutWorldBindingAsset* Binding : LayoutWorldBindings)
+		{
+			if (!Binding || Binding->Candidates.IsEmpty() || !Captured->Noise->IsInitialized()) continue;
+			for (const FName Row : Binding->BiomeRowNames)
+			{
+				if (!Captured->Noise->GetSampler().HasMatchingRow(Row)) continue;
+				auto& Item = Captured->Bindings.AddDefaulted_GetRef();
+				Item.Binding = Binding;
+				Item.Inputs = LayoutWorldBindingSitePlanner::CaptureSitePlanningInputs(Binding, Row,
+					WorldSeed, Binding->DefaultPlacementPolicy.SurfaceSearch, Coordinates, INDEX_NONE, ChunkWorld);
+			}
+		}
+		CachedDiscoveryInputs = MoveTemp(Captured);
+	}
+	const auto Noise = CachedDiscoveryInputs->Noise.ToSharedRef();
 	if (!Noise->IsInitialized())
 	{
-		ReportLayoutPlanningWarning(this, GetDetailedDiagnostics(), Failure);
+		ReportLayoutPlanningWarning(this, GetDetailedDiagnostics(), CachedDiscoveryInputs->Failure);
 		PlanningAreaQueue->FinishScan(Area, false, ScanId);
-		return;
+		return {};
 	}
 	struct FPreparedBinding
 	{
 		TWeakObjectPtr<ULayoutWorldBindingAsset> Binding;
 		LayoutWorldBindingSitePlanner::FSitePlanningSnapshot Inputs;
+		TArray<FIntPoint> Centers;
 		TArray<FPlannedLayoutSiteRecord> Records;
 		TSet<FString> BlockingReservations;
-		int32 Samples = 0, OccupancyRejected = 0;
+		int32 Samples = 0, OccupancyRejected = 0, OwnerRejected = 0;
 	};
 	const auto Prepared = MakeShared<TArray<FPreparedBinding>, ESPMode::ThreadSafe>();
-	const auto Coordinates = MakeCoordinateSettings(ChunkWorld->WorldGenDef);
-	for (ULayoutWorldBindingAsset* Binding : LayoutWorldBindings)
+	for (const auto& Captured : CachedDiscoveryInputs->Bindings)
 	{
-		if (Binding == nullptr || Binding->Candidates.IsEmpty() || ExcludedBindings.Contains(Binding) || DisabledBindings.Contains(Binding)) continue;
-		for (const FName Row : Binding->BiomeRowNames)
-		{
-			if (!Noise->GetSampler().HasMatchingRow(Row)) continue;
-			auto& Item = Prepared->AddDefaulted_GetRef();
-			Item.Binding = Binding;
-			Item.Inputs = LayoutWorldBindingSitePlanner::CaptureSitePlanningInputs(Binding, Row,
-				WorldSeed, Binding->DefaultPlacementPolicy.SurfaceSearch,
-				Coordinates, Center.Z, ChunkWorld);
-			Item.Inputs.RootReservations = Reservations;
-		}
+		auto* Binding = Captured.Binding.Get();
+		const auto* Centers = CandidateCenters.Find(Binding);
+		if (!Centers) continue;
+		auto& Item = Prepared->AddDefaulted_GetRef();
+		Item.Binding = Binding;
+		Item.Centers = *Centers;
+		Item.Inputs = Captured.Inputs;
+		Item.Inputs.RootReferenceZ = Center.Z;
+		Item.Inputs.CandidateCenterBoundsInBlocks = FBox(FVector(OwnerMin), FVector(OwnerMax));
+		Item.Inputs.RootReservations = Reservations;
 	}
 	if (Prepared->IsEmpty())
 	{
-		if (ExcludedBindings.IsEmpty() && DisabledBindings.IsEmpty()) PlanningAreaQueue->MarkIrrelevant(Area, ScanId);
+		if (ExcludedBindings.IsEmpty() && DisabledBindings.IsEmpty() && EmptyBindings.IsEmpty()) PlanningAreaQueue->MarkIrrelevant(Area, ScanId);
 		PlanningAreaQueue->FinishScan(Area, false, ScanId);
-		return;
+		return {};
 	}
 	const FString DiagnosticContext = GetDetailedDiagnostics()
-		? FString::Printf(TEXT("origin=automatic-area area=(%d,%d) scan=%llu"), Area.X, Area.Y, ScanId) : FString();
-	const FGuid TransportId = FGuid::NewGuid();
-	const uint64 GroupId = ((uint64(TransportId.A) << 32) | TransportId.B) | 1;
+		? FString::Printf(TEXT("origin=automatic-area component=%p area=(%d,%d) scan=%llu"),
+			this, Area.X, Area.Y, ScanId) : FString();
 	FLayoutBackgroundSolveSubmission Submission;
-	Submission.DebugName = FString::Printf(TEXT("PlanningArea(%d,%d)"), Area.X, Area.Y);
-	Submission.LayoutGroupId = GroupId;
-	Submission.Tier = ELayoutBackgroundSolveJobTier::NearRoot;
-	Submission.LifecycleStage = ELayoutBackgroundSolveLifecycleStage::Preparation;
-	Submission.Priority = FLayoutPlanningAreaQueue::ComputePriority(Center, PlanningPriorityCenters);
-	Submission.Work = [Prepared, Noise, OwnerMin, OwnerMax, DiagnosticContext](const FLayoutSolveCancellationToken& Token, FString& OutFailure)
+	Submission.Work = [Prepared, Noise, DiagnosticContext](const FLayoutSolveCancellationToken& Token, FString& OutFailure)
 	{
 		LayoutSolveExecution::FDiagnosticScope Diagnostics(DiagnosticContext, TEXT("location-preparation"), &OutFailure);
 		for (auto& Item : *Prepared)
@@ -4035,17 +4081,10 @@ void UChunkWorldLayoutRuntimeComponent::SubmitPlanningAreaDiscovery(
 			// centers directly instead of building/discarding a large halo grid. Its existing
 			// surface/cavity and full-footprint checks still sample across native chunk edges.
 			TArray<FLayoutReservationPocket> Pockets;
-			Pockets.AddDefaulted_GetRef().SampleBlockXYs = LayoutWorldBindingSitePlanner::BuildBoundedNormalCellSiteCenters(
-				FIntPoint(OwnerMin.X, OwnerMin.Y), FIntPoint(OwnerMax.X, OwnerMax.Y), Inputs.SharedCellSizeInBlocks);
+			Pockets.AddDefaulted_GetRef().SampleBlockXYs = MoveTemp(Item.Centers);
 			Item.Samples = Pockets[0].SampleBlockXYs.Num();
 			Item.Records = LayoutWorldBindingSitePlanner::BuildPendingSiteRecordsFromPockets(
-				Pockets, Inputs, Noise->GetSampler(), &Item.BlockingReservations, &Item.OccupancyRejected);
-			Item.Records.RemoveAll([OwnerMin, OwnerMax](const FPlannedLayoutSiteRecord& Record)
-			{
-				const FIntVector Position = Record.GetPlannedSiteReservationSourceSelection().SiteCenterBlockWorldPos;
-				return Position.X < OwnerMin.X || Position.X > OwnerMax.X || Position.Y < OwnerMin.Y || Position.Y > OwnerMax.Y
-					|| Position.Z < OwnerMin.Z || Position.Z > OwnerMax.Z;
-			});
+				Pockets, Inputs, Noise->GetSampler(), &Item.BlockingReservations, &Item.OccupancyRejected, &Item.OwnerRejected);
 		}
 		const bool bSucceeded = !Token.IsCancellationRequested();
 		Diagnostics.Finish(bSucceeded);
@@ -4056,19 +4095,13 @@ void UChunkWorldLayoutRuntimeComponent::SubmitPlanningAreaDiscovery(
 	{
 		auto* Runtime = WeakThis.Get();
 		if (Runtime == nullptr || !Runtime->PendingPlanningAreaDiscovery.IsSet()
-			|| Runtime->PendingPlanningAreaDiscovery->ScanId != ScanId) return;
+			|| Runtime->PendingPlanningAreaDiscovery->Handle.LayoutGroupId != GroupId) return;
 		const bool bTimePublication = Runtime->GetDetailedDiagnostics();
 		const double PublicationStart = bTimePublication ? FPlatformTime::Seconds() : 0.0;
 		ON_SCOPE_EXIT { if (bTimePublication) Runtime->DiscoveryPublicationTiming.Record((FPlatformTime::Seconds() - PublicationStart) * 1000.0); };
 		bool bDeferred = false;
 		bool bCanceled = true;
-		ON_SCOPE_EXIT
-		{
-			Runtime->PlanningAreaQueue->FinishScan(Area, bDeferred, ScanId, bCanceled);
-			Runtime->bLoadedInfluenceDirty = true;
-			if (Runtime->PendingPlanningAreaDiscovery.IsSet() && Runtime->PendingPlanningAreaDiscovery->ScanId == ScanId)
-				Runtime->PendingPlanningAreaDiscovery.Reset();
-		};
+		ON_SCOPE_EXIT { Runtime->PlanningAreaQueue->FinishScan(Area, bDeferred, ScanId, bCanceled); };
 		if (!Runtime->PlanningAreaQueue->IsCurrentScan(Area, ScanId)) return;
 		if (!Completion.bWorkSucceeded)
 		{
@@ -4081,8 +4114,8 @@ void UChunkWorldLayoutRuntimeComponent::SubmitPlanningAreaDiscovery(
 		if (!Runtime->bEnablePlanningWindowRuntimeUpdates || Owner == nullptr || !Owner->HasAuthority() || !Owner->IsRunning()) return;
 		const auto Centers = Runtime->CollectPlanningWindowCenters();
 		if (Centers.IsEmpty()) return;
-		if (Prepared->ContainsByPredicate([](const FPreparedBinding& Item) { return !Item.Records.IsEmpty(); })
-			&& !Runtime->PlanningAreaQueue->MarkEligible(Area, ScanId))
+		const bool bHasCandidates = Prepared->ContainsByPredicate([](const FPreparedBinding& Item) { return !Item.Records.IsEmpty(); });
+		if (bHasCandidates && !Runtime->PlanningAreaQueue->MarkEligible(Area, ScanId))
 		{
 			bDeferred = true;
 			bCanceled = false;
@@ -4098,9 +4131,9 @@ void UChunkWorldLayoutRuntimeComponent::SubmitPlanningAreaDiscovery(
 			ULayoutWorldBindingAsset* Binding = Item.Binding.Get();
 			if (Binding == nullptr) continue;
 			if (!DiagnosticContext.IsEmpty())
-				UE_LOG(LogTemp, Display, TEXT("[LayoutSolveDiag] %s binding=%s row=%s centers=%d candidates=%d occupancyRejected=%d spacingBlockers=%d"),
+				UE_LOG(LogTemp, Display, TEXT("[LayoutSolveDiag] %s binding=%s row=%s centers=%d candidates=%d occupancyRejected=%d ownerRejected=%d spacingBlockers=%d"),
 					*DiagnosticContext, *Item.Inputs.BindingId.ToString(), *Item.Inputs.MatchingBiomeRowName.ToString(),
-					Item.Samples, Item.Records.Num(), Item.OccupancyRejected, Item.BlockingReservations.Num());
+					Item.Samples, Item.Records.Num(), Item.OccupancyRejected, Item.OwnerRejected, Item.BlockingReservations.Num());
 			for (const FString& Key : Item.BlockingReservations)
 			{
 				if (Runtime->PlanningAreasByRecordKey.Contains(Key)) Runtime->PlanningAreaQueue->MarkBlockedByReservation(Area, Key);
@@ -4108,17 +4141,102 @@ void UChunkWorldLayoutRuntimeComponent::SubmitPlanningAreaDiscovery(
 			}
 			Runtime->AdmitPlanningSitesFromWorldBinding(Binding, Item.Inputs, Item.Records, Noise);
 		}
+		// Empty discovery changes no loaded coverage or root/route influence. Lifecycle events
+		// retain their own invalidation; candidate admission may introduce new retained influence.
+		Runtime->bLoadedInfluenceDirty |= bHasCandidates;
 		bDeferred = Runtime->bPlanningAreaDeferred;
 		bCanceled = false;
 	};
+	return MoveTemp(Submission);
+}
+
+void UChunkWorldLayoutRuntimeComponent::SubmitPlanningAreaDiscovery(const TArray<FIntVector>& Centers)
+{
+	check(IsInGameThread());
+	check(!PendingPlanningAreaDiscovery.IsSet());
+	struct FAreaTask
+	{
+		FLayoutBackgroundSolveSubmission Submission;
+		FString Failure;
+		bool bFailed = false;
+	};
+	const auto Tasks = MakeShared<TArray<FAreaTask>, ESPMode::ThreadSafe>();
 	FPlanningAreaDiscoveryJob Job;
-	Job.Area = Area;
-	Job.Center = Center;
-	Job.ScanId = ScanId;
+	const FGuid TransportId = FGuid::NewGuid();
+	const uint64 GroupId = ((uint64(TransportId.A) << 32) | TransportId.B) | 1;
 	Job.Handle.LayoutGroupId = GroupId;
-	PendingPlanningAreaDiscovery = Job;
-	const auto Handle = GetOrCreateBackgroundSolveDispatcher().Submit(MoveTemp(Submission));
-	if (PendingPlanningAreaDiscovery.IsSet() && PendingPlanningAreaDiscovery->ScanId == ScanId)
+	int32 Priority = MIN_int32;
+	const double DrainStart = FPlatformTime::Seconds();
+	// The same capture budget covers empty exclusions and batch filling. One expensive
+	// capture is not preemptible; subsequent attempts yield after the budget is consumed.
+	for (int32 Attempt = 0; Attempt < 16 && Tasks->Num() < 4; ++Attempt)
+	{
+		FIntPoint Area;
+		const bool bTimeSelection = GetDetailedDiagnostics();
+		const double SelectionStart = bTimeSelection ? FPlatformTime::Seconds() : 0.0;
+		const bool bSelected = PlanningAreaQueue->TakeNext(Centers, Area);
+		if (bTimeSelection) DiscoverySelectionTiming.Record((FPlatformTime::Seconds() - SelectionStart) * 1000.0);
+		if (!bSelected) break;
+		FIntVector OwnerMin, OwnerMax;
+		if (!PlanningAreaQueue->GetScanBounds(Area, OwnerMin, OwnerMax)) break;
+		const FIntPoint Min(OwnerMin.X, OwnerMin.Y), Max(OwnerMax.X, OwnerMax.Y);
+		const FIntVector Center(int32((int64(Min.X) + Max.X) / 2), int32((int64(Min.Y) + Max.Y) / 2),
+			PlanningAreaQueue->GetSelectedCenter().Z);
+		if (!MakeAutomaticPlanningRoom(Center))
+		{
+			PlanningAreaQueue->FinishScan(Area, true, PlanningAreaQueue->GetScanId(Area));
+			break;
+		}
+		auto Prepared = PreparePlanningAreaDiscovery(Area, Center, Min, Max, GroupId);
+		if (Prepared.IsSet())
+		{
+			Job.Scans.Add({Area, Center, PlanningAreaQueue->GetScanId(Area)});
+			Priority = FMath::Max(Priority, ComputeAutomaticPlanningPriority(Center, Centers));
+			Tasks->AddDefaulted_GetRef().Submission = MoveTemp(Prepared.GetValue());
+		}
+		if (FPlatformTime::Seconds() - DrainStart >= 0.001) break;
+	}
+	if (Tasks->IsEmpty()) return;
+	FLayoutBackgroundSolveSubmission Batch;
+	Batch.DebugName = FString::Printf(TEXT("PlanningAreaBatch(%d)"), Tasks->Num());
+	Batch.LayoutGroupId = GroupId;
+	Batch.Tier = ELayoutBackgroundSolveJobTier::NearRoot;
+	Batch.LifecycleStage = ELayoutBackgroundSolveLifecycleStage::Preparation;
+	Batch.Priority = Priority;
+	Batch.Work = [Tasks](const FLayoutSolveCancellationToken& Token, FString&)
+	{
+		for (auto& Task : *Tasks)
+		{
+			if (Token.IsCancellationRequested()) return false;
+			Task.bFailed = !Task.Submission.Work(Token, Task.Failure);
+		}
+		return !Token.IsCancellationRequested();
+	};
+	Batch.PublishOnGameThread = [WeakThis = TWeakObjectPtr<UChunkWorldLayoutRuntimeComponent>(this), Tasks, GroupId]
+		(const FLayoutBackgroundSolveCompletion& Completion)
+	{
+		auto* Runtime = WeakThis.Get();
+		if (!Runtime || !Runtime->PendingPlanningAreaDiscovery.IsSet()
+			|| Runtime->PendingPlanningAreaDiscovery->Handle.LayoutGroupId != GroupId) return;
+		ON_SCOPE_EXIT
+		{
+			if (Runtime->PendingPlanningAreaDiscovery.IsSet()
+				&& Runtime->PendingPlanningAreaDiscovery->Handle.LayoutGroupId == GroupId)
+				Runtime->PendingPlanningAreaDiscovery.Reset();
+		};
+		// Admission remains serial in selection order. Each area independently fences its
+		// native lifetime and rechecks reservations changed by earlier publications.
+		for (const auto& Task : *Tasks)
+		{
+			FLayoutBackgroundSolveCompletion AreaCompletion = Completion;
+			AreaCompletion.bWorkSucceeded = Completion.bWorkSucceeded && !Task.bFailed;
+			if (Task.bFailed) AreaCompletion.FailureReason = Task.Failure;
+			Task.Submission.PublishOnGameThread(AreaCompletion);
+		}
+	};
+	PendingPlanningAreaDiscovery = MoveTemp(Job);
+	const auto Handle = GetOrCreateBackgroundSolveDispatcher().Submit(MoveTemp(Batch));
+	if (PendingPlanningAreaDiscovery.IsSet() && PendingPlanningAreaDiscovery->Handle.LayoutGroupId == GroupId)
 	{
 		if (!Handle.IsValid()) CancelPlanningAreaDiscovery();
 		else PendingPlanningAreaDiscovery->Handle = Handle;
@@ -4182,15 +4300,8 @@ void UChunkWorldLayoutRuntimeComponent::NotifyAutomaticLayoutWriteAttempt(const 
 	if (Bounds.IsValid) OnAutomaticLayoutWriteAttempt.Broadcast(World, Bounds);
 }
 
-bool UChunkWorldLayoutRuntimeComponent::HasPendingAutomaticLayoutWork(const FBox& WorldBounds) const
+FVector UChunkWorldLayoutRuntimeComponent::GetAutomaticLayoutReachInBlocks() const
 {
-	check(IsInGameThread());
-	AChunkWorldExtended* const World = GetOwningChunkWorld();
-	if (!World || !World->HasAuthority()) return false;
-	if (!WorldBounds.IsValid || WorldBounds.Min.ContainsNaN() || WorldBounds.Max.ContainsNaN()) return true;
-	if (bProcessingQueuedLayoutWork) return true;
-	const FBox Bounds(FVector(World->UEWorldPosToBlockWorldPos(WorldBounds.Min)),
-		FVector(World->UEWorldPosToBlockWorldPos(WorldBounds.Max)));
 	FVector Reach = FVector::ZeroVector;
 	for (const ULayoutWorldBindingAsset* Binding : LayoutWorldBindings)
 	{
@@ -4218,6 +4329,20 @@ bool UChunkWorldLayoutRuntimeComponent::HasPendingAutomaticLayoutWork(const FBox
 					? Family.TerrainTransitionPolicyOverride : Binding->DefaultPlacementPolicy.TerrainTransition,
 					double(FMath::Max(0, Family.MaxConnectionDistanceInCells)) + FMath::Max(0, Family.ContinuationPolicy.PathPaddingCells));
 	}
+	return Reach;
+}
+
+bool UChunkWorldLayoutRuntimeComponent::HasPendingAutomaticLayoutWork(const FBox& WorldBounds) const
+{
+	check(IsInGameThread());
+	AChunkWorldExtended* const World = GetOwningChunkWorld();
+	if (!World || !World->HasAuthority()) return false;
+	if (!WorldBounds.IsValid || WorldBounds.Min.ContainsNaN() || WorldBounds.Max.ContainsNaN()) return true;
+	if (bProcessingQueuedLayoutWork) return true;
+	const FBox Bounds(FVector(World->UEWorldPosToBlockWorldPos(WorldBounds.Min)),
+		FVector(World->UEWorldPosToBlockWorldPos(WorldBounds.Max)));
+	const FVector Reach = GetAutomaticLayoutReachInBlocks();
+	const int32 FirstRequiredDetailLevel = GetFirstReadinessDetailLevel();
 	if (bEnablePlanningWindowRuntimeUpdates && !LayoutWorldBindings.IsEmpty())
 	{
 		// Inspect queued Created intent, not loaded terrain. Distant/Updated/duplicate events add no gate.
@@ -4226,7 +4351,7 @@ bool UChunkWorldLayoutRuntimeComponent::HasPendingAutomaticLayoutWork(const FBox
 		{
 			const FObservedChunkLoad& Event = Pair.Value;
 			if (Event.bUnloaded || Event.EventType != EChunkWorldChunkLifecycleEventType::Created
-				|| Event.DetailLevel < 0 || Event.DetailLevel >= World->GetChunkLayerCount()) continue;
+				|| Event.DetailLevel < FirstRequiredDetailLevel || Event.DetailLevel >= World->GetChunkLayerCount()) continue;
 			const CChunkData* Data = World->WorldChunks[Event.DetailLevel];
 			if (!Data || Data->ChunkBlockFactor.GetMin() <= 0) continue;
 			const FIntVector Origin = FLayoutStreamingWindow::BlockWorldPosToChunkOrigin(Event.ChunkBlockWorldPos, Data->ChunkBlockFactor);
@@ -4236,13 +4361,12 @@ bool UChunkWorldLayoutRuntimeComponent::HasPendingAutomaticLayoutWork(const FBox
 			const FVector Min(Origin), Max = Min + FVector(Data->ChunkBlockFactor) - FVector(1.0);
 			if (Bounds.Intersect(FBox(Min - Reach, Max + Reach))) return true;
 		}
-		if (!PlanningPriorityCenters.IsEmpty() && PlanningAreaQueue
-			&& PlanningAreaQueue->HasPendingCreatedWork(Bounds, Reach)) return true;
+		if (PlanningAreaQueue && PlanningAreaQueue->HasPendingCreatedWork(Bounds, Reach, FirstRequiredDetailLevel)) return true;
 	}
 
 	auto TouchesOwner = [&](const FLayoutCreatedChunkIdentity& Origin)
 	{
-		if (!Origin.IsCurrent(ObservedChunkLayers)) return false;
+		if (Origin.DetailLevel < FirstRequiredDetailLevel || !Origin.IsCurrent(ObservedChunkLayers)) return false;
 		const FVector Min(Origin.Origin);
 		const FVector Max = Min + FVector(ObservedChunkLayers[Origin.DetailLevel].ChunkSizeInBlocks) - FVector(1.0);
 		return Bounds.Intersect(FBox(Min - Reach, Max + Reach));
@@ -4256,7 +4380,8 @@ bool UChunkWorldLayoutRuntimeComponent::HasPendingAutomaticLayoutWork(const FBox
 		}
 		return false;
 	};
-	// Once solved, use the same template + terrain coverage required by the write boundary.
+	// Once solved, protect overlapping writes from every LOD using the write boundary's
+	// template + terrain coverage. The count only exempts discovery and unsolved owner work.
 	TSet<FString> RootsWithKnownBounds;
 	for (const auto& Pair : PlanningRecordKeysBySiteRecordKey)
 	{
@@ -4321,14 +4446,15 @@ bool UChunkWorldLayoutRuntimeComponent::MakeAutomaticPlanningRoom(const FIntVect
 	}
 	if (CountAutomaticPlanningWork() < Capacity) return true;
 	const auto Centers = CollectPlanningWindowCenters();
-	const int32 IncomingPriority = FLayoutPlanningAreaQueue::ComputePriority(IncomingCenter, Centers);
+	const int32 IncomingPriority = ComputeAutomaticPlanningPriority(IncomingCenter, Centers);
 	int32 BestTier = 2, BestPriority = MAX_int32;
 	FString BestKey, RootKey;
 	FLayoutId RouteId;
 	uint64 PreparationKey = 0;
 	const auto Select = [&](const int32 Tier, const FIntVector Position, const FString& Key)
 	{
-		const int32 Priority = FLayoutPlanningAreaQueue::ComputePriority(Position, Centers);
+		const int32 Priority = ComputeAutomaticPlanningPriority(Position, Centers);
+		if (PlanningAreaQueue->IsStartupPosition(Position)) return false;
 		if (Priority >= IncomingPriority || Tier > BestTier
 			|| (Tier == BestTier && (Priority > BestPriority || (Priority == BestPriority && Key >= BestKey)))) return false;
 		BestTier = Tier;
@@ -4435,11 +4561,12 @@ void UChunkWorldLayoutRuntimeComponent::UpdateLoadedChunkPlanning()
 	if (GetOwner() && !GetOwner()->HasAuthority()) return;
 	RefreshPlanningBiomeTableSubscription();
 	AChunkWorldExtended* const ChunkWorld = GetOwningChunkWorld();
+	// Runtime seed/definition replacement has no editor property event. Fence old publications
+	// before pumping; movement never invalidates these static captures.
+	if (CachedDiscoveryInputs && (!ChunkWorld || CachedDiscoveryInputs->Definition.Get() != ChunkWorld->WorldGenDef
+		|| CachedDiscoveryInputs->Noise->WorldSeed != ResolveLayoutWorldSeed())) InvalidateAutomaticPlanningInputs();
 	UWorld* const World = GetWorld();
 	const TArray<FIntVector> Centers = CollectPlanningWindowCenters();
-	const int32 AutomaticWorkCount = CountAutomaticPlanningWork();
-	if (AutomaticWorkCount < LastAutomaticWorkCount) PlanningAreaQueue->NotifyCapacityAvailable();
-	LastAutomaticWorkCount = AutomaticWorkCount;
 	const bool bActive = bEnablePlanningWindowRuntimeUpdates && !LayoutWorldBindings.IsEmpty()
 		&& ChunkWorld && ChunkWorld->WorldGenDef && ChunkWorld->IsRunning() && World && !Centers.IsEmpty();
 	if (!bActive)
@@ -4466,12 +4593,13 @@ void UChunkWorldLayoutRuntimeComponent::UpdateLoadedChunkPlanning()
 			bLoadedInfluenceDirty = false;
 		}
 		bAutomaticPlanningActive = false;
+		PumpBackgroundLayoutSolves();
 		return;
 	}
 	bLoadedInfluenceDirty |= !bAutomaticPlanningActive;
 	bAutomaticPlanningActive = true;
-	if (PendingPlanningAreaDiscovery.IsSet()
-		&& !PlanningAreaQueue->IsCurrentScan(PendingPlanningAreaDiscovery->Area, PendingPlanningAreaDiscovery->ScanId))
+	if (PendingPlanningAreaDiscovery.IsSet() && !PendingPlanningAreaDiscovery->Scans.ContainsByPredicate(
+		[this](const FPlanningAreaDiscoveryScan& Scan) { return PlanningAreaQueue->IsCurrentScan(Scan.Area, Scan.ScanId); }))
 		CancelPlanningAreaDiscovery();
 	if (bLoadedInfluenceDirty)
 	{
@@ -4493,9 +4621,14 @@ void UChunkWorldLayoutRuntimeComponent::UpdateLoadedChunkPlanning()
 		PruneRootSpacingReservations(Mins, Maxs);
 		bLoadedInfluenceDirty = false;
 	}
+	// Lifecycle invalidation must precede publication; publication frees the discovery slot
+	// before selection in this same pass. Callbacks never recursively select replacement work.
+	PumpBackgroundLayoutSolves();
+	const int32 AutomaticWorkCount = CountAutomaticPlanningWork();
+	if (AutomaticWorkCount < LastAutomaticWorkCount) PlanningAreaQueue->NotifyCapacityAvailable();
+	LastAutomaticWorkCount = AutomaticWorkCount;
 	const double Now = World->WorldType == EWorldType::Editor ? FPlatformTime::Seconds() : World->GetTimeSeconds();
-	// Priority housekeeping is infrequent; idle discovery wakes on this later tick,
-	// not from its publication callback and not after another full polling interval.
+	// Priority housekeeping remains infrequent; replacement discovery does not wait for it.
 	const bool bRefreshPriorities = Now - LastPlanningWindowUpdateTimeSeconds >= PlanningWindowUpdateIntervalSeconds;
 	if (bRefreshPriorities) LastPlanningWindowUpdateTimeSeconds = Now;
 	if (bRefreshPriorities && BackgroundSolveDispatcher)
@@ -4503,23 +4636,28 @@ void UChunkWorldLayoutRuntimeComponent::UpdateLoadedChunkPlanning()
 		TMap<uint64, int32> Priorities;
 		for (const auto& Pair : PendingPlanningWindowSolveHandlesByRecordKey)
 			if (const FIntVector* Center = PendingPlanningWindowSolveCentersByRecordKey.Find(Pair.Key))
-				Priorities.Add(Pair.Value.LayoutGroupId, FLayoutPlanningAreaQueue::ComputePriority(*Center, Centers));
+				Priorities.Add(Pair.Value.LayoutGroupId, ComputeAutomaticPlanningPriority(*Center, Centers));
 		if (PendingPlanningAreaDiscovery.IsSet())
-			Priorities.Add(PendingPlanningAreaDiscovery->Handle.LayoutGroupId,
-				FLayoutPlanningAreaQueue::ComputePriority(PendingPlanningAreaDiscovery->Center, Centers));
+		{
+			int32 Priority = MIN_int32;
+			for (const auto& Scan : PendingPlanningAreaDiscovery->Scans)
+				if (PlanningAreaQueue->IsCurrentScan(Scan.Area, Scan.ScanId))
+					Priority = FMath::Max(Priority, ComputeAutomaticPlanningPriority(Scan.Center, Centers));
+			Priorities.Add(PendingPlanningAreaDiscovery->Handle.LayoutGroupId, Priority);
+		}
 		for (const auto& Pair : PendingAutomaticContinuationPreparations)
 		{
 			const auto* Edge = PlanningWindowStore ? PlanningWindowStore->FindContinuationEdgeRecord(
 				ContinuationEdgeKeysByConnectorKey.FindRef(Pair.Key)) : nullptr;
 			if (Edge) Priorities.Add(Pair.Value.LayoutGroupId,
-				FLayoutPlanningAreaQueue::ComputePriority(Edge->StartEndpointBlockWorldPos, Centers));
+				ComputeAutomaticPlanningPriority(Edge->StartEndpointBlockWorldPos, Centers));
 		}
 		for (const auto& Pair : ContinuationRouteReservations)
 		{
 			if (!Pair.Value.bAutomatic || Pair.Value.bCanceled || Pair.Value.bReleased) continue;
 			const auto* Prepared = RetainedPreparedContinuationRoutesById.Find(Pair.Key);
 			if (!Prepared) continue;
-			const int32 Priority = FLayoutPlanningAreaQueue::ComputePriority(
+			const int32 Priority = ComputeAutomaticPlanningPriority(
 				Prepared->Route.StartRootEndpoint.EndpointBlockWorldPos, Centers);
 			for (const uint64 SegmentKey : Pair.Value.SegmentKeys) Priorities.Add(SegmentKey, Priority);
 		}
@@ -4537,23 +4675,7 @@ void UChunkWorldLayoutRuntimeComponent::UpdateLoadedChunkPlanning()
 	if (PendingPlanningAreaDiscovery.IsSet()) return;
 	if (BackgroundSolveDispatcher && BackgroundSolveDispatcher->GetDiagnosticsSnapshot().InProgressLayoutGroups
 		>= BuildBackgroundSolveSettings().ResolveMaxConcurrentBackgroundLayoutSolves()) return;
-	FIntPoint Area;
-	const bool bTimeSelection = GetDetailedDiagnostics();
-	const double SelectionStart = bTimeSelection ? FPlatformTime::Seconds() : 0.0;
-	const bool bSelected = PlanningAreaQueue->TakeNext(Centers, Area);
-	if (bTimeSelection) DiscoverySelectionTiming.Record((FPlatformTime::Seconds() - SelectionStart) * 1000.0);
-	if (!bSelected) return;
-	FIntVector OwnerMin, OwnerMax;
-	if (!PlanningAreaQueue->GetScanBounds(Area, OwnerMin, OwnerMax)) return;
-	const FIntPoint Min(OwnerMin.X, OwnerMin.Y), Max(OwnerMax.X, OwnerMax.Y);
-	const FIntVector Center(int32((int64(Min.X) + Max.X) / 2), int32((int64(Min.Y) + Max.Y) / 2),
-		PlanningAreaQueue->GetSelectedCenter().Z);
-	if (!MakeAutomaticPlanningRoom(Center))
-	{
-		PlanningAreaQueue->FinishScan(Area, true, PlanningAreaQueue->GetScanId(Area));
-		return;
-	}
-	SubmitPlanningAreaDiscovery(Area, Center, Min, Max);
+	SubmitPlanningAreaDiscovery(Centers);
 }
 
 void UChunkWorldLayoutRuntimeComponent::PruneContinuationEndpointsOutsideExpandedWindows(
@@ -5551,7 +5673,7 @@ int32 UChunkWorldLayoutRuntimeComponent::AdmitPlanningSitesFromWorldBinding(
 		Preparation.LayoutGroupId = RootLayoutGroupId;
 		Preparation.Tier = ELayoutBackgroundSolveJobTier::NearRoot;
 		Preparation.LifecycleStage = ELayoutBackgroundSolveLifecycleStage::Preparation;
-		Preparation.Priority = FLayoutPlanningAreaQueue::ComputePriority(
+		Preparation.Priority = ComputeAutomaticPlanningPriority(
 			PendingReservationSourceSelection.SiteCenterBlockWorldPos, PlanningPriorityCenters);
 		{
 			FLayoutWorkerSolvePacket WorkerPacket = FLayoutWorkerSolvePacket::CapturePlanningRoot(
@@ -6577,6 +6699,7 @@ TArray<ULayoutWorldBindingAsset*> UChunkWorldLayoutRuntimeComponent::GetLayoutWo
 void UChunkWorldLayoutRuntimeComponent::InvalidateAutomaticPlanningInputs()
 {
 	check(IsInGameThread());
+	CachedDiscoveryInputs.Reset();
 	bLoadedInfluenceDirty = true;
 	bRealizationDirty = true;
 	CancelPlanningAreaDiscovery();
@@ -6886,6 +7009,7 @@ void UChunkWorldLayoutRuntimeComponent::RefreshPlanningBiomeTableSubscription()
 	const auto* Owner = GetOwningChunkWorld();
 	UDataTable* Table = IsRegistered() && Owner && Owner->WorldGenDef ? Owner->WorldGenDef->WorldBiomesDT : nullptr;
 	if (PlanningBiomeTable.Get() == Table) return;
+	if (CachedDiscoveryInputs) InvalidateAutomaticPlanningInputs();
 	if (auto* Previous = PlanningBiomeTable.Get()) Previous->OnDataTableChanged().Remove(PlanningBiomeTableChangedHandle);
 	PlanningBiomeTable = Table;
 	PlanningBiomeTableChangedHandle.Reset();
@@ -6915,6 +7039,7 @@ void UChunkWorldLayoutRuntimeComponent::OnRegister()
 
 void UChunkWorldLayoutRuntimeComponent::OnUnregister()
 {
+	InvalidateAutomaticPlanningInputs();
 	if (auto* Table = PlanningBiomeTable.Get()) Table->OnDataTableChanged().Remove(PlanningBiomeTableChangedHandle);
 	PlanningBiomeTable.Reset();
 	PlanningBiomeTableChangedHandle.Reset();
@@ -7211,10 +7336,11 @@ void UChunkWorldLayoutRuntimeComponent::ReleaseContinuationRouteReservation(cons
 
 void UChunkWorldLayoutRuntimeComponent::ReleaseContinuationReservationForConnector(const uint64 ConnectorKey, const bool bFailed)
 {
-	if (const FLayoutId* const RouteId = ContinuationRouteIdsByConnectorKey.Find(ConnectorKey))
+	const FLayoutId* const RouteId = ContinuationRouteIdsByConnectorKey.Find(ConnectorKey);
+	FLayoutContinuationRouteReservationState* const State = RouteId ? ContinuationRouteReservations.Find(*RouteId) : nullptr;
+	if (RouteId)
 	{
 		const FLayoutId OwnedRouteId = *RouteId;
-		FLayoutContinuationRouteReservationState* const State = ContinuationRouteReservations.Find(OwnedRouteId);
 		if (State != nullptr)
 		{
 			if (State->CommittedSegmentKeys.Contains(ConnectorKey)) return;
@@ -9392,9 +9518,11 @@ void UChunkWorldLayoutRuntimeComponent::ResetResolvedLayoutRecords(const bool bR
 
 void UChunkWorldLayoutRuntimeComponent::ResetObservedChunkLoadStateForGenerationRestart()
 {
+	CachedDiscoveryInputs.Reset();
 	CancelPlanningAreaDiscovery();
 	CancelAutomaticRootWork();
 	PlanningAreaQueue->ResetLoadedDirectory();
+	InvalidateStartupCoverage();
 	CompletedDiscoveryAreas = 0;
 	PlanningAreasByRecordKey.Reset();
 	LastPlanningWindowUpdateTimeSeconds = TNumericLimits<double>::Lowest();
@@ -9667,7 +9795,7 @@ bool UChunkWorldLayoutRuntimeComponent::AreRequiredChunkOriginsLoaded(
 void UChunkWorldLayoutRuntimeComponent::HandleObservedLoadedChunk(const FObservedChunkLoad& ObservedChunk)
 {
 	AChunkWorldExtended* const World = GetOwningChunkWorld();
-	if (!World || !World->HasAuthority()) return;
+	if (!World) return;
 	if (ObservedChunk.bUnloaded || ObservedChunk.bResetBeforeObservation)
 	{
 		if (ObservedChunkLayers.IsValidIndex(ObservedChunk.DetailLevel))
@@ -9682,7 +9810,7 @@ void UChunkWorldLayoutRuntimeComponent::HandleObservedLoadedChunk(const FObserve
 	// The shared actor flag intentionally describes finest-detail generation for other listeners.
 	// Layouts trust Created intent at every LOD; Updated preserves existing authority and stamp history.
 	RecordLoadedChunk(ObservedChunk.ChunkBlockWorldPos, ObservedChunk.DetailLevel,
-		ObservedChunk.EventType == EChunkWorldChunkLifecycleEventType::Created);
+		World->HasAuthority() && ObservedChunk.EventType == EChunkWorldChunkLifecycleEventType::Created);
 }
 
 
@@ -9709,12 +9837,14 @@ bool UChunkWorldLayoutRuntimeComponent::HasFreshCreatedChunkEligibility(
 	return AreRequiredChunkOriginsLoaded(RequiredChunkOrigins, true);
 }
 
-void UChunkWorldLayoutRuntimeComponent::TryRealizeEligibleSites()
+void UChunkWorldLayoutRuntimeComponent::TryRealizeEligibleSites(const bool bStartupOnly)
 {
 	bool bRemovedRejectedAutoDiscoveredSite = false;
 	for (auto It = ResolvedSiteRecords.CreateIterator(); It; ++It)
 	{
 		FResolvedLayoutSiteRecord& SiteRecord = It.Value();
+		if (StartupCoverage && !StartupCoverage->BoundsInBlocks.IsEmpty()
+			&& PlanningAreaQueue->IsStartupPosition(SiteRecord.SiteCenterBlockWorldPos) != bStartupOnly) continue;
 		if (const FString* Key = PlanningRecordKeysBySiteRecordKey.Find(It.Key());
 			Key && !IsAutomaticRootOriginCurrent(*Key)) continue;
 		if (!ShouldAttemptRealization(SiteRecord))
@@ -9989,7 +10119,7 @@ void UChunkWorldLayoutRuntimeComponent::SubmitAutomaticContinuationPreparation(c
 	Submission.DebugName = FString::Printf(TEXT("ContinuationPreparation.%llu"), Key);
 	Submission.Tier = ELayoutBackgroundSolveJobTier::Continuation;
 	Submission.LifecycleStage = ELayoutBackgroundSolveLifecycleStage::Preparation;
-	Submission.Priority = FLayoutPlanningAreaQueue::ComputePriority(RouteRecord.StartEndpointBlockWorldPos, CollectPlanningWindowCenters());
+	Submission.Priority = ComputeAutomaticPlanningPriority(RouteRecord.StartEndpointBlockWorldPos, CollectPlanningWindowCenters());
 	Submission.Work = [Inputs, Noise, Prepared, Coordinates, RootFootprints, RouteRecord, WorldSeed](const FLayoutSolveCancellationToken& Token, FString& Reason)
 	{
 		LayoutSolveCancellation::FThreadTokenScope Scope(Token);
@@ -11639,13 +11769,15 @@ bool UChunkWorldLayoutRuntimeComponent::RejectAutoDiscoveredResolvedSiteAfterRea
 		RuntimeState.TerrainFitDiagnosticKind);
 }
 
-void UChunkWorldLayoutRuntimeComponent::TryRealizeEligibleConnectors()
+void UChunkWorldLayoutRuntimeComponent::TryRealizeEligibleConnectors(const bool bStartupOnly)
 {
 	const TArray<FIntVector> PlayerBlockWorldPositions = CollectPlanningWindowCenters();
 
 	TArray<uint64> EligibleConnectorKeys;
 	for (const TPair<uint64, FResolvedLayoutConnectorRecord>& Pair : ResolvedConnectorRecords)
 	{
+		if (StartupCoverage && !StartupCoverage->BoundsInBlocks.IsEmpty()
+			&& PlanningAreaQueue->IsStartupPosition(Pair.Value.PathOriginBlockWorldPos) != bStartupOnly) continue;
 		if (ExplicitPreviewConnectorKeys.Contains(Pair.Key)
 			|| !ShouldAttemptConnectorRealization(Pair.Value))
 		{

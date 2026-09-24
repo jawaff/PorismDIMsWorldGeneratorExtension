@@ -495,6 +495,15 @@ FLayoutValidationResult ULayoutWorldBindingAsset::ValidateWorldBinding() const
 		Result.AddError(FString::Printf(TEXT("Layout world binding '%s' requires finite OccupancyProbability in [0, 1]."), *GetName()));
 	}
 
+	if (SiteSpacingInCells.X <= 0 || SiteSpacingInCells.Y <= 0)
+	{
+		Result.AddError(FString::Printf(TEXT("Layout world binding '%s' requires positive XY SiteSpacingInCells."), *GetName()));
+	}
+	if (!FMath::IsFinite(SiteJitterFraction) || SiteJitterFraction < 0.0f || SiteJitterFraction > 1.0f)
+	{
+		Result.AddError(FString::Printf(TEXT("Layout world binding '%s' requires finite SiteJitterFraction in [0, 1]."), *GetName()));
+	}
+
 	if (MinimumRootGapCells < 0)
 	{
 		Result.AddError(FString::Printf(

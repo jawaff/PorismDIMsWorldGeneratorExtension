@@ -22,10 +22,12 @@ namespace LayoutWorldBindingSitePlanner
 	PORISMDIMSWORLDGENERATOREXTENSION_API bool PassesOccupancy(
 		int32 WorldSeed, FName BindingId, FIntVector SnappedSite, float Probability);
 
-	/** Enumerates binding-lattice XY centers in one bounded queue region, including negative coordinates.
-	 * Rejects invalid/oversized regions rather than allocating an entire coarse chunk; queue cores hold at most 16 sites. */
+	/** Enumerates one deterministic normal-cell-aligned candidate per intersecting spacing bucket.
+	 * Only final positions inside inclusive owner bounds are returned. Negative buckets use floor division;
+	 * invalid inputs or regions exceeding four buckets per axis fail closed. No biome rejection rerolls. */
 	PORISMDIMSWORLDGENERATOREXTENSION_API TArray<FIntPoint> BuildBoundedNormalCellSiteCenters(
-		FIntPoint Min, FIntPoint Max, FIntVector CellSize);
+		FIntPoint Min, FIntPoint Max, FIntVector CellSize, FIntPoint SpacingInCells,
+		float JitterFraction, int32 WorldSeed, FName BindingId);
 
 	/** Raw block-world bounds for the finite axes on one chunk world. */
 	struct FChunkWorldFiniteAxisBlockBounds
@@ -65,6 +67,8 @@ namespace LayoutWorldBindingSitePlanner
 		FLayoutTerrainSurfaceSearchSettings SurfaceSearch;
 		FLayoutNoiseCoordinateSettings CoordinateSettings;
 		int32 RootReferenceZ = INDEX_NONE;
+		/** Optional inclusive native-owner bounds for final snapped centers, never for footprint/search clipping. */
+		FBox CandidateCenterBoundsInBlocks = FBox(ForceInit);
 		bool bQualifyEnvironment = false;
 		FChunkWorldFiniteAxisBlockBounds FiniteAxisBounds;
 		TArray<FPlanningCandidateSnapshot> Candidates;
@@ -146,9 +150,10 @@ namespace LayoutWorldBindingSitePlanner
 	/** Builds candidates from copied inputs and owned noise; no asset/world reads or store mutation.
 	 * Preserves seed selection, surface/cavity qualification and footprint ownership. Returns unique
 	 * ordered proposals, including overlapping alternatives; runtime reservations enforce final spacing.
-	 * Optional outputs identify captured blockers for stale-evidence checks and count occupancy rejections. */
+	 * Final center ownership rejects before footprint sampling; surface/cavity search remains unchanged.
+	 * Optional outputs identify captured blockers and count occupancy/owner rejections. */
 	PORISMDIMSWORLDGENERATOREXTENSION_API TArray<FPlannedLayoutSiteRecord> BuildPendingSiteRecordsFromPockets(
 		const TArray<FLayoutReservationPocket>& Pockets, const FSitePlanningSnapshot& Inputs,
 		const FLayoutActiveBiomeSampler& ActiveBiomeSampler, TSet<FString>* OutBlockingReservations = nullptr,
-		int32* OutOccupancyRejected = nullptr);
+		int32* OutOccupancyRejected = nullptr, int32* OutOwnerRejected = nullptr);
 }
