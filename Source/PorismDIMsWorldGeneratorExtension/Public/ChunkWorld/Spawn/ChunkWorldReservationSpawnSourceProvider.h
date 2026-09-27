@@ -62,7 +62,7 @@ private:
 		const AChunkWorldExtended& ChunkWorld,
 		const FResolvedWorldGenScaleContext& ScaleContext);
 
-	/** Finds the uppermost theoretical GenA terrain crossing at one authored XY without loading destination chunks. */
+	/** Finds the top face of the highest solid base-grid cell using compiled world terrain and seed; requires air above inside the field. Does not load chunks or include saved/layout edits. */
 	bool TryResolveTopTheoreticalSurface(
 		const FBiomeStrategyReservationFieldBinding& Binding,
 		AChunkWorldExtended& ChunkWorld,
@@ -78,7 +78,7 @@ private:
 	UPROPERTY(EditAnywhere, Category = "Chunk World|Spawn", meta = (ClampMin = "1", UIMin = "1", ToolTip = "Maximum reservation candidates this provider may append for one component query. This prevents one authored world from producing an unbounded candidate list."))
 	int32 MaximumCandidatesPerQuery = 32;
 
-	/** Maximum theoretical vertical GenA samples allowed while finding a field's topmost pre-realization terrain surface. Wider fields are rejected rather than approximated. */
-	UPROPERTY(EditAnywhere, Category = "Chunk World|Spawn", meta = (ClampMin = "2", UIMin = "2", ToolTip = "Maximum theoretical vertical GenA samples allowed while finding a field's topmost pre-realization terrain surface. Wider fields are rejected rather than approximated."))
+	/** Maximum vertical compiled-terrain samples allowed while finding a field's topmost pre-realization surface. Wider fields are rejected rather than approximated. */
+	UPROPERTY(EditAnywhere, Category = "Chunk World|Spawn", meta = (ClampMin = "2", UIMin = "2", ToolTip = "Maximum vertical samples of compiled world terrain used to find a spawn surface. Includes biome branches and world noise with the world seed. Wider fields are rejected rather than approximated."))
 	int32 MaximumTheoreticalSurfaceSamples = 257;
 };

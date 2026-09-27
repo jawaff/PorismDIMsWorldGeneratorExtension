@@ -22,6 +22,16 @@ For simple block removal in either route, call `DestroyBlock()` on `AChunkWorldE
 For proximity-driven mesh/actor presentation swap, add `UChunkWorldProximityComponent` to the relevant actor, usually the player character or another actor that defines swap relevance.
 For the full swap feature design and ownership boundary, see `Docs/Design/ChunkWorldBlockSwap.md`.
 
+### Disposable Terrain Storage
+
+Each `AChunkWorldExtended::StartGen()` allocates fresh `Saved/ChunkWorldSessions/<RunGuid>/Save/` and `Cache/` directories. Block/mesh edits and custom values still need native save stores; generated cache alone does not preserve them. `AutoSave=true` keeps normal disk-backed eviction available. Chunk unload/re-entry retains the current run's paths and edits.
+
+`StopGen()` joins native work and closes stores before deleting that run's owned directory. A subsequent start, including editor regeneration, resets terrain edits even on the same actor. The same seed can generate the same original terrain. Debug-only property changes retain their existing non-restarting behavior.
+
+Storage paths and flags are derived editor controls, not persistence settings. The obsolete `WorldStorageName` property is removed. Clients receive separate local paths while native client save managers remain memory-only; paths are not replicated. Character/profile persistence is outside this terrain lifecycle.
+
+Cleanup checks captured ownership and rejects reparse-point traversal. Unconfirmed shutdown or cleanup failure retains the payload and blocks that actor's restart; inspect the logged directory and shutdown error. Crash leftovers are never reused or purged on startup. Existing legacy save/cache folders remain untouched; orphan reclamation is deferred.
+
 ### Swap Setup Notes
 - `UChunkWorldProximityComponent` now drives polling queries, not overlap-event tracking.
 - Configure `SwapScanInterval` on `UChunkWorldBlockSwapScannerComponent` and `SwapInDistance` / `SwapOutDistance` on `UChunkWorldProximityComponent`.

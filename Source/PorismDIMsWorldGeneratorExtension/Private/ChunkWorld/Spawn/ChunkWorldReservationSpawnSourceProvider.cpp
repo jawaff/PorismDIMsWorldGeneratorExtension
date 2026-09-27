@@ -3,12 +3,11 @@
 #include "ChunkWorld/Spawn/ChunkWorldReservationSpawnSourceProvider.h"
 
 #include "Biome/Noise/Strategy/BiomeStrategyBindingLibrary.h"
-#include "Biome/Noise/Strategy/BiomeFastNoiseEditor.h"
 #include "Biome/Noise/WorldGenScaleContext.h"
 #include "ChunkWorld/Actors/ChunkWorldExtended.h"
 #include "ChunkWorld/Spawn/ChunkWorldSpawnComponent.h"
 
-#include <vector>
+#include "ChunkWorldStructs/ChunkWorldRuntimeStructs.h"
 
 namespace
 {
@@ -139,6 +138,34 @@ void UChunkWorldReservationSpawnSourceProvider::GatherSpawnCandidates(
 			continue;
 		}
 
+		FChunkWorldSpawnFacing Facing;
+		float AuthoredYaw = 0.0f;
+		if (Binding.Field.SpawnFacingMode == EReservationSpawnFacing::FixedRotation)
+		{
+			const auto* Rotation = Binding.Field.SpawnFacingPayload.GetPtr<FReservationSpawnRotationPayload>();
+			if (!Rotation || !FMath::IsFinite(Rotation->Yaw)) continue;
+			AuthoredYaw = Rotation->Yaw;
+		}
+		else if (Binding.Field.SpawnFacingMode == EReservationSpawnFacing::FixedPoint)
+		{
+			const auto* Point = Binding.Field.SpawnFacingPayload.GetPtr<FReservationSpawnPointPayload>();
+			if (!Point || Point->Target.ContainsNaN()) continue;
+			Facing.bFaceTarget = true;
+			// The target belongs to the shared strategy frame, not a repeated field's local frame.
+			Facing.Target = ChunkWorld->GetActorTransform().TransformPosition(
+				ScaleContext.AuthoredBlockPositionToRawBlock(Point->Target) * ScaleContext.BaseBlockSize);
+			if (Facing.Target.ContainsNaN()) continue;
+		}
+		else continue;
+		const FVector Heading = ChunkWorld->GetActorTransform().TransformVectorNoScale(
+			FRotator(0.0, FRotator::NormalizeAxis(AuthoredYaw), 0.0).Vector());
+		// A vertical heading has no upright facing; reject it instead of manufacturing an angle.
+		if (Heading.ContainsNaN() || Heading.SizeSquared2D() <= UE_SMALL_NUMBER)
+		{
+			continue;
+		}
+		Facing.Yaw = FMath::RadiansToDegrees(FMath::Atan2(Heading.Y, Heading.X));
+
 		FBox CandidateBounds = ConvertAuthoredFieldBoundsToWorld(
 			FBox(Binding.Field.AuthoredMinBlock, Binding.Field.AuthoredMaxBlock),
 			*ChunkWorld,
@@ -156,12 +183,8 @@ void UChunkWorldReservationSpawnSourceProvider::GatherSpawnCandidates(
 			continue;
 		}
 
-		FRandomStream RandomStream(static_cast<int32>(
-			Request.RequestId.A ^ Request.RequestId.B ^ Request.RequestId.C ^ Request.RequestId.D
-			^ GetTypeHash(Binding.Field.DebugPath)));
-		const FVector2D AuthoredXY(
-			FMath::Lerp(SampleBounds.Min.X, SampleBounds.Max.X, RandomStream.FRand()),
-			FMath::Lerp(SampleBounds.Min.Y, SampleBounds.Max.Y, RandomStream.FRand()));
+		// Area selection remains randomized; physical placement starts at this area's center.
+		const FVector2D AuthoredXY(SampleBounds.GetCenter());
 		double SurfaceZBlock = 0.0;
 		if (!TryResolveTopTheoreticalSurface(Binding, *ChunkWorld, ScaleContext, AuthoredXY, SurfaceZBlock))
 		{
@@ -199,6 +222,7 @@ void UChunkWorldReservationSpawnSourceProvider::GatherSpawnCandidates(
 		Candidate.SourceId = FName(*Binding.Field.DebugPath);
 		Candidate.SearchBounds = CandidateBounds;
 		Candidate.TheoreticalLocation = TheoreticalLocation;
+		Candidate.Facing = Facing;
 		Candidate.TheoreticalSurfaceZ = TheoreticalLocation.Z;
 		Candidate.SpawnTags = Binding.Field.FieldTags;
 		Candidate.BiomeTags = MoveTemp(BiomeTags);
@@ -276,39 +300,99 @@ bool UChunkWorldReservationSpawnSourceProvider::TryResolveTopTheoreticalSurface(
 		return false;
 	}
 
-	std::vector<FNodeLink> Nodes;
-	UBiomeFastNoiseEditor* const Editor = NewObject<UBiomeFastNoiseEditor>(GetTransientPackage());
-	if (Editor == nullptr || Binding.RowBinding.Strategy == nullptr)
+	const FRuntimeWorldConfig* Config = ChunkWorld.RuntimeConfig;
+	if (Config == nullptr || Config->BaseBlockSize <= 0)
 	{
 		return false;
 	}
 
-	Editor->Nodes = &Nodes;
-	Editor->Strategy = const_cast<UBiomeStrategyData*>(Binding.RowBinding.Strategy.Get());
-	Editor->NoiseSlot = EBiomeNoiseSlot::GenA;
-	Editor->BiomeTag = Binding.RowBinding.BiomeTag;
-	const FNodeLink Terrain = Editor->GetNoiseRef(&ChunkWorld);
-	if (Terrain.Node == nullptr || !Terrain.Node->BaseNode)
+	// Sample the base-block lattice used by ShapeBatch, not fractional field-bound coordinates.
+	const FVector RawTop = ScaleContext.AuthoredBlockPositionToRawBlock(FVector(AuthoredXY.X, AuthoredXY.Y, MaximumZ));
+	const double TopZ = FMath::FloorToDouble(RawTop.Z);
+	const double BottomZ = FMath::CeilToDouble(MinimumZ + ScaleContext.AuthoredOriginToRawBlockOffset.Z);
+	if (RawTop.ContainsNaN() || !FMath::IsFinite(BottomZ) || TopZ <= BottomZ
+		|| TopZ - BottomZ >= FMath::Min(MaximumSamples, MAX_int32 - 16))
 	{
 		return false;
 	}
-
-	// Scan only this authored field from top down: first solid GenA sample excludes lower cave pockets.
-	for (double Z = MaximumZ; Z >= MinimumZ; Z -= 1.0)
+	const int32 SampleCount = static_cast<int32>(TopZ - BottomZ) + 1;
+	// Native FastNoise bulk kernels access whole SIMD lanes, including the final partial group.
+	const int32 PaddedCount = Align(SampleCount, 16);
+	TArray<float> X, Y, Z, OffsetX, OffsetY, OffsetZ, Density, Power;
+	TArray<int32> Biomes, Switches;
+	X.SetNumUninitialized(PaddedCount);
+	Y.SetNumUninitialized(PaddedCount);
+	Z.SetNumUninitialized(PaddedCount);
+	OffsetX.SetNumUninitialized(PaddedCount);
+	OffsetY.SetNumUninitialized(PaddedCount);
+	OffsetZ.SetNumUninitialized(PaddedCount);
+	Density.Init(0.0f, PaddedCount);
+	Power.Init(0.0f, PaddedCount);
+	Biomes.Init(EmptyBiome, PaddedCount);
+	Switches.Init(0, PaddedCount);
+	const FIntVector NoiseOffset = Config->NoiseCoordinateOffset / Config->BaseBlockSize;
+	// Match native float coordinate arithmetic too; noise near a cell boundary can be seed-sensitive.
+	const float FrequencyX = 0.0001f * Config->BaseBlockSize * Config->NoiseScale.X;
+	const float FrequencyY = 0.0001f * Config->BaseBlockSize * Config->NoiseScale.Y;
+	const float FrequencyZ = 0.0001f * Config->BaseBlockSize * Config->NoiseScale.Z;
+	for (int32 Index = 0; Index < PaddedCount; ++Index)
 	{
-		const FVector NoisePosition = ScaleContext.AuthoredBlockPositionToNoise(FVector(AuthoredXY.X, AuthoredXY.Y, Z));
-		const float Density = Terrain.Node->BaseNode->GenSingle3D(
-			static_cast<float>(NoisePosition.X),
-			static_cast<float>(NoisePosition.Y),
-			static_cast<float>(NoisePosition.Z),
-			0);
-		if (FMath::IsFinite(Density) && Density <= 0.0f)
+		X[Index] = static_cast<float>(FMath::FloorToDouble(RawTop.X) + NoiseOffset.X) * FrequencyX;
+		Y[Index] = static_cast<float>(FMath::FloorToDouble(RawTop.Y) + NoiseOffset.Y) * FrequencyY;
+		Z[Index] = static_cast<float>(TopZ - FMath::Min(Index, SampleCount - 1) + NoiseOffset.Z) * FrequencyZ;
+		if (!FMath::IsFinite(X[Index]) || !FMath::IsFinite(Y[Index]) || !FMath::IsFinite(Z[Index])) return false;
+	}
+	const auto Warp = [&](const FastNoise::SmartNode<>& Node, const TArray<float>& Base, TArray<float>& Output)
+	{
+		if (Node)
 		{
-			OutSurfaceZBlock = Z;
-			return true;
+			Node->GenPositionArray3D(Output.GetData(), PaddedCount, X.GetData(), Y.GetData(), Z.GetData(), 0.0f, 0.0f, 0.0f, ChunkWorld.Seed);
+			for (int32 Index = 0; Index < PaddedCount; ++Index) Output[Index] += Base[Index];
+		}
+		else Output = Base;
+	};
+	Warp(Config->BiomeOffsetXNode, X, OffsetX);
+	Warp(Config->BiomeOffsetYNode, Y, OffsetY);
+	Warp(Config->BiomeOffsetZNode, Z, OffsetZ);
+	// Use the native composition kernels and compiled nodes, including domain/branch selection,
+	// density-only contributions and world noise. A reservation's GenA alone is not the world surface.
+	if (Config->GenOnlyTestNode)
+	{
+		Config->GenOnlyTestNode->Gen3DComplexAdd(Density.GetData(), X.GetData(), Y.GetData(), Z.GetData(), ChunkWorld.Seed, PaddedCount, 1.0f);
+	}
+	else
+	{
+		for (int32 Index = 0; Index < Config->Biomes.Num(); ++Index)
+		{
+			const FRuntimeBiome& Biome = Config->Biomes[Index];
+			if (!Biome.DomainNode || !Biome.GenANode) return false;
+			if (Biome.NoiseOnly)
+			{
+				Biome.GenANode->Gen3DAdd(Density.GetData(), X.GetData(), Y.GetData(), Z.GetData(), OffsetX.GetData(), OffsetY.GetData(), OffsetZ.GetData(), ChunkWorld.Seed, PaddedCount, Biome.DomainNode.get());
+			}
+			else
+			{
+				if (!Biome.GenBNode || !Biome.DualSwitchNode) return false;
+				Biome.GenANode->Gen3DFullAdd(Density.GetData(), X.GetData(), Y.GetData(), Z.GetData(), OffsetX.GetData(), OffsetY.GetData(), OffsetZ.GetData(), ChunkWorld.Seed, PaddedCount,
+					Biome.Overlap, Biome.DomainOver, Biome.GenBNode.get(), Biome.DualSwitchNode.get(), Biome.DomainNode.get(), Index, Power.GetData(), Switches.GetData(), Biomes.GetData());
+			}
+		}
+		if (Config->WorldGenNode)
+			Config->WorldGenNode->Gen3DCompAddWV(Density.GetData(), Power.GetData(), X.GetData(), Y.GetData(), Z.GetData(), ChunkWorld.Seed, PaddedCount, 1.0f);
+	}
+
+	for (int32 Index = 0; Index < SampleCount; ++Index)
+	{
+		if (!FMath::IsFinite(Density[Index])) return false;
+		if (Density[Index] <= 0.0f)
+		{
+			// A solid upper boundary does not establish a surface inside the region. Voxel Z names
+			// the cell; its top face is Z+1. Capsule-center placement remains character-owned.
+			if (Index == 0) return false;
+			OutSurfaceZBlock = TopZ - Index + 1.0 - ScaleContext.AuthoredOriginToRawBlockOffset.Z;
+			return OutSurfaceZBlock >= MinimumZ && OutSurfaceZBlock <= MaximumZ;
 		}
 	}
-
 	return false;
 }
 

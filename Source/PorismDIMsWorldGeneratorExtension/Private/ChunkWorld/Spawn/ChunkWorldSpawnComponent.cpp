@@ -335,6 +335,7 @@ void UChunkWorldSpawnComponent::EndPlay(const EEndPlayReason::Type EndPlayReason
 
 	RegisteredSourceProviders.Reset();
 	RegisteredOriginProvider.Reset();
+	ReservationAssignments.Reset();
 	TrackedExecutionActors.Reset();
 	InvalidateCandidateQueryCache();
 	SetComponentTickEnabled(false);
@@ -444,6 +445,14 @@ void UChunkWorldSpawnComponent::UpdateSpawnTicket(const FGuid& TicketId)
 			return;
 		}
 
+		if (TicketRecord->Request.bAssignUniqueReservation)
+		{
+			// Selection and approval run on the game thread without callbacks between them.
+			// Commit before publication so reentrant or same-tick requests cannot share this source.
+			FReservationAssignment& Assignment = ReservationAssignments.FindOrAdd(TicketRecord->SelectedCandidate.SourceId);
+			Assignment.StableSubjectId = TicketRecord->Request.SubjectBinding.StableSubjectId;
+			Assignment.Owner = TicketRecord->Request.SubjectBinding.RequestOwner;
+		}
 		TicketRecord->Result.bSuccess = true;
 		TicketRecord->Result.FailureCategory = EChunkWorldSpawnFailureCategory::None;
 		TicketRecord->Result.ApprovedTransform = ApprovedTransform;
@@ -453,6 +462,8 @@ void UChunkWorldSpawnComponent::UpdateSpawnTicket(const FGuid& TicketId)
 		TicketRecord->Result.SelectedSourceId = TicketRecord->SelectedCandidate.SourceId;
 		TicketRecord->Result.ApprovedCandidateRegion.Minimum = TicketRecord->SelectedCandidate.SearchBounds.Min;
 		TicketRecord->Result.ApprovedCandidateRegion.Maximum = TicketRecord->SelectedCandidate.SearchBounds.Max;
+		TicketRecord->Result.Facing = TicketRecord->SelectedCandidate.Facing;
+		TicketRecord->Result.Facing.Yaw = ApprovedTransform.Rotator().Yaw;
 		TicketRecord->Result.DebugReason = FString::Printf(
 			TEXT("Approved deterministic provisional biome-backed location. Source=%s TheoreticalSurfaceZ=%.3f Location=%s."),
 			*TicketRecord->SelectedCandidate.DebugLabel,
@@ -562,9 +573,29 @@ bool UChunkWorldSpawnComponent::SelectCandidateForCurrentFamily(const FGuid& Tic
 		UE_LOG(LogChunkWorldSpawn, VeryVerbose, TEXT("Spawn candidate cache miss. Ticket=%s Family=%s CandidateCount=%d Cacheable=%s"), *TicketId.ToString(), *UEnum::GetValueAsString(RequestedFamily), Candidates.Num(), bCanUseCache ? TEXT("true") : TEXT("false"));
 	}
 
-	Candidates.RemoveAll([RequestedFamily, &Request](const FChunkWorldSpawnCandidate& Candidate)
+	FName AssignedSourceId = NAME_None;
+	for (auto It = ReservationAssignments.CreateIterator(); It; ++It)
 	{
-		return Candidate.SourceFamily != RequestedFamily
+		if (!It.Value().Owner.IsValid())
+		{
+			It.RemoveCurrent();
+		}
+		else if (It.Value().StableSubjectId == Request.SubjectBinding.StableSubjectId
+			&& It.Value().Owner == Request.SubjectBinding.RequestOwner)
+		{
+			AssignedSourceId = It.Key();
+		}
+	}
+	Candidates.RemoveAll([this, RequestedFamily, &Request, AssignedSourceId](const FChunkWorldSpawnCandidate& Candidate)
+	{
+		const FReservationAssignment* Assignment = Candidate.SourceFamily == EChunkWorldSpawnSourceFamily::ReservationField
+			? ReservationAssignments.Find(Candidate.SourceId) : nullptr;
+		const bool bAssignedToOther = Assignment && (Assignment->StableSubjectId != Request.SubjectBinding.StableSubjectId
+			|| Assignment->Owner != Request.SubjectBinding.RequestOwner);
+		return bAssignedToOther
+			|| (Request.bAssignUniqueReservation && (Candidate.SourceId.IsNone()
+				|| (!AssignedSourceId.IsNone() && Candidate.SourceId != AssignedSourceId)))
+			|| Candidate.SourceFamily != RequestedFamily
 			|| !IsFiniteWorldBounds(Candidate.SearchBounds)
 			|| !FMath::IsFinite(Candidate.TheoreticalLocation.X)
 			|| !FMath::IsFinite(Candidate.TheoreticalLocation.Y)
@@ -692,7 +723,13 @@ bool UChunkWorldSpawnComponent::ResolveBiomePlacement(const FSpawnTicketRecord& 
 		return false;
 	}
 
-	OutTransform = FTransform(FRotator::ZeroRotator, CandidateLocation);
+	double FacingYaw;
+	if (!TicketRecord.SelectedCandidate.Facing.ResolveYaw(CandidateLocation, FacingYaw))
+	{
+		OutFailureReason = TEXT("The selected source produced non-finite facing data.");
+		return false;
+	}
+	OutTransform = FTransform(FRotator(0.0, FacingYaw, 0.0), CandidateLocation);
 	return true;
 }
 
@@ -828,6 +865,14 @@ bool UChunkWorldSpawnComponent::IsPendingRequestValid(const FChunkWorldSpawnRequ
 {
 	OutFailureCategory = EChunkWorldSpawnFailureCategory::None;
 	OutFailureReason.Reset();
+	if (Request.bAssignUniqueReservation && (!Request.SubjectBinding.RequestOwner.IsValid()
+		|| Request.AllowedSourceFamiliesInPriorityOrder.Num() != 1
+		|| Request.AllowedSourceFamiliesInPriorityOrder[0] != EChunkWorldSpawnSourceFamily::ReservationField))
+	{
+		OutFailureCategory = EChunkWorldSpawnFailureCategory::RequestInvalid;
+		OutFailureReason = TEXT("Unique reservation assignment requires a valid request owner and only the ReservationField family.");
+		return false;
+	}
 	if (!FMath::IsFinite(Request.PreferredSearchOrigin.X)
 		|| !FMath::IsFinite(Request.PreferredSearchOrigin.Y)
 		|| !FMath::IsFinite(Request.PreferredSearchOrigin.Z)

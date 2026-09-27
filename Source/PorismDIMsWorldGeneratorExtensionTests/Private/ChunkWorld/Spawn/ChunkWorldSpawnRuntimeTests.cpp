@@ -6,6 +6,7 @@
 #include "ChunkWorld/Spawn/Support/ChunkWorldSpawnTestWorld.h"
 #include "GameFramework/WorldSettings.h"
 #include "Misc/AutomationTest.h"
+#include <limits>
 
 namespace
 {
@@ -120,6 +121,59 @@ bool FChunkWorldSpawnLocationResultTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Location event emits exactly once"), EventCount, 1);
 	TestEqual(TEXT("Event preserves request identity"), PublishedResult.RequestId, PolledResult.RequestId);
 	TestTrue(TEXT("Event preserves finite handoff region"), PublishedResult.ApprovedCandidateRegion.Minimum.Equals(Provider->Candidates[0].SearchBounds.Min) && PublishedResult.ApprovedCandidateRegion.Maximum.Equals(Provider->Candidates[0].SearchBounds.Max));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FChunkWorldSpawnFacingResultTest,
+	"PorismExtension.ChunkWorld.Spawn.Runtime.FacingResult",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FChunkWorldSpawnFacingResultTest::RunTest(const FString& Parameters)
+{
+	AddExpectedError(TEXT("The selected source produced non-finite facing data."), EAutomationExpectedErrorFlags::Contains, 2);
+	FChunkWorldSpawnRuntimeTestContext Context;
+	if (!TestTrue(TEXT("Authority world initializes"), Context.Initialize()))
+	{
+		return false;
+	}
+	UChunkWorldSpawnTestSourceProvider* Provider = NewObject<UChunkWorldSpawnTestSourceProvider>(Context.ChunkWorld);
+	Provider->Candidates.Add(MakeCandidate(TEXT("Facing")));
+	Context.SpawnComponent->RegisterSpawnSourceProvider(AsSourceProvider(Provider));
+	for (const double Yaw : {0.0, 90.0, -135.0, 450.0, std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity()})
+	{
+		Provider->Candidates[0].Facing.Yaw = Yaw;
+		FChunkWorldSpawnRequest Request = MakeLocationRequest();
+		Request.RequestId = FGuid::NewGuid();
+		const FChunkWorldSpawnTicketHandle Ticket = Context.SpawnComponent->SubmitSpawnRequest(Request);
+		Context.SpawnComponent->Advance();
+		FChunkWorldSpawnResult Result;
+		TestTrue(TEXT("Terminal result exists"), Context.SpawnComponent->GetSpawnTicketResult(Ticket, Result));
+		TestEqual(TEXT("Only finite heading approves"), Result.bSuccess, FMath::IsFinite(Yaw));
+		if (Result.bSuccess)
+		{
+			TestTrue(TEXT("Result carries upright source heading"), Result.ApprovedTransform.Rotator().Equals(FRotator(0.0, FRotator::NormalizeAxis(Yaw), 0.0), 0.001));
+			TestTrue(TEXT("Heading does not change location"), Result.ApprovedTransform.GetLocation().Equals(Provider->Candidates[0].TheoreticalLocation));
+		}
+	}
+	auto& Facing = Provider->Candidates[0].Facing;
+	Facing.Yaw = 15.0;
+	Facing.bFaceTarget = true;
+	Facing.Target = Provider->Candidates[0].TheoreticalLocation + FVector(0.0, 100.0, 900.0);
+	FChunkWorldSpawnRequest Request = MakeLocationRequest();
+	Request.RequestId = FGuid::NewGuid();
+	const auto Ticket = Context.SpawnComponent->SubmitSpawnRequest(Request);
+	Context.SpawnComponent->Advance();
+	FChunkWorldSpawnResult Result;
+	TestTrue(TEXT("Target-facing result exists"), Context.SpawnComponent->GetSpawnTicketResult(Ticket, Result));
+	TestTrue(TEXT("Target-facing placement approves"), Result.bSuccess);
+	TestEqual(TEXT("Exact target survives result handoff"), Result.Facing.Target, Facing.Target);
+	TestTrue(TEXT("Provisional reference yaw faces point"), FMath::IsNearlyEqual(Result.Facing.Yaw, 90.0));
+	double ResolvedYaw;
+	TestTrue(TEXT("Relocated final position resolves"), Result.Facing.ResolveYaw(Facing.Target - FVector(100.0, 0.0, 25.0), ResolvedYaw));
+	TestTrue(TEXT("Relocation changes facing without target elevation tilt"), FMath::IsNearlyZero(ResolvedYaw));
+	TestTrue(TEXT("Coincident XY resolves"), Result.Facing.ResolveYaw(Facing.Target + FVector(0.0, 0.0, 500.0), ResolvedYaw));
+	TestEqual(TEXT("Coincident point retains provisional heading"), ResolvedYaw, Result.Facing.Yaw);
 	return true;
 }
 

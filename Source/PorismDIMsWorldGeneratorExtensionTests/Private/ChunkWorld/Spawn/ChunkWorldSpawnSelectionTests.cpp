@@ -5,6 +5,7 @@
 #include "ChunkWorld/Spawn/Support/ChunkWorldSpawnTestTypes.h"
 #include "ChunkWorld/Spawn/Support/ChunkWorldSpawnTestWorld.h"
 #include "Misc/AutomationTest.h"
+#include "UObject/UnrealType.h"
 
 #include <limits>
 
@@ -57,6 +58,106 @@ namespace
 		Interface.SetInterface(Provider);
 		return Interface;
 	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FChunkWorldSpawnUniqueReservationTest,
+	"PorismExtension.ChunkWorld.Spawn.Selection.UniqueReservations",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FChunkWorldSpawnUniqueReservationTest::RunTest(const FString& Parameters)
+{
+	FSelectionContext Context;
+	if (!TestTrue(TEXT("Authority world initializes"), Context.Initialize())) return false;
+	auto* Provider = NewObject<UChunkWorldSpawnTestSourceProvider>(Context.ChunkWorld);
+	Provider->SourceFamily = EChunkWorldSpawnSourceFamily::ReservationField;
+	for (int32 Index = 0; Index < 8; ++Index)
+	{
+		auto Candidate = MakeCandidate(FName(*FString::Printf(TEXT("Slot%d"), Index)));
+		Candidate.SourceFamily = EChunkWorldSpawnSourceFamily::ReservationField;
+		Provider->Candidates.Add(Candidate);
+	}
+	Context.SpawnComponent->RegisterSpawnSourceProvider(AsSourceProvider(Provider));
+	TArray<FChunkWorldSpawnRequest> Requests;
+	TArray<FChunkWorldSpawnTicketHandle> Tickets;
+	TArray<AActor*> Owners;
+	AActor* NpcOwner = Context.World->SpawnActor<AActor>();
+	auto RejectedRequest = MakeRequest();
+	RejectedRequest.AllowedSourceFamiliesInPriorityOrder = {EChunkWorldSpawnSourceFamily::ReservationField};
+	RejectedRequest.bAssignUniqueReservation = true;
+	RejectedRequest.SubjectBinding.RequestOwner = NpcOwner;
+	RejectedRequest.PreferredSearchRadius = 1.0f;
+	AddExpectedError(TEXT("Failure=UnsafePlacement"), EAutomationExpectedErrorFlags::Contains, 1);
+	const auto RejectedTicket = Context.SpawnComponent->SubmitSpawnRequest(RejectedRequest);
+	Context.SpawnComponent->Advance();
+	TestEqual(TEXT("Rejected location must not consume one of eight slots"), Context.SpawnComponent->GetSpawnTicketState(RejectedTicket), EChunkWorldSpawnTicketState::Failed);
+	for (int32 Index = 0; Index < 8; ++Index)
+	{
+		AActor* Owner = Index < 4 ? Context.World->SpawnActor<AActor>() : NpcOwner;
+		Owners.Add(Owner);
+		auto Request = MakeRequest();
+		Request.AllowedSourceFamiliesInPriorityOrder = {EChunkWorldSpawnSourceFamily::ReservationField};
+		Request.bAssignUniqueReservation = true;
+		Request.SubjectBinding.RequestOwner = Owner;
+		Requests.Add(Request);
+		Tickets.Add(Context.SpawnComponent->SubmitSpawnRequest(Request));
+	}
+	Context.SpawnComponent->Advance();
+	TSet<FName> Assigned;
+	TArray<FName> Sources;
+	for (const auto Ticket : Tickets)
+	{
+		FChunkWorldSpawnResult Result;
+		Context.SpawnComponent->GetSpawnTicketResult(Ticket, Result);
+		TestTrue(TEXT("Every participant receives a source"), Result.bSuccess);
+		TestFalse(TEXT("Human and shared-owner NPC requests cannot duplicate a source"), Assigned.Contains(Result.SelectedSourceId));
+		Assigned.Add(Result.SelectedSourceId);
+		Sources.Add(Result.SelectedSourceId);
+	}
+	TestEqual(TEXT("Eight distinct reservations assigned"), Assigned.Num(), 8);
+	FindFProperty<FIntProperty>(Context.SpawnComponent->GetClass(), TEXT("MaximumRetainedTerminalTickets"))->SetPropertyValue_InContainer(Context.SpawnComponent, 1);
+	auto Extra = Requests[0];
+	Extra.SubjectBinding.StableSubjectId = FGuid::NewGuid();
+	AddExpectedError(TEXT("Failure=NoEligibleSource"), EAutomationExpectedErrorFlags::Contains, 1);
+	const auto Exhausted = Context.SpawnComponent->SubmitSpawnRequest(Extra);
+	Context.SpawnComponent->Advance();
+	TestEqual(TEXT("Exhaustion cannot silently share"), Context.SpawnComponent->GetSpawnTicketState(Exhausted), EChunkWorldSpawnTicketState::Failed);
+	FChunkWorldSpawnResult Evicted;
+	TestFalse(TEXT("First ticket was evicted before assignment reuse"), Context.SpawnComponent->GetSpawnTicketResult(Tickets[0], Evicted));
+	const auto Repeated = Context.SpawnComponent->SubmitSpawnRequest(Requests[0]);
+	Context.SpawnComponent->Advance();
+	FChunkWorldSpawnResult Result;
+	Context.SpawnComponent->GetSpawnTicketResult(Repeated, Result);
+	TestTrue(TEXT("Same subject may request again"), Result.bSuccess);
+	TestEqual(TEXT("Assignment survives terminal-ticket lifetime"), Result.SelectedSourceId, Sources[0]);
+	Owners[0]->Destroy();
+	Extra.SubjectBinding.RequestOwner = Context.World->SpawnActor<AActor>();
+	const auto Reclaimed = Context.SpawnComponent->SubmitSpawnRequest(Extra);
+	Context.SpawnComponent->Advance();
+	Context.SpawnComponent->GetSpawnTicketResult(Reclaimed, Result);
+	TestTrue(TEXT("Departed owner releases source"), Result.bSuccess);
+	TestEqual(TEXT("Only departed owner's source can be reclaimed"), Result.SelectedSourceId, Sources[0]);
+
+	Extra.SubjectBinding.RequestOwner.Reset();
+	AddExpectedError(TEXT("Failure=RequestInvalid"), EAutomationExpectedErrorFlags::Contains, 1);
+	const auto Unowned = Context.SpawnComponent->SubmitSpawnRequest(Extra);
+	TestEqual(TEXT("Unique assignment cannot outlive an absent owner"), Context.SpawnComponent->GetSpawnTicketState(Unowned), EChunkWorldSpawnTicketState::Failed);
+
+	auto TeamArea = MakeCandidate(TEXT("SharedTeamArea"));
+	TeamArea.SourceFamily = EChunkWorldSpawnSourceFamily::ReservationField;
+	TeamArea.SpawnTags.AddTag(BiomeGameplayTags::ReservationSpawnTeam1);
+	Provider->Candidates.Add(TeamArea);
+	Extra.bAssignUniqueReservation = false;
+	Extra.RequiredSpawnTags.AddTag(BiomeGameplayTags::ReservationSpawnTeam1);
+	for (int32 Index = 0; Index < 8; ++Index)
+	{
+		Extra.SubjectBinding.StableSubjectId = FGuid::NewGuid();
+		const auto Shared = Context.SpawnComponent->SubmitSpawnRequest(Extra);
+		Context.SpawnComponent->Advance();
+		Context.SpawnComponent->GetSpawnTicketResult(Shared, Result);
+		TestTrue(TEXT("Team area remains shareable for all eight participants"), Result.bSuccess);
+		TestEqual(TEXT("Team request only selects its tagged area"), Result.SelectedSourceId, TeamArea.SourceId);
+	}
+	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(

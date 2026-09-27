@@ -210,6 +210,40 @@ struct PORISMDIMSWORLDGENERATOREXTENSION_API FReservationPayloadBase
 	GENERATED_BODY()
 };
 
+UENUM(BlueprintType)
+enum class EReservationSpawnFacing : uint8
+{
+	FixedRotation,
+	FixedPoint
+};
+
+/** Authoring payload family selected by the reservation's facing mode. */
+USTRUCT(BlueprintType)
+struct PORISMDIMSWORLDGENERATOREXTENSION_API FReservationSpawnFacingPayloadBase
+{
+	GENERATED_BODY()
+};
+
+USTRUCT(BlueprintType)
+struct PORISMDIMSWORLDGENERATOREXTENSION_API FReservationSpawnRotationPayload : public FReservationSpawnFacingPayloadBase
+{
+	GENERATED_BODY()
+
+	/** Strategy XY heading; world rotation applies, scale and mirroring do not. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn Facing", meta = (Units = "deg", ToolTip = "Upright strategy-space heading: 0 faces +X, 90 faces +Y. World rotation applies; scale and mirroring do not change heading."))
+	float Yaw = 0.0f;
+};
+
+USTRUCT(BlueprintType)
+struct PORISMDIMSWORLDGENERATOREXTENSION_API FReservationSpawnPointPayload : public FReservationSpawnFacingPayloadBase
+{
+	GENERATED_BODY()
+
+	/** One shared strategy-space point, never offset by provider or reservation repetition. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn Facing", meta = (ToolTip = "Fixed point in shared biome-strategy authored block coordinates. All repeated reservations share this point; their offsets/scales do not move it. World coordinate conversion applies once. Final facing uses horizontal direction only; coincident XY retains provisional heading (strategy +X if initially coincident)."))
+	FVector Target = FVector::ZeroVector;
+};
+
 /** Generic reservation metadata shared by domain, terrain, planning, and spawn outputs. */
 USTRUCT(BlueprintType)
 struct PORISMDIMSWORLDGENERATOREXTENSION_API FReservationDefinition
@@ -243,6 +277,14 @@ struct PORISMDIMSWORLDGENERATOREXTENSION_API FReservationDefinition
 	/** Tags used by spawn systems, validation, and tooling to classify the spawn-readable sub-field. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Strategy|Spawn", meta = (EditCondition = "bEnableSpawnReservation", ToolTip = "Gameplay/strategy tags used by spawn systems, validation, and tooling to classify the spawn-readable sub-field."))
 	FGameplayTagContainer SpawnFieldTags;
+
+	/** Chooses fixed heading or a shared strategy-space point without changing terrain. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Strategy|Spawn", meta = (EditCondition = "bEnableSpawnReservation", ToolTip = "Choose fixed rotation or fixed point. Changing the mode installs its matching payload."))
+	EReservationSpawnFacing SpawnFacingMode = EReservationSpawnFacing::FixedRotation;
+
+	/** Typed payload synchronized with Spawn Facing Mode in the editor. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Strategy|Spawn", meta = (EditCondition = "bEnableSpawnReservation", BaseStruct = "/Script/PorismDIMsWorldGeneratorExtension.ReservationSpawnFacingPayloadBase", ExcludeBaseStruct, ToolTip = "Facing settings for this reservation. A fixed point uses shared strategy block coordinates, including for repeated reservations."))
+	FInstancedStruct SpawnFacingPayload = FInstancedStruct::Make<FReservationSpawnRotationPayload>();
 };
 
 /** Base family for foundation provider definitions stored in provider hierarchies. */
@@ -596,6 +638,13 @@ struct PORISMDIMSWORLDGENERATOREXTENSION_API FTaggedReservationField
 	/** Theoretical authored-block terrain surface used before generated chunks realize. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Biome Strategy")
 	double TheoreticalSurfaceZBlock = 0.0;
+
+	/** Facing mode and exact payload; repeated field placements do not move a shared target. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Biome Strategy")
+	EReservationSpawnFacing SpawnFacingMode = EReservationSpawnFacing::FixedRotation;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Biome Strategy")
+	FInstancedStruct SpawnFacingPayload = FInstancedStruct::Make<FReservationSpawnRotationPayload>();
 };
 
 /** Shared strategy asset referenced by biome-slot FastNoiseEditor wrappers. */

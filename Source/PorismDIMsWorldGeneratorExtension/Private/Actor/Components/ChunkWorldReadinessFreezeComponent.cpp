@@ -3,6 +3,10 @@
 #include "Actor/Components/ChunkWorldReadinessFreezeComponent.h"
 
 #include "ChunkWorld/Actors/ChunkWorldExtended.h"
+#include "Chunk/Chunk.h"
+#include "ChunkComponent/ChunkComponent.h"
+#include "EngineUtils.h"
+#include "Misc/ScopeExit.h"
 #include "Layout/Runtime/ChunkWorldLayoutRuntimeComponent.h"
 #include "ChunkWorldExtended/ChunkWorldWalker.h"
 #include "Components/CapsuleComponent.h"
@@ -19,6 +23,69 @@ DEFINE_LOG_CATEGORY_STATIC(LogChunkWorldReadinessFreeze, Log, All);
 
 namespace ChunkWorldReadinessFreeze
 {
+	/** Read native finest-collision readiness under its visibility/topology fence.
+	 * Ready includes empty chunks; navigation export and navigation demand are irrelevant. */
+	bool HasCollisionCoverage(AChunkWorldExtended& World, const FBox& WorldBounds)
+	{
+		if (!World.IsRunning() || !World.WorldGenDef || !World.GetPrimaryComponent() || !WorldBounds.IsValid) return false;
+		const CChunkData* Layer = nullptr;
+		int32 LayerIndex = INDEX_NONE;
+		for (int32 Index = 0; Index < static_cast<int32>(World.WorldChunks.size()); ++Index)
+		{
+			const CChunkData* Candidate = World.WorldChunks[Index];
+			if (Candidate->Collision || Candidate->InstancedMeshCollision) { Layer = Candidate; LayerIndex = Index; }
+		}
+		// A world configured without voxel collision can still settle on ordinary scene geometry.
+		if (!Layer) return true;
+		const FBox Local = WorldBounds.TransformBy(World.GetPrimaryComponent()->GetComponentTransform().Inverse());
+		const FVector Size(Layer->ChunkSize);
+		if (Size.ContainsNaN() || Size.GetMin() <= 0.0 || Local.Min.ContainsNaN() || Local.Max.ContainsNaN()) return false;
+		const FVector GridMin = Local.Min / Size;
+		const FVector GridMax = Local.Max / Size;
+		if (GridMin.GetMin() < double(MIN_int32) + 2.0 || GridMax.GetMax() > double(MAX_int32) - 2.0) return false;
+		const FIntVector Min(FMath::FloorToInt(GridMin.X), FMath::FloorToInt(GridMin.Y), FMath::FloorToInt(GridMin.Z));
+		const FIntVector Max(FMath::FloorToInt(GridMax.X), FMath::FloorToInt(GridMax.Y), FMath::FloorToInt(GridMax.Z));
+		const FVector Count = FVector(Max) - FVector(Min) + FVector::OneVector;
+		if (Count.X * Count.Y * Count.Z > 4096.0) return false;
+		bool bExpected = false;
+		if (!World.CheckChunkPosesIsRunning.compare_exchange_strong(bExpected, true, std::memory_order_acq_rel)) return false;
+		ON_SCOPE_EXIT { World.CheckChunkPosesIsRunning.store(false, std::memory_order_release); };
+		{
+			std::lock_guard<std::mutex> Updates(World.ChunkUpdateCalls.Mutex);
+			if (LayerIndex < static_cast<int32>(World.ChunkUpdateCalls.Data.size()))
+				for (const FIntVector& Key : World.ChunkUpdateCalls.Data[LayerIndex])
+					if (Key.X >= Min.X - 1 && Key.X <= Max.X + 1 && Key.Y >= Min.Y - 1 && Key.Y <= Max.Y + 1 && Key.Z >= Min.Z - 1 && Key.Z <= Max.Z + 1)
+						return false;
+		}
+		std::lock_guard<std::mutex> Roots(World.ChunkStack.Mutex);
+		for (int32 X = Min.X; X <= Max.X; ++X)
+		for (int32 Y = Min.Y; Y <= Max.Y; ++Y)
+		for (int32 Z = Min.Z; Z <= Max.Z; ++Z)
+		{
+			const FVector Point = (FVector(X, Y, Z) + FVector(0.5)) * Size;
+			const auto Contains = [&World, &Point](const CChunk* Chunk)
+			{
+				if (!Chunk) return false;
+				const FVector Start = FVector(Chunk->Start) * World.WorldGenDef->BaseBlockSize;
+				const FVector End = Start + FVector(Chunk->ChunkData->ChunkSize);
+				return Point.X >= Start.X && Point.X < End.X && Point.Y >= Start.Y && Point.Y < End.Y && Point.Z >= Start.Z && Point.Z < End.Z;
+			};
+			CChunk* Chunk = nullptr;
+			for (const auto& Bucket : World.ChunkStack.Data)
+				for (const auto& Entry : Bucket)
+					if (Contains(Entry.Chunk)) Chunk = Entry.Chunk;
+			while (Chunk && Chunk->ChunkData != Layer)
+			{
+				CChunk* Child = nullptr;
+				for (CChunk* Candidate : Chunk->Children)
+					if (Contains(Candidate)) { Child = Candidate; break; }
+				Chunk = Child;
+			}
+			if (!Chunk || !Chunk->IsReady) return false;
+		}
+		return true;
+	}
+
 	EMovementMode ResolveCharacterMovementRestoreMode(const UCharacterMovementComponent* CharacterMovement, const EMovementMode CapturedMode)
 	{
 		if (CapturedMode != MOVE_None)
@@ -156,8 +223,11 @@ void UChunkWorldReadinessFreezeComponent::TickComponent(float DeltaTime, ELevelT
 FGuid UChunkWorldReadinessFreezeComponent::StartRuntimeReadinessSession(
 	AChunkWorldExtended* ChunkWorld,
 	const FChunkWorldSpawnRegion& CandidateRegion,
-	const bool bRequireOwningClientReady)
+	const bool bRequireOwningClientReady,
+	const FChunkWorldSpawnFacing& Facing)
 {
+	double ValidatedYaw;
+	if (!Facing.ResolveYaw(FVector::ZeroVector, ValidatedYaw)) return FGuid();
 	if (bStartingRuntimeSession || GetOwner() == nullptr || !GetOwner()->HasAuthority() || ChunkWorld == nullptr || ChunkWorld->GetWorld() != GetWorld()
 		|| !ChunkWorldReadinessFreeze::IsFiniteRegion(CandidateRegion)
 		|| (RuntimeSession.SessionId.IsValid() && !IsRuntimeSessionTerminal() && !bAutomaticStartupSession))
@@ -184,9 +254,11 @@ FGuid UChunkWorldReadinessFreezeComponent::StartRuntimeReadinessSession(
 	RuntimeSession.ReadinessId = FGuid::NewGuid();
 	RuntimeSession.ChunkWorld = ChunkWorld;
 	RuntimeSession.CandidateRegion = CandidateRegion;
+	RuntimeSession.Facing = Facing;
 	RuntimeSession.bRequiresOwningClientReady = bRequireOwningClientReady;
 	RuntimeSession.State = EChunkWorldRuntimeReadinessState::WaitingForWalker;
 	RuntimeSessionStartTimeSeconds = GetWorld() != nullptr ? GetWorld()->GetTimeSeconds() : 0.0;
+	RuntimeSettlementWaitStartSeconds = -1.0;
 	bLocalClientReadyBroadcast = false;
 	ObserveLayoutWrites(ChunkWorld);
 	for (const auto& State : ObservedChunkWorldStates) ObserveLayoutWrites(State.ChunkWorld.Get());
@@ -331,7 +403,7 @@ void UChunkWorldReadinessFreezeComponent::TryFinishStartupFreeze()
 	Region.Minimum.Z -= FMath::Max(0.0f, RuntimeSettlementDownwardScanDistance);
 	Region.Maximum.Z += FMath::Max(0.0f, RuntimeSettlementUpwardScanDistance);
 	bAutomaticStartupSession = StartRuntimeReadinessSession(PrimaryWorld, Region,
-		Pawn && Cast<APlayerController>(Pawn->GetController())).IsValid();
+		Pawn && Cast<APlayerController>(Pawn->GetController()), {}).IsValid();
 }
 
 void UChunkWorldReadinessFreezeComponent::ReleaseStartupFreeze()
@@ -692,6 +764,10 @@ void UChunkWorldReadinessFreezeComponent::TryAcknowledgeLocalCoverage()
 		|| !Pawn || !Pawn->IsLocallyControlled() || !RuntimeSession.bRequiresOwningClientReady) return;
 	FString Failure;
 	if (!IsRequiredCoverageReady(Failure)) return;
+	// Authority may choose any bounded fallback after this acknowledgement. Prove the
+	// client's entire approved search region, not only the original walker's column.
+	if (!RuntimeSession.ChunkWorld || !ChunkWorldReadinessFreeze::HasCollisionCoverage(*RuntimeSession.ChunkWorld,
+		FBox(RuntimeSession.CandidateRegion.Minimum, RuntimeSession.CandidateRegion.Maximum))) return;
 	bLocalClientReadyBroadcast = true;
 	OnOwningClientRuntimeReady.Broadcast(RuntimeSession.SessionId, RuntimeSession.ReadinessId);
 }
@@ -731,6 +807,7 @@ void UChunkWorldReadinessFreezeComponent::HandleAutomaticLayoutWrite(AChunkWorld
 
 void UChunkWorldReadinessFreezeComponent::RearmRuntimeReadiness()
 {
+	RuntimeSettlementWaitStartSeconds = -1.0;
 	StopLocalRuntimeWalkerTracking();
 	RuntimeSession.ReadinessId = FGuid::NewGuid();
 	RuntimeSession.bServerWalkerReady = false;
@@ -767,6 +844,7 @@ void UChunkWorldReadinessFreezeComponent::TrySettleRuntimeSession()
 	}
 	if (bPendingLayouts)
 	{
+		RuntimeSettlementWaitStartSeconds = -1.0;
 		RuntimeSession.State = EChunkWorldRuntimeReadinessState::WaitingForLayouts;
 		return;
 	}
@@ -786,8 +864,20 @@ void UChunkWorldReadinessFreezeComponent::TrySettleRuntimeSession()
 	FTransform SettledTransform;
 	EChunkWorldRuntimeReadinessFailure Failure = EChunkWorldRuntimeReadinessFailure::NoSettledSurface;
 	FString FailureReason;
-	if (!TryBuildRuntimeSettledTransform(SettledTransform, Failure, FailureReason))
+	bool bCollisionPending = false;
+	if (!TryBuildRuntimeSettledTransform(SettledTransform, Failure, FailureReason, bCollisionPending))
 	{
+		if (bCollisionPending)
+		{
+			if (RuntimeSettlementWaitStartSeconds < 0.0) RuntimeSettlementWaitStartSeconds = Now;
+			if (Now - RuntimeSettlementWaitStartSeconds < FMath::Max(0.0f, RuntimeSettlementCollisionTimeoutSeconds))
+			{
+				RuntimeSession.State = EChunkWorldRuntimeReadinessState::WaitingForServerReady;
+				RuntimeSession.DebugReason = FailureReason;
+				return;
+			}
+			FailureReason = TEXT("Settlement collision wait expired. ") + FailureReason;
+		}
 		SetRuntimeTerminal(EChunkWorldRuntimeReadinessState::Failed, Failure, FailureReason);
 		return;
 	}
@@ -807,8 +897,10 @@ bool UChunkWorldReadinessFreezeComponent::HasBoundRuntimeWalker() const
 bool UChunkWorldReadinessFreezeComponent::TryBuildRuntimeSettledTransform(
 	FTransform& OutTransform,
 	EChunkWorldRuntimeReadinessFailure& OutFailure,
-	FString& OutFailureReason) const
+	FString& OutFailureReason,
+	bool& bOutCollisionPending) const
 {
+	bOutCollisionPending = false;
 	OutFailure = EChunkWorldRuntimeReadinessFailure::NoSettledSurface;
 	OutFailureReason.Reset();
 	AActor* Owner = GetOwner();
@@ -818,20 +910,33 @@ bool UChunkWorldReadinessFreezeComponent::TryBuildRuntimeSettledTransform(
 		OutFailureReason = TEXT("Runtime settlement requires valid owner, world, and candidate region.");
 		return false;
 	}
-	const FVector Location = FrozenActorTransform.GetLocation();
+	const UCapsuleComponent* Capsule = Owner->FindComponentByClass<UCapsuleComponent>();
+	// Collision can be offset from actor origin (for example, a floor-based tracking origin).
+	// CalcBounds honors the capsule's native collision-center override without a plugin dependency.
+	const FVector CapsuleOffset = Capsule != nullptr
+		? Capsule->CalcBounds(Capsule->GetComponentTransform()).Origin - Owner->GetActorLocation()
+		: FVector::ZeroVector;
+	const FVector Location = FrozenActorTransform.GetLocation() + CapsuleOffset;
 	if (!ChunkWorldReadinessFreeze::IsFiniteVector(Location) || Location.X < RuntimeSession.CandidateRegion.Minimum.X || Location.X > RuntimeSession.CandidateRegion.Maximum.X
 		|| Location.Y < RuntimeSession.CandidateRegion.Minimum.Y || Location.Y > RuntimeSession.CandidateRegion.Maximum.Y)
 	{
 		OutFailureReason = TEXT("Frozen provisional location is outside candidate region.");
 		return false;
 	}
-	const UCapsuleComponent* Capsule = Owner->FindComponentByClass<UCapsuleComponent>();
-	const float Radius = Capsule != nullptr ? Capsule->GetScaledCapsuleRadius() : 0.0f;
-	const float HalfHeight = Capsule != nullptr ? Capsule->GetScaledCapsuleHalfHeight() : 0.0f;
-	const FCollisionShape Shape = Capsule != nullptr ? FCollisionShape::MakeCapsule(Radius, HalfHeight) : FCollisionShape::MakeSphere(1.0f);
-	const double StartZ = FMath::Min<double>(RuntimeSession.CandidateRegion.Maximum.Z, Location.Z + FMath::Max(0.0f, RuntimeSettlementUpwardScanDistance));
-	const double EndZ = FMath::Max<double>(RuntimeSession.CandidateRegion.Minimum.Z, Location.Z - FMath::Max(0.0f, RuntimeSettlementDownwardScanDistance));
-	if (!FMath::IsFinite(StartZ) || !FMath::IsFinite(EndZ) || StartZ <= EndZ)
+	const float Radius = Capsule != nullptr ? Capsule->GetScaledCapsuleRadius() : 1.0f;
+	const float HalfHeight = Capsule != nullptr ? Capsule->GetScaledCapsuleHalfHeight() : 1.0f;
+	if (!FMath::IsFinite(Radius) || !FMath::IsFinite(HalfHeight) || Radius <= 0.0f || HalfHeight < Radius || !FMath::IsFinite(RuntimeSettlementZOffset))
+	{
+		OutFailureReason = TEXT("Settlement requires finite upright capsule dimensions and contact clearance.");
+		return false;
+	}
+	const FCollisionShape Shape = Capsule != nullptr ? FCollisionShape::MakeCapsule(Radius, HalfHeight) : FCollisionShape::MakeSphere(Radius);
+	const FVector Extent(Radius, Radius, HalfHeight);
+	const FVector Min = RuntimeSession.CandidateRegion.Minimum + Extent;
+	const FVector Max = RuntimeSession.CandidateRegion.Maximum - Extent;
+	const double StartZ = FMath::Min<double>(Max.Z, Location.Z + FMath::Max(0.0f, RuntimeSettlementUpwardScanDistance));
+	const double EndZ = FMath::Max<double>(Min.Z, Location.Z - FMath::Max(0.0f, RuntimeSettlementDownwardScanDistance));
+	if (!FMath::IsFinite(StartZ) || !FMath::IsFinite(EndZ) || StartZ <= EndZ || Min.X > Max.X || Min.Y > Max.Y)
 	{
 		OutFailureReason = TEXT("Candidate region does not contain a valid bounded settlement scan.");
 		return false;
@@ -845,20 +950,85 @@ bool UChunkWorldReadinessFreezeComponent::TryBuildRuntimeSettledTransform(
 		return false;
 	}
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(ChunkWorldRuntimeSettlement), false, Owner);
-	FHitResult Hit;
-	if (!World->SweepSingleByProfile(Hit, FVector(Location.X, Location.Y, StartZ), FVector(Location.X, Location.Y, EndZ), FQuat::Identity, RuntimeSettlementCollisionProfile, Shape, Params) || !Hit.bBlockingHit)
+	TArray<AActor*> Attached;
+	Owner->GetAttachedActors(Attached, true, true);
+	Params.AddIgnoredActors(Attached);
+	const UCharacterMovementComponent* Movement = Owner->FindComponentByClass<UCharacterMovementComponent>();
+	FRandomStream Random(static_cast<int32>(GetTypeHash(RuntimeSession.SessionId)));
+	const int32 Attempts = FMath::Clamp(RuntimeSettlementCandidateCount, 1, 64);
+	FVector SettledLocation = FVector::ZeroVector;
+	bool bFound = false;
+	for (int32 Attempt = 0; Attempt < Attempts; ++Attempt)
 	{
-		OutFailureReason = TEXT("No blocking surface found inside bounded candidate region.");
+		const double X = Attempt == 0 ? Location.X : FMath::Lerp(Min.X, Max.X, Random.FRand());
+		const double Y = Attempt == 0 ? Location.Y : FMath::Lerp(Min.Y, Max.Y, Random.FRand());
+		if (X < Min.X || X > Max.X || Y < Min.Y || Y > Max.Y) continue;
+		FHitResult Hit;
+		if (!World->SweepSingleByProfile(Hit, FVector(X, Y, StartZ), FVector(X, Y, EndZ), FQuat::Identity, RuntimeSettlementCollisionProfile, Shape, Params) || !Hit.bBlockingHit)
+		{
+			// An empty query is conclusive only once collision covers its entire scan.
+			bOutCollisionPending |= !RuntimeSession.ChunkWorld || !ChunkWorldReadinessFreeze::HasCollisionCoverage(*RuntimeSession.ChunkWorld,
+				FBox(FVector(X - Radius, Y - Radius, EndZ - HalfHeight), FVector(X + Radius, Y + Radius, StartZ + HalfHeight)));
+			continue;
+		}
+		if (Hit.bStartPenetrating || (Hit.GetActor() && Hit.GetActor()->IsA<APawn>())
+			|| (Movement ? !Movement->IsWalkable(Hit) : Hit.ImpactNormal.Z < 0.70710678f)) continue;
+		// Hit.Location is the swept shape center; ImpactPoint + half-height is wrong on slopes.
+		// Chaos can report overlap at exact capsule contact. Use character movement's native
+		// minimum floor clearance, not a terrain-height correction or an untested offset.
+		const FVector Candidate = Hit.Location + FVector(0.0, 0.0,
+			FMath::Max(RuntimeSettlementZOffset, UCharacterMovementComponent::MIN_FLOOR_DIST));
+		if (Candidate.ContainsNaN() || Candidate.Z < Min.Z || Candidate.Z > Max.Z) continue;
+		// A live floor hit proves support, but only committed collision throughout the body
+		// volume can prove headroom and side clearance. Unloaded space is not empty space.
+		if (!RuntimeSession.ChunkWorld || !ChunkWorldReadinessFreeze::HasCollisionCoverage(*RuntimeSession.ChunkWorld, FBox(Candidate - Extent, Candidate + Extent)))
+		{
+			bOutCollisionPending = true;
+			continue;
+		}
+		if (World->OverlapBlockingTestByProfile(Candidate, FQuat::Identity, RuntimeSettlementCollisionProfile, Shape, Params)) continue;
+		bool bOccupied = false;
+		for (TActorIterator<APawn> It(World); It; ++It)
+		{
+			if (*It == Owner || It->IsActorBeingDestroyed()) continue;
+			const UCapsuleComponent* Other = It->FindComponentByClass<UCapsuleComponent>();
+			if (!Other) continue;
+			const FVector Delta = Other->CalcBounds(Other->GetComponentTransform()).Origin - Candidate;
+			const float OtherRadius = Other->GetScaledCapsuleRadius();
+			const auto* OtherFreeze = It->FindComponentByClass<UChunkWorldReadinessFreezeComponent>();
+			const double GapZ = OtherFreeze && (OtherFreeze->IsRuntimeFreezeActive() || OtherFreeze->IsStartupFreezeActive()) ? 0.0
+				: FMath::Max(0.0, FMath::Abs(Delta.Z) - (HalfHeight - Radius) - (Other->GetScaledCapsuleHalfHeight() - OtherRadius));
+			if (Delta.SizeSquared2D() + GapZ * GapZ < FMath::Square(double(Radius + OtherRadius)))
+			{
+				bOccupied = true;
+				break;
+			}
+		}
+		if (bOccupied) continue;
+		SettledLocation = Candidate;
+		bFound = true;
+		break;
+	}
+	if (!bFound)
+	{
+		OutFailureReason = FString::Printf(
+			TEXT("No safe blocking surface found inside bounded candidate region. Owner=%s CapsuleCenter=(%s) CapsuleOffset=(%s) Radius=%.3f HalfHeight=%.3f ScanZ=[%.3f,%.3f] RegionMin=(%s) RegionMax=(%s) Profile=%s Attempts=%d CollisionPending=%d"),
+			*GetNameSafe(Owner), *Location.ToString(), *CapsuleOffset.ToString(), Radius, HalfHeight, EndZ, StartZ,
+			*RuntimeSession.CandidateRegion.Minimum.ToString(), *RuntimeSession.CandidateRegion.Maximum.ToString(), *RuntimeSettlementCollisionProfile.ToString(), Attempts, bOutCollisionPending);
 		return false;
 	}
-	const FVector SettledLocation(Location.X, Location.Y, Hit.ImpactPoint.Z + HalfHeight + RuntimeSettlementZOffset);
-	if (!ChunkWorldReadinessFreeze::IsFiniteVector(SettledLocation) || SettledLocation.Z < RuntimeSession.CandidateRegion.Minimum.Z || SettledLocation.Z > RuntimeSession.CandidateRegion.Maximum.Z)
+	double FinalYaw;
+	if (!RuntimeSession.Facing.ResolveYaw(SettledLocation, FinalYaw))
 	{
-		OutFailureReason = TEXT("Settled transform falls outside bounded candidate region.");
+		OutFailureReason = TEXT("Settlement facing is nonfinite.");
 		return false;
 	}
+	// Apply only the heading delta, preserving game-owned inverse-HMD/view composition.
+	// Rotate the capsule offset too, so changing facing cannot move its accepted collision center.
+	const FQuat FacingDelta(FVector::UpVector, FMath::DegreesToRadians(FRotator::NormalizeAxis(FinalYaw - RuntimeSession.Facing.Yaw)));
 	OutTransform = FrozenActorTransform;
-	OutTransform.SetLocation(SettledLocation);
+	OutTransform.SetRotation(FacingDelta * FrozenActorTransform.GetRotation());
+	OutTransform.SetLocation(SettledLocation - FacingDelta.RotateVector(CapsuleOffset));
 	return true;
 }
 

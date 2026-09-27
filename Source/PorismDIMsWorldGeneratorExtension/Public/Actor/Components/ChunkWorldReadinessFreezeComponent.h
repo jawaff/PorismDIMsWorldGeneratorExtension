@@ -73,6 +73,10 @@ struct PORISMDIMSWORLDGENERATOREXTENSION_API FChunkWorldRuntimeReadinessSession
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ChunkWorld|Runtime Readiness", meta = (ToolTip = "Bounded source region inherited from the approved location result. Settlement never searches outside it."))
 	FChunkWorldSpawnRegion CandidateRegion;
 
+	/** Exact fixed target and creation heading; authority resolves final yaw after placement. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ChunkWorld|Runtime Readiness")
+	FChunkWorldSpawnFacing Facing;
+
 	/** True when authority must receive one acknowledgement from the owning client before settlement. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ChunkWorld|Runtime Readiness", meta = (ToolTip = "True when authority must receive one acknowledgement from the owning client before settlement."))
 	bool bRequiresOwningClientReady = false;
@@ -139,8 +143,8 @@ public:
 
 	/** Starts authority-owned settlement, superseding an automatic startup session but never another explicit request.
 	 * Returns the stable operation id, or an invalid id on rejection. */
-	UFUNCTION(BlueprintCallable, Category = "ChunkWorld|Runtime Readiness")
-	FGuid StartRuntimeReadinessSession(AChunkWorldExtended* ChunkWorld, const FChunkWorldSpawnRegion& CandidateRegion, bool bRequireOwningClientReady);
+	UFUNCTION(BlueprintCallable, Category = "ChunkWorld|Runtime Readiness", meta = (AutoCreateRefTerm = "Facing"))
+	FGuid StartRuntimeReadinessSession(AChunkWorldExtended* ChunkWorld, const FChunkWorldSpawnRegion& CandidateRegion, bool bRequireOwningClientReady, const FChunkWorldSpawnFacing& Facing);
 
 	/** Cancels matching authority session. Cancellation retains freeze until game teardown or a later explicit session. */
 	UFUNCTION(BlueprintCallable, Category = "ChunkWorld|Runtime Readiness")
@@ -203,8 +207,8 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ChunkWorld|Runtime Readiness", meta = (ToolTip = "Collision profile used for one bounded capsule sweep during runtime settlement."))
 	FName RuntimeSettlementCollisionProfile = TEXT("BlockAll");
 
-	/** Vertical offset applied above settled terrain contact before actor transform is committed. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ChunkWorld|Runtime Readiness", meta = (ToolTip = "Vertical offset applied above settled terrain contact before actor transform is committed."))
+	/** Desired contact clearance, with character movement's native minimum floor distance enforced. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ChunkWorld|Runtime Readiness", meta = (ClampMin = "0.0", ToolTip = "Desired height above swept terrain contact. Native character-movement minimum floor clearance prevents exact-contact overlap; larger values still require bounded headroom and clearance."))
 	float RuntimeSettlementZOffset = 0.0f;
 
 	/** Maximum distance above provisional location inspected by runtime settlement sweep. */
@@ -214,6 +218,14 @@ protected:
 	/** Maximum distance below provisional location inspected by runtime settlement sweep. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ChunkWorld|Runtime Readiness", meta = (ClampMin = "0.0", UIMin = "0.0", ToolTip = "Maximum distance below provisional location inspected by runtime settlement sweep."))
 	float RuntimeSettlementDownwardScanDistance = 2000.0f;
+
+	/** Total collision-tested positions per settlement attempt, including the provisional center. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ChunkWorld|Runtime Readiness", meta = (ClampMin = "1", ClampMax = "64", ToolTip = "Try the source center first, then this bounded number of deterministic randomized positions inside its approved region. Increase only for densely occupied reservations."))
+	int32 RuntimeSettlementCandidateCount = 32;
+
+	/** Bounds the wait for collision at searched positions after native/layout/client prerequisites finish. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ChunkWorld|Runtime Readiness", meta = (ClampMin = "0.0", ToolTip = "Seconds to wait for searched chunk collision after other readiness gates pass. Expiry retains freeze and reports failure; it never approves unloaded terrain."))
+	float RuntimeSettlementCollisionTimeoutSeconds = 20.0f;
 
 	/** Maximum authority wait for required owning-client finest-detail acknowledgement. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ChunkWorld|Runtime Readiness", meta = (ClampMin = "0.0", UIMin = "0.0", ToolTip = "Maximum authority wait for required owning-client finest-detail acknowledgement. Zero fails immediately when acknowledgement is required."))
@@ -271,7 +283,8 @@ private:
 	void ObserveLayoutWrites(AChunkWorldExtended* ChunkWorld);
 	void StopObservingLayoutWrites();
 	void HandleAutomaticLayoutWrite(AChunkWorldExtended* ChunkWorld, const FBox& WorldBounds);
-	bool TryBuildRuntimeSettledTransform(FTransform& OutTransform, EChunkWorldRuntimeReadinessFailure& OutFailure, FString& OutFailureReason) const;
+	/** Tests bounded positions against committed terrain collision, walkability and current/pending pawn occupancy. */
+	bool TryBuildRuntimeSettledTransform(FTransform& OutTransform, EChunkWorldRuntimeReadinessFailure& OutFailure, FString& OutFailureReason, bool& bOutCollisionPending) const;
 	bool HasBoundRuntimeWalker() const;
 	void SetRuntimeTerminal(EChunkWorldRuntimeReadinessState TerminalState, EChunkWorldRuntimeReadinessFailure Failure, const FString& DebugReason, const FTransform* SettledTransform = nullptr);
 	void RefreshFreezeTick();
@@ -304,6 +317,7 @@ private:
 	FGuid RuntimeTrackedReadinessId;
 	float StartupFreezeElapsedSeconds = 0.0f;
 	double RuntimeSessionStartTimeSeconds = 0.0;
+	double RuntimeSettlementWaitStartSeconds = -1.0;
 	FGuid LastRuntimeStartedNotificationId;
 	FGuid LastRuntimeTerminalNotificationId;
 	bool bStartupFreezeActive = false;

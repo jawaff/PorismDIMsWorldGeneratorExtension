@@ -2,9 +2,13 @@
 
 #include "Actor/Components/ChunkWorldReadinessFreezeComponent.h"
 #include "ChunkWorld/Actors/ChunkWorldExtended.h"
+#include "Chunk/Chunk.h"
 #include "ChunkWorld/Spawn/Support/ChunkWorldSpawnTestWorld.h"
 #include "ChunkWorld/Support/ChunkWorldReadinessTestTypes.h"
 #include "GameFramework/Controller.h"
+#include "Components/CapsuleComponent.h"
+#include "Components/BoxComponent.h"
+#include "UObject/UnrealType.h"
 #include "Layout/Testing/LayoutTestWorldSupport.h"
 #include "Layout/Runtime/ChunkWorldLayoutRuntimeComponent.h"
 #include "Layout/Runtime/LayoutPlanningAreaQueue.h"
@@ -69,6 +73,142 @@ namespace
 	}
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FChunkWorldRuntimeSafePlacementTest,
+	"PorismExtension.ChunkWorld.ReadinessFreeze.Runtime.SafePlacement",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FChunkWorldRuntimeSafePlacementTest::RunTest(const FString& Parameters)
+{
+	FRuntimeReadinessTestContext Context;
+	if (!TestTrue(TEXT("Authority world initializes"), Context.Initialize())) return false;
+	auto* Floor = Context.World->SpawnActor<AChunkWorldReadinessTestSurface>();
+	Floor->FindComponentByClass<UBoxComponent>()->SetBoxExtent(FVector(1000.0, 1000.0, 20.0));
+	const auto AddCapsule = [](AActor* Actor)
+	{
+		auto* Capsule = NewObject<UCapsuleComponent>(Actor);
+		Capsule->InitCapsuleSize(20.0f, 80.0f);
+		Capsule->SetupAttachment(Actor->GetRootComponent());
+		Capsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Capsule->RegisterComponent();
+		return Capsule;
+	};
+	AddCapsule(Context.Pawn);
+	FChunkWorldSpawnRegion Region = MakeRegion();
+	Region.Minimum.X = Region.Minimum.Y = -300.0;
+	Region.Maximum.X = Region.Maximum.Y = 300.0;
+	auto* Freeze = Context.Pawn->GetTestFreeze();
+	const auto Settle = [&]()
+	{
+		Context.Pawn->SetActorLocation(FVector(0.0, 0.0, 100.0));
+		TestTrue(TEXT("Placement starts"), Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, Region, false, {}).IsValid());
+		Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Freeze->GetRuntimeReadinessSession().ReadinessId);
+	};
+	Settle();
+	TestEqual(TEXT("Clear center settles"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Settled);
+	TestTrue(TEXT("Clear center stays first choice"), FVector2D(Context.Pawn->GetActorLocation()).IsNearlyZero());
+
+	auto* Obstacle = Context.World->SpawnActor<AChunkWorldReadinessTestSurface>();
+	Obstacle->FindComponentByClass<UBoxComponent>()->SetBoxExtent(FVector(40.0, 40.0, 1500.0));
+	Settle();
+	TestEqual(TEXT("Penetrating center uses bounded fallback"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Settled);
+	const FVector Position = Context.Pawn->GetActorLocation();
+	TestTrue(TEXT("Fallback clears center obstacle"), FMath::Abs(Position.X) >= 60.0 || FMath::Abs(Position.Y) >= 60.0);
+	TestTrue(TEXT("Whole capsule stays inside source XY"), FMath::Abs(Position.X) <= 280.0 && FMath::Abs(Position.Y) <= 280.0);
+	Obstacle->Destroy();
+
+	auto* Pending = Context.World->SpawnActor<AChunkWorldReadinessTestPawn>();
+	AddCapsule(Pending)->SetCapsuleSize(40.0f, 80.0f);
+	Pending->SetActorLocation(FVector(0.0, 0.0, -500.0));
+	Context.ChunkWorld->AddChunkWorldWalker(Pending->GetTestWalker());
+	Pending->GetTestFreeze()->StartRuntimeReadinessSession(Context.ChunkWorld, Region, false, {});
+	Settle();
+	TestEqual(TEXT("Pending occupant still permits clear alternative"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Settled);
+	TestTrue(TEXT("Larger pending capsule reserves XY even below terrain with collision disabled"), Context.Pawn->GetActorLocation().SizeSquared2D() >= 3600.0);
+	Pending->Destroy();
+
+	Floor->SetActorRotation(FRotator(60.0, 0.0, 0.0));
+	Settle();
+	TestEqual(TEXT("Steep support cannot release the pawn"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Failed);
+	Floor->SetActorRotation(FRotator::ZeroRotator);
+	Region.Maximum.Z = 170.0;
+	Settle();
+	TestEqual(TEXT("Insufficient bounded headroom fails closed"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Failed);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FChunkWorldRuntimeCollisionCoverageTest,
+	"PorismExtension.ChunkWorld.ReadinessFreeze.Runtime.CollisionCoverage",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FChunkWorldRuntimeCollisionCoverageTest::RunTest(const FString& Parameters)
+{
+	FRuntimeReadinessTestContext Context;
+	if (!TestTrue(TEXT("Authority world initializes"), Context.Initialize())) return false;
+	Context.ChunkWorld->StopGen();
+	Context.ChunkWorld->WorldGenDef->WorldChunks[0].Collision = true;
+	Context.ChunkWorld->UseChunkAutoRefresh = false;
+	Context.ChunkWorld->StartGen();
+	Context.ChunkWorld->AddChunkWorldWalker(Context.Pawn->GetTestWalker());
+	Context.World->SpawnActor<AChunkWorldReadinessTestSurface>();
+	Context.Pawn->SetActorLocation(FVector(8.0, 8.0, 100.0));
+	auto* Freeze = Context.Pawn->GetTestFreeze();
+	Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), false, {});
+	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Freeze->GetRuntimeReadinessSession().ReadinessId);
+	TestEqual(TEXT("Original walker receipt cannot approve an unloaded collision column"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::WaitingForServerReady);
+	TestTrue(TEXT("Wait identifies collision coverage"), Freeze->GetRuntimeReadinessSession().DebugReason.Contains(TEXT("CollisionPending=1")));
+	// Publish an empty native collision cell around the eventual body, distinct from the
+	// original walker's cell. The scene box supplies support; this receipt proves empty headroom.
+	Context.ChunkWorld->MaxPriTasks = 0;
+	Context.ChunkWorld->MaxSecTasks = 0;
+	STarget Target{};
+	Target.Pos = FIntVector(8, 8, 24);
+	Context.ChunkWorld->CheckChunkPos(Target, FIntVector(0, 0, 1), -1, nullptr, nullptr, 0, Context.ChunkWorld->WorldChunks.back());
+	CChunk* const Chunk = Context.ChunkWorld->ChunkStack.Data[0][0].Chunk;
+	Freeze->Advance();
+	TestEqual(TEXT("An allocated cell without collision commit remains pending"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::WaitingForServerReady);
+	Chunk->IsReady = true;
+	{
+		std::lock_guard<std::mutex> Updates(Context.ChunkWorld->ChunkUpdateCalls.Mutex);
+		Context.ChunkWorld->ChunkUpdateCalls.Data[0].push_back(FIntVector(0, 0, 1));
+	}
+	Freeze->Advance();
+	TestEqual(TEXT("Queued terrain edit invalidates otherwise ready collision"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::WaitingForServerReady);
+	{
+		std::lock_guard<std::mutex> Updates(Context.ChunkWorld->ChunkUpdateCalls.Mutex);
+		Context.ChunkWorld->ChunkUpdateCalls.Data[0].clear();
+	}
+	Freeze->Advance();
+	TestEqual(TEXT("Native empty-collision readiness completes body clearance"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Settled);
+	Chunk->IsReady = false;
+	Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), false, {});
+	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Freeze->GetRuntimeReadinessSession().ReadinessId);
+	FindFProperty<FFloatProperty>(UChunkWorldReadinessFreezeComponent::StaticClass(), TEXT("RuntimeSettlementCollisionTimeoutSeconds"))->SetPropertyValue_InContainer(Freeze, 0.0f);
+	Freeze->Advance();
+	TestEqual(TEXT("Collision wait has a terminal bound"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Failed);
+	TestTrue(TEXT("Timeout does not release to visible but incomplete scene geometry"), Freeze->GetRuntimeReadinessSession().DebugReason.Contains(TEXT("collision wait expired")));
+
+	Chunk->IsReady = true;
+	FChunkWorldSpawnRegion ClientRegion;
+	ClientRegion.Minimum = FVector(1.0, 1.0, 17.0);
+	ClientRegion.Maximum = FVector(31.0, 15.0, 31.0);
+	Freeze->OnOwningClientRuntimeReady.AddDynamic(Context.Controller, &AChunkWorldReadinessTestController::CountClientReady);
+	TestTrue(TEXT("Fixture observes the locally controlled readiness path"), Context.Pawn->IsLocallyControlled());
+	Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, ClientRegion, true, {});
+	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Freeze->GetRuntimeReadinessSession().ReadinessId);
+	TestEqual(TEXT("Client cannot acknowledge while a fallback cell is missing"), Context.Controller->ClientReadyCount, 0);
+	Target.Pos = FIntVector(24, 8, 24);
+	const FIntVector NeighborKey(1, 0, 1);
+	Context.ChunkWorld->CheckChunkPos(Target, NeighborKey, -1, nullptr, nullptr, 0, Context.ChunkWorld->WorldChunks.back());
+	for (auto& Bucket : Context.ChunkWorld->ChunkStack.Data)
+		for (auto& Entry : Bucket)
+			if (Entry.ChunkIndex == NeighborKey) Entry.Chunk->IsReady = true;
+	Freeze->Advance();
+	TestEqual(TEXT("Complete client search footprint publishes acknowledgement"), Context.Controller->ClientReadyCount, 1);
+	Freeze->Advance();
+	TestEqual(TEXT("Coverage acknowledgement publishes only once"), Context.Controller->ClientReadyCount, 1);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FChunkWorldRuntimeReadinessContractDefaultsTest,
 	"PorismExtension.ChunkWorld.ReadinessFreeze.Runtime.Contracts.Defaults",
@@ -89,7 +229,7 @@ bool FChunkWorldRuntimeReadinessContractDefaultsTest::RunTest(const FString& Par
 		return false;
 	}
 
-	TestFalse(TEXT("No owner/authority context rejects runtime session start"), Freeze->StartRuntimeReadinessSession(nullptr, MakeRegion(), true).IsValid());
+	TestFalse(TEXT("No owner/authority context rejects runtime session start"), Freeze->StartRuntimeReadinessSession(nullptr, MakeRegion(), true, {}).IsValid());
 	TestEqual(TEXT("Rejected start leaves session inactive"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Inactive);
 	return true;
 }
@@ -109,7 +249,7 @@ bool FChunkWorldRuntimeReadinessInvalidAcknowledgementTest::RunTest(const FStrin
 	}
 
 	UChunkWorldReadinessTestFreezeComponent* const Freeze = Context.Pawn->GetTestFreeze();
-	const FGuid SessionId = Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), true);
+	const FGuid SessionId = Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), true, {});
 	TestTrue(TEXT("Authority starts a bounded player session"), SessionId.IsValid());
 	TestEqual(TEXT("Session binds exact registered owner walker"), Freeze->GetRuntimeReadinessSession().TrackedWalker.Get(), static_cast<UObject*>(Context.Pawn->GetTestWalker()));
 	TestFalse(TEXT("Wrong session acknowledgement is rejected without poisoning active session"), Freeze->AcknowledgeOwningClientRuntimeReady(Context.Controller, FGuid::NewGuid(), Freeze->GetRuntimeReadinessSession().ReadinessId));
@@ -155,7 +295,7 @@ bool FChunkWorldRuntimeReadinessServerSettlementTest::RunTest(const FString& Par
 	UChunkWorldReadinessTestFreezeComponent* const Freeze = Context.Pawn->GetTestFreeze();
 	Freeze->ApplyStartupFreeze();
 	TestTrue(TEXT("Startup freeze is active before runtime settlement"), Freeze->IsStartupFreezeActive());
-	const FGuid SessionId = Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), false);
+	const FGuid SessionId = Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), false, {});
 	TestTrue(TEXT("Authority starts server-only session"), SessionId.IsValid());
 	auto* Layout = Context.ChunkWorld->GetLayoutRuntimeComponent();
 	Layout->QueueObservedLoadedChunk(Context.ChunkWorld->UEWorldPosToBlockWorldPos(Context.Pawn->GetActorLocation()), 0);
@@ -178,6 +318,81 @@ bool FChunkWorldRuntimeReadinessServerSettlementTest::RunTest(const FString& Par
 	TestFalse(TEXT("Runtime settlement releases lingering startup freeze"), Freeze->IsStartupFreezeActive());
 	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Freeze->GetRuntimeReadinessSession().ReadinessId);
 	TestEqual(TEXT("Duplicate ready event cannot reopen or release twice"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Settled);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FChunkWorldRuntimeReadinessOffsetCapsuleTest,
+	"PorismExtension.ChunkWorld.ReadinessFreeze.Runtime.OffsetCapsule",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FChunkWorldRuntimeReadinessOffsetCapsuleTest::RunTest(const FString& Parameters)
+{
+	FRuntimeReadinessTestContext Context;
+	if (!TestTrue(TEXT("Authority world initializes"), Context.Initialize())) return false;
+	Context.World->SpawnActor<AChunkWorldReadinessTestSurface>();
+	Context.Pawn->SetActorTransform(FTransform(FRotator(0.0, 90.0, 0.0), FVector(0.0, -200.0, 100.0)));
+	UCapsuleComponent* Capsule = NewObject<UCapsuleComponent>(Context.Pawn);
+	Capsule->InitCapsuleSize(20.0f, 80.0f);
+	Capsule->SetupAttachment(Context.Pawn->GetRootComponent());
+	Capsule->SetRelativeLocation(FVector(200.0, 0.0, 80.0));
+	Capsule->RegisterComponent();
+	UChunkWorldReadinessTestFreezeComponent* Freeze = Context.Pawn->GetTestFreeze();
+	const FGuid SessionId = Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), false, {});
+	TestTrue(TEXT("Offset capsule starts a session"), SessionId.IsValid());
+	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Freeze->GetRuntimeReadinessSession().ReadinessId);
+	TestEqual(TEXT("Collision center inside region settles even with actor origin outside"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Settled);
+	TestTrue(TEXT("Floor-based actor origin stays at surface instead of capsule half-height"), Context.Pawn->GetActorLocation().Z >= 20.0 && Context.Pawn->GetActorLocation().Z < 30.0);
+	TestTrue(TEXT("Heading survives settlement"), Context.Pawn->GetActorRotation().Equals(FRotator(0.0, 90.0, 0.0), 0.001));
+	TestTrue(TEXT("Horizontal actor offset survives settlement"), FMath::IsNearlyEqual(Context.Pawn->GetActorLocation().Y, -200.0, 0.001));
+
+	FChunkWorldSpawnFacing Facing;
+	Facing.bFaceTarget = true;
+	Facing.Target = FVector(0.0, 1000.0, 5000.0);
+	// Body yaw +90 represents an inverse-tracking offset from provisional view yaw zero.
+	TestTrue(TEXT("Target-facing offset capsule starts"), Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), false, Facing).IsValid());
+	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Freeze->GetRuntimeReadinessSession().ReadinessId);
+	TestEqual(TEXT("Target-facing session settles"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Settled);
+	TestTrue(TEXT("Heading delta preserves inverse-tracking offset"), Context.Pawn->GetActorRotation().Equals(FRotator(0.0, 180.0, 0.0), 0.001));
+	const FVector Center = Capsule->CalcBounds(Capsule->GetComponentTransform()).Origin;
+	TestTrue(TEXT("Facing leaves approved physical capsule XY unchanged"), FVector2D(Center).IsNearlyZero(0.001));
+	TestTrue(TEXT("Target elevation cannot tilt capsule"), FMath::IsNearlyZero(Context.Pawn->GetActorRotation().Pitch));
+	const FTransform Settled = Context.Pawn->GetActorTransform();
+	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Freeze->GetRuntimeReadinessSession().ReadinessId);
+	TestTrue(TEXT("Duplicate readiness cannot rotate again"), Context.Pawn->GetActorTransform().Equals(Settled));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FChunkWorldRuntimeReadinessCapsuleHeightsTest,
+	"PorismExtension.ChunkWorld.ReadinessFreeze.Runtime.CapsuleStartingHeights",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+/** Capsule-center and floor-origin pawns must settle to the same floor from either side of it. */
+bool FChunkWorldRuntimeReadinessCapsuleHeightsTest::RunTest(const FString& Parameters)
+{
+	FRuntimeReadinessTestContext Context;
+	if (!TestTrue(TEXT("Authority world initializes"), Context.Initialize())) return false;
+	Context.World->SpawnActor<AChunkWorldReadinessTestSurface>();
+	UCapsuleComponent* Capsule = NewObject<UCapsuleComponent>(Context.Pawn);
+	Capsule->InitCapsuleSize(20.0f, 80.0f);
+	Capsule->SetupAttachment(Context.Pawn->GetRootComponent());
+	Capsule->RegisterComponent();
+	UChunkWorldReadinessTestFreezeComponent* Freeze = Context.Pawn->GetTestFreeze();
+	for (const double CapsuleOffset : {0.0, 80.0})
+	{
+		Capsule->SetRelativeLocation(FVector(0.0, 0.0, CapsuleOffset));
+		for (const double StartingZ : {-200.0, 20.0, 500.0})
+		{
+			Context.Pawn->SetActorLocation(FVector(0.0, 0.0, StartingZ));
+			TestTrue(TEXT("Bounded height case starts"), Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), false, {}).IsValid());
+			Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Freeze->GetRuntimeReadinessSession().ReadinessId);
+			TestEqual(TEXT("Above/on/below floor settles"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Settled);
+			const double BottomZ = Capsule->CalcBounds(Capsule->GetComponentTransform()).Origin.Z - Capsule->GetScaledCapsuleHalfHeight();
+			TestTrue(TEXT("Actual capsule bottom has native floor clearance"), FMath::IsNearlyEqual(BottomZ, 20.0 + UCharacterMovementComponent::MIN_FLOOR_DIST, 0.1));
+			const FCollisionQueryParams ClearanceParams(SCENE_QUERY_STAT(SettlementHeightClearance), false, Context.Pawn);
+			TestFalse(TEXT("Settled capsule does not penetrate floor"), Context.World->OverlapBlockingTestByProfile(
+				Capsule->CalcBounds(Capsule->GetComponentTransform()).Origin, FQuat::Identity, TEXT("BlockAll"), FCollisionShape::MakeCapsule(20.0f, 80.0f), ClearanceParams));
+		}
+	}
 	return true;
 }
 
@@ -323,7 +538,7 @@ bool FChunkWorldRuntimeReadinessClientAcknowledgementTest::RunTest(const FString
 	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	Context.World->SpawnActor<AChunkWorldReadinessTestSurface>(AChunkWorldReadinessTestSurface::StaticClass(), FTransform::Identity, SpawnParameters);
 	UChunkWorldReadinessTestFreezeComponent* const Freeze = Context.Pawn->GetTestFreeze();
-	const FGuid SessionId = Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), true);
+	const FGuid SessionId = Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), true, {});
 	TestTrue(TEXT("Authority starts client-acknowledged player session"), SessionId.IsValid());
 	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Freeze->GetRuntimeReadinessSession().ReadinessId);
 	TestEqual(TEXT("Server remains frozen while waiting for client acknowledgement"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::WaitingForClientReady);
@@ -350,7 +565,7 @@ bool FChunkWorldRuntimeReadinessInvalidTraceProfileTest::RunTest(const FString& 
 
 	UChunkWorldReadinessTestFreezeComponent* const Freeze = Context.Pawn->GetTestFreeze();
 	Freeze->SetSettlementCollisionProfile(TEXT("MissingRuntimeSettlementProfile"));
-	const FGuid SessionId = Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), false);
+	const FGuid SessionId = Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), false, {});
 	TestTrue(TEXT("Authority starts invalid-profile session"), SessionId.IsValid());
 	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Freeze->GetRuntimeReadinessSession().ReadinessId);
 	TestEqual(TEXT("Invalid profile retains structured trace failure"), Freeze->GetRuntimeReadinessSession().Failure, EChunkWorldRuntimeReadinessFailure::InvalidTraceProfile);
@@ -373,7 +588,7 @@ bool FChunkWorldRuntimeReadinessNoSurfaceTest::RunTest(const FString& Parameters
 	}
 
 	UChunkWorldReadinessTestFreezeComponent* const Freeze = Context.Pawn->GetTestFreeze();
-	const FGuid SessionId = Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), false);
+	const FGuid SessionId = Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), false, {});
 	TestTrue(TEXT("Authority starts no-surface session"), SessionId.IsValid());
 	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Freeze->GetRuntimeReadinessSession().ReadinessId);
 	TestEqual(TEXT("No surface retains structured failure"), Freeze->GetRuntimeReadinessSession().Failure, EChunkWorldRuntimeReadinessFailure::NoSettledSurface);
@@ -397,7 +612,7 @@ bool FChunkWorldRuntimeReadinessTimeoutTest::RunTest(const FString& Parameters)
 
 	UChunkWorldReadinessTestFreezeComponent* const Freeze = Context.Pawn->GetTestFreeze();
 	Freeze->SetClientReadyTimeout(0.0f);
-	const FGuid SessionId = Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), true);
+	const FGuid SessionId = Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), true, {});
 	TestTrue(TEXT("Authority starts timeout session"), SessionId.IsValid());
 	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Freeze->GetRuntimeReadinessSession().ReadinessId);
 	Freeze->Advance();
@@ -421,7 +636,7 @@ bool FChunkWorldRuntimeReadinessWorldTeardownTest::RunTest(const FString& Parame
 	}
 
 	UChunkWorldReadinessTestFreezeComponent* const Freeze = Context.Pawn->GetTestFreeze();
-	const FGuid SessionId = Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), false);
+	const FGuid SessionId = Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), false, {});
 	TestTrue(TEXT("Authority starts teardown session"), SessionId.IsValid());
 	Context.ChunkWorld->Destroy();
 	Freeze->Advance();
@@ -445,7 +660,7 @@ bool FChunkWorldRuntimeReadinessCancelTest::RunTest(const FString& Parameters)
 	}
 
 	UChunkWorldReadinessTestFreezeComponent* const Freeze = Context.Pawn->GetTestFreeze();
-	const FGuid SessionId = Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), false);
+	const FGuid SessionId = Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), false, {});
 	TestTrue(TEXT("Authority starts server-only session"), SessionId.IsValid());
 	TestTrue(TEXT("Matching session cancels"), Freeze->CancelRuntimeReadinessSession(SessionId));
 	TestEqual(TEXT("Canceled session stays terminal"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Canceled);
@@ -469,7 +684,7 @@ bool FChunkWorldRuntimeReadinessWalkerRebindTest::RunTest(const FString& Paramet
 
 	UChunkWorldReadinessTestFreezeComponent* const Freeze = Context.Pawn->GetTestFreeze();
 	Context.ChunkWorld->RemoveChunkWorldWalker(Context.Pawn->GetTestWalker());
-	const FGuid SessionId = Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), false);
+	const FGuid SessionId = Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), false, {});
 	TestTrue(TEXT("Authority accepts late-walker session"), SessionId.IsValid());
 	TestEqual(TEXT("Session waits for missing exact walker"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::WaitingForWalker);
 	Context.ChunkWorld->AddChunkWorldWalker(Context.Pawn->GetTestWalker());

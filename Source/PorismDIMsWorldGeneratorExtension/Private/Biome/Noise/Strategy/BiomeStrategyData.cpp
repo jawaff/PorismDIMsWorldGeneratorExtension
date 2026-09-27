@@ -284,6 +284,13 @@ namespace
 		for (FReservationDefinition& Reservation : Reservations)
 		{
 			bChanged = EnsureReservationPayloadForType(Reservation.ReservationType, Reservation.ReservationPayload) || bChanged;
+			UScriptStruct* FacingType = Reservation.SpawnFacingMode == EReservationSpawnFacing::FixedPoint
+				? FReservationSpawnPointPayload::StaticStruct() : FReservationSpawnRotationPayload::StaticStruct();
+			if (Reservation.SpawnFacingPayload.GetScriptStruct() != FacingType)
+			{
+				Reservation.SpawnFacingPayload.InitializeAs(FacingType);
+				bChanged = true;
+			}
 		}
 		return bChanged;
 	}
@@ -1473,6 +1480,8 @@ namespace
 		OutField.DebugName = Reservation.DebugName;
 		OutField.BiomeTag = Reservation.BiomeTag;
 		OutField.FieldKind = FieldKind;
+		OutField.SpawnFacingMode = Reservation.SpawnFacingMode;
+		OutField.SpawnFacingPayload = Reservation.SpawnFacingPayload;
 		OutField.DebugPath = FString::Printf(
 			TEXT("%s.Reservations[%s].%s"),
 			*ProviderInstance.DebugPath,
@@ -2384,6 +2393,17 @@ FBiomeStrategyValidationResult UBiomeStrategyData::ValidateStrategy() const
 		const FString& ReservationPath,
 		const FFoundationProviderQueryCapabilities& ProviderCapabilities) -> void
 	{
+		if (Reservation.bEnableSpawnReservation)
+		{
+			const auto* Rotation = Reservation.SpawnFacingPayload.GetPtr<FReservationSpawnRotationPayload>();
+			const auto* Point = Reservation.SpawnFacingPayload.GetPtr<FReservationSpawnPointPayload>();
+			const bool bValidFacing = (Reservation.SpawnFacingMode == EReservationSpawnFacing::FixedRotation && Rotation && FMath::IsFinite(Rotation->Yaw))
+				|| (Reservation.SpawnFacingMode == EReservationSpawnFacing::FixedPoint && Point && !Point->Target.ContainsNaN());
+			if (!bValidFacing)
+			{
+				AddError(ReservationPath, TEXT("Spawn facing payload is mismatched or nonfinite."), TEXT("Choose the matching fixed rotation or fixed point payload with finite coordinates."));
+			}
+		}
 		if (Reservation.DebugName.IsNone())
 		{
 			AddError(

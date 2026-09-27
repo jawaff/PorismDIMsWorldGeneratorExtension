@@ -81,4 +81,11 @@ UCLASS()
 class AChunkWorldReadinessTestController final : public AController
 {
 	GENERATED_BODY()
+
+public:
+	int32 ClientReadyCount = 0;
+
+	/** Observes local publication in transient worlds without initialized actors; does not send a network acknowledgement. */
+	UFUNCTION(CallInEditor)
+	void CountClientReady(FGuid SessionId, FGuid ReadinessId) { ++ClientReadyCount; }
 };

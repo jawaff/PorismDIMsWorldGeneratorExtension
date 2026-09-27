@@ -109,13 +109,6 @@ public:
 	 */
 	AChunkWorldExtended();
 
-	/** Validate a storage identity without normalizing it into a different name or touching disk.
-	 *  Accepts 1-64 ASCII letters/digits/underscore/hyphen, excluding Windows device names. */
-	static bool ValidateWorldStorageName(const FString& Name, FString& OutError);
-
-	/** Authored identity; the storage lifecycle captures its own immutable copy for each run. */
-	const FString& GetWorldStorageName() const { return WorldStorageName; }
-
 	/**
 	 * Sizes chunk-world custom-data storage from the active schema registry before Porism compiles runtime config.
 	 */
@@ -133,12 +126,13 @@ public:
 	 */
 	bool PrepareRuntimeWorldGenDefForGeneration();
 
-	/**
-	 * Starts generation and then rebuilds the schema lookup maps once the world indexes are available.
-	 */
+	/** Starts a fresh generation with unique disposable save/cache paths and automatic disk eviction.
+	 * Stops any preceding run first. Chunk unload/re-entry retains this run's stores and edits.
+	 * Authored SaveTarget/CacheTarget/AutoSave values cannot select persistent storage. */
 	virtual void StartGen() override;
 
-	/** Joins native generation, then clears all generation-owned layout state without deleting terrain saves/cache. */
+	/** Joins native generation and clears layout state, then deletes only this run's owned storage.
+	 * Unconfirmed partial-start shutdown or unsafe filesystem ownership retains the payload and blocks restart. */
 	virtual void StopGen() override;
 
 	/** Observes native create/update/delete independently of optional edit callbacks, preserving Blueprint behavior. May run on a worker. */
@@ -289,7 +283,7 @@ protected:
 	virtual TArray<FInstanceMeshInfos> OnChunkUpdateEdit_Implementation(FIntVector chunkBlockWorldPos, int detailLevel, UPARAM(ref) TArray<FInstanceMeshInfos>& newMeshInstances) override;
 
 #if WITH_EDITOR
-	/** Storage identity is authored only while generation is stopped. */
+	/** Native storage settings are derived outputs of the disposable lifecycle, not authored retention controls. */
 	virtual bool CanEditChange(const FProperty* InProperty) const override;
 
 	/** Debug switches do not reconstruct the actor, so their pre-edit must not unregister its ticking/rendering components. */
@@ -303,8 +297,17 @@ protected:
 	virtual void PostLoad() override;
 
 private:
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chunk World|Storage", meta = (AllowPrivateAccess = "true", ToolTip = "Storage policy identity: Default selects a disposable session; another valid name selects a retained world. Default cleanup includes a real editor regeneration. Use 1-64 ASCII letters, digits, underscores or hyphens, excluding Windows device names. Changing names is not Save As and copies no terrain. Stop generation before editing. Retention requires the session-storage lifecycle; name validation alone does not change existing save/cache behavior."))
-	FString WorldStorageName = TEXT("Default");
+	/** Allocates an exclusively new run directory. Never adopts legacy or crashed-run files. */
+	bool CreateSessionStorage();
+
+	/** Removes only captured owned storage after native writers have closed; failures remain isolated. */
+	void ReleaseSessionStorage();
+
+	// Not serialized or replicated: each local generator owns its own disk namespace.
+	FString SessionStorageDirectory;
+	bool bSessionWritersMayExist = false;
+	bool bStartingGeneration = false;
+	bool bStoppingGeneration = false;
 
 	struct FChunkWorldWalkerReadyState
 	{

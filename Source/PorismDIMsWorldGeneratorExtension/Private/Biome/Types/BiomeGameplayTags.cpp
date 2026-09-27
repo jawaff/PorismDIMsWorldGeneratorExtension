@@ -9,4 +9,8 @@ namespace BiomeGameplayTags
 	UE_DEFINE_GAMEPLAY_TAG(FoundationSecondary, "Biome.Foundation.Secondary");
 	UE_DEFINE_GAMEPLAY_TAG(Reservation, "Biome.Reservation");
 	UE_DEFINE_GAMEPLAY_TAG(ReservationCenter, "Biome.Reservation.Center");
+	UE_DEFINE_GAMEPLAY_TAG(ReservationSpawnMain, "Biome.Reservation.Spawn.Main");
+	UE_DEFINE_GAMEPLAY_TAG(ReservationSpawnNoTeam, "Biome.Reservation.Spawn.NoTeam");
+	UE_DEFINE_GAMEPLAY_TAG(ReservationSpawnTeam1, "Biome.Reservation.Spawn.Team1");
+	UE_DEFINE_GAMEPLAY_TAG(ReservationSpawnTeam2, "Biome.Reservation.Spawn.Team2");
 }

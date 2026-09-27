@@ -94,6 +94,13 @@ private:
 		uint64 TerminalSequence = 0;
 	};
 
+	/** A location assignment outlives its ticket, but never keeps its request owner alive. */
+	struct FReservationAssignment
+	{
+		FGuid StableSubjectId;
+		TWeakObjectPtr<UObject> Owner;
+	};
+
 	/** Retains one short-lived provider-query result so equivalent pending tickets do not repeat an expensive worldgen query. */
 	struct FCandidateQueryCacheEntry
 	{
@@ -198,6 +205,9 @@ private:
 	/** Maximum terminal ticket results retained for polling. Oldest terminal records are removed before a new terminal result is stored. */
 	UPROPERTY(EditAnywhere, Category = "Chunk World|Spawn", meta = (ClampMin = "1", UIMin = "1", ToolTip = "Maximum completed, failed, or canceled ticket results retained for polling. Pending tickets are never evicted by this limit."))
 	int32 MaximumRetainedTerminalTickets = 128;
+
+	/** World-local ReservationField source identities assigned atomically before result publication. */
+	TMap<FName, FReservationAssignment> ReservationAssignments;
 
 	/** Ticket records owned solely by this component. */
 	TMap<FGuid, FSpawnTicketRecord> TicketRecords;

@@ -21,4 +21,16 @@ namespace BiomeGameplayTags
 
 	/** Center reservation biome for central surface anchors or primary build pockets. */
 	PORISMDIMSWORLDGENERATOREXTENSION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(ReservationCenter);
+
+	/** Reservation tag for primary spawn locations. */
+	PORISMDIMSWORLDGENERATOREXTENSION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(ReservationSpawnMain);
+
+	/** Reservation tag for team-independent spawn locations. Does not assign a participant team. */
+	PORISMDIMSWORLDGENERATOREXTENSION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(ReservationSpawnNoTeam);
+
+	/** Reservation tag for team 1 spawn locations. Gameplay owns team-based spawn eligibility. */
+	PORISMDIMSWORLDGENERATOREXTENSION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(ReservationSpawnTeam1);
+
+	/** Reservation tag for team 2 spawn locations. Gameplay owns team-based spawn eligibility. */
+	PORISMDIMSWORLDGENERATOREXTENSION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(ReservationSpawnTeam2);
 }

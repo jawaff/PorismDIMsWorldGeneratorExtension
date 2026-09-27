@@ -170,6 +170,10 @@ struct PORISMDIMSWORLDGENERATOREXTENSION_API FChunkWorldSpawnRequest
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Chunk World|Spawn", meta = (ToolTip = "Opaque biome tags that a selected source must contain."))
 	FGameplayTagContainer RequiredBiomeTags;
 
+	/** Assign one reservation to this stable subject and owner until owner invalidation or world teardown. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Chunk World|Spawn", meta = (ToolTip = "Randomly assign an unclaimed ReservationField source, then reuse it for this stable subject and request owner. Requires a valid request owner and only the ReservationField family. Other subjects cannot use the assigned source. Disable for shared team spawn areas."))
+	bool bAssignUniqueReservation = false;
+
 	/** Optional world location used by origin-relative providers. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Chunk World|Spawn", meta = (ToolTip = "Optional world location used by origin-relative providers."))
 	FVector PreferredSearchOrigin = FVector::ZeroVector;
@@ -185,6 +189,27 @@ struct PORISMDIMSWORLDGENERATOREXTENSION_API FChunkWorldSpawnRequest
 	/** Allows lower-priority source fallback after a higher-priority source family has no valid candidate. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Chunk World|Spawn", meta = (ToolTip = "Allows lower-priority source fallback after a higher-priority source family has no valid candidate."))
 	bool bAllowLowerPrioritySourceFallback = false;
+};
+
+/** World-space facing carried from an exact source through creation and final settlement. */
+USTRUCT(BlueprintType)
+struct PORISMDIMSWORLDGENERATOREXTENSION_API FChunkWorldSpawnFacing
+{
+	GENERATED_BODY()
+
+	/** Provisional heading; also the deterministic coincident-target fallback. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chunk World|Spawn")
+	double Yaw = 0.0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chunk World|Spawn")
+	bool bFaceTarget = false;
+
+	/** Fixed world-space point, independent of candidate/settled position. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chunk World|Spawn")
+	FVector Target = FVector::ZeroVector;
+
+	/** Resolves upright yaw at Location. Rejects nonfinite input; coincident XY retains Yaw. */
+	bool ResolveYaw(const FVector& Location, double& OutYaw) const;
 };
 
 /** Preserves the finite source region approved for one spawn result and later runtime settlement. */
@@ -243,6 +268,10 @@ struct PORISMDIMSWORLDGENERATOREXTENSION_API FChunkWorldSpawnResult
 	/** Finite candidate region handed to game-owned runtime readiness settlement. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chunk World|Spawn", meta = (ToolTip = "Finite candidate region handed to game-owned runtime readiness settlement."))
 	FChunkWorldSpawnRegion ApprovedCandidateRegion;
+
+	/** Exact source target and provisional heading needed to retain view/body alignment at settlement. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chunk World|Spawn")
+	FChunkWorldSpawnFacing Facing;
 
 	/** Human-readable supplemental detail intended for logs and diagnostics. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chunk World|Spawn", meta = (ToolTip = "Human-readable supplemental detail intended for logs and diagnostics."))
@@ -332,6 +361,9 @@ struct PORISMDIMSWORLDGENERATOREXTENSION_API FChunkWorldSpawnCandidate
 
 	/** Deterministic theoretical location selected by the provider before destination chunks realize. Providers derive it from reservation/noise truth, never realized collision. */
 	FVector TheoreticalLocation = FVector::ZeroVector;
+
+	/** Facing supplied by this exact source, not a lookup by biome tag. */
+	FChunkWorldSpawnFacing Facing;
 
 	/** The theoretical terrain surface height used before destination chunks realize. Retained for compact diagnostics. */
 	double TheoreticalSurfaceZ = 0.0;

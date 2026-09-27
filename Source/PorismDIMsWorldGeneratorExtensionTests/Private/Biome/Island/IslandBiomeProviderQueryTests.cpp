@@ -314,6 +314,47 @@ bool FIslandBiomeFastNoiseResolvesLineMultiInstanceProviderTest::RunTest(const F
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIslandReservationFacingCopiesTest,
+	"PorismExtension.Biome.IslandNoise.ReservationFacingCopies",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FIslandReservationFacingCopiesTest::RunTest(const FString& Parameters)
+{
+	UBiomeStrategyData* Strategy = CreateLineMultiInstanceFoundationStrategy();
+	auto& Multi = Strategy->RootFoundationProvider.ProviderPayload.GetMutable<FMultiInstanceFoundationPayload>();
+	Multi.MinUniformScale = 1.5f;
+	Multi.MaxUniformScale = 1.5f;
+	auto& Reservation = Multi.PrototypeProvider.GetMutable<FFoundationProviderPrototypeDefinition>().Reservations[0];
+	Reservation.bEnableSpawnReservation = true;
+	Reservation.SpawnFacingPayload.GetMutable<FReservationSpawnRotationPayload>().Yaw = -75.0f;
+	TArray<FTaggedReservationField> Fields;
+	Strategy->QueryTaggedReservationFields(GetTransientPackage(), FBox(ForceInit), Fields);
+	int32 SpawnCount = 0;
+	for (const auto& Field : Fields)
+	{
+		if (Field.FieldKind != EReservationFieldKind::Spawn) continue;
+		++SpawnCount;
+		TestEqual(TEXT("Translated/scaled copy preserves authored heading"), Field.SpawnFacingPayload.Get<FReservationSpawnRotationPayload>().Yaw, -75.0f);
+	}
+	TestEqual(TEXT("Both provider copies expose spawn facing"), SpawnCount, 2);
+	Reservation.SpawnFacingMode = EReservationSpawnFacing::FixedPoint;
+	Reservation.SpawnFacingPayload.InitializeAs<FReservationSpawnPointPayload>();
+	const FVector SharedPoint(17.0, -31.0, 9.0);
+	Reservation.SpawnFacingPayload.GetMutable<FReservationSpawnPointPayload>().Target = SharedPoint;
+	Fields.Reset();
+	Strategy->QueryTaggedReservationFields(GetTransientPackage(), FBox(ForceInit), Fields);
+	SpawnCount = 0;
+	for (const auto& Field : Fields)
+	{
+		if (Field.FieldKind != EReservationFieldKind::Spawn) continue;
+		++SpawnCount;
+		TestEqual(TEXT("Repeated provider retains point mode"), Field.SpawnFacingMode, EReservationSpawnFacing::FixedPoint);
+		TestEqual(TEXT("Provider translation and scale never move shared target"), Field.SpawnFacingPayload.Get<FReservationSpawnPointPayload>().Target, SharedPoint);
+	}
+	TestEqual(TEXT("Both copies share target"), SpawnCount, 2);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FIslandBiomeFastNoiseMultiInstanceBiomeDomainGeneratesBothInstancesTest,
 	"PorismExtension.Biome.IslandNoise.MultiInstanceBiomeDomainGeneratesBothInstances",

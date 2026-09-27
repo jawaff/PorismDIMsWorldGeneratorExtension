@@ -421,70 +421,62 @@ void AChunkWorldExtended::ProcessEvent(UFunction* Function, void* Parms)
 
 void AChunkWorldExtended::StopGen()
 {
+	if (bStoppingGeneration) return;
+	TGuardValue<bool> Stopping(bStoppingGeneration, true);
+	const bool bNativeShutdownWillRun = GeneratorShouldBeOnline;
+	if (!SessionStorageDirectory.IsEmpty())
+	{
+		// Native managers capture paths, but metadata/shutdown may still read these mutable properties.
+		SaveTarget = SessionStorageDirectory / TEXT("Save/");
+		CacheTarget = SessionStorageDirectory / TEXT("Cache/");
+		AutoSave = true;
+	}
 	Super::StopGen();
+	if (bNativeShutdownWillRun && !GeneratorShouldBeOnline && !IsRunning() && ThreadPool == nullptr)
+	{
+		bSessionWritersMayExist = false;
+	}
 	if (LayoutRuntimeComponent != nullptr)
 	{
 		LayoutRuntimeComponent->ResetResolvedLayoutRecords(true);
 	}
-}
-
-bool AChunkWorldExtended::ValidateWorldStorageName(const FString& Name, FString& OutError)
-{
-	OutError.Reset();
-	if (Name.IsEmpty() || Name.Len() > 64)
-	{
-		OutError = TEXT("Storage name must contain 1-64 characters.");
-		return false;
-	}
-	for (const TCHAR Character : Name)
-	{
-		if (!((Character >= TEXT('A') && Character <= TEXT('Z'))
-			|| (Character >= TEXT('a') && Character <= TEXT('z'))
-			|| (Character >= TEXT('0') && Character <= TEXT('9'))
-			|| Character == TEXT('_') || Character == TEXT('-')))
-		{
-			OutError = TEXT("Storage name may contain only ASCII letters, digits, underscores and hyphens.");
-			return false;
-		}
-	}
-	if (Name.Equals(TEXT("CON"), ESearchCase::IgnoreCase)
-		|| Name.Equals(TEXT("PRN"), ESearchCase::IgnoreCase)
-		|| Name.Equals(TEXT("AUX"), ESearchCase::IgnoreCase)
-		|| Name.Equals(TEXT("NUL"), ESearchCase::IgnoreCase)
-		|| (Name.Len() == 4 && Name[3] >= TEXT('1') && Name[3] <= TEXT('9')
-			&& (Name.StartsWith(TEXT("COM"), ESearchCase::IgnoreCase) || Name.StartsWith(TEXT("LPT"), ESearchCase::IgnoreCase))))
-	{
-		OutError = TEXT("Storage name cannot be a Windows reserved device name.");
-		return false;
-	}
-	return true;
+	ReleaseSessionStorage();
 }
 
 void AChunkWorldExtended::StartGen()
 {
-	FString StorageNameError;
-	const bool bValidStorageName = ValidateWorldStorageName(WorldStorageName, StorageNameError);
-	if (bValidStorageName && !WorldStorageName.Equals(TEXT("Default"), ESearchCase::IgnoreCase))
+	if (bStartingGeneration || bStoppingGeneration) return;
+	TGuardValue<bool> Starting(bStartingGeneration, true);
+	// Reject the known early failure before native startup allocates its worker pool.
+	if (!WorldGenDef && !WorldGenDefType)
 	{
-		// Do not let an authored persistent identity silently reuse unrelated legacy save paths.
-		StorageNameError = TEXT("Named storage is not implemented yet; no persistent payload has been acquired.");
-	}
-	if (!StorageNameError.IsEmpty())
-	{
-		if (!IsRunning())
-		{
-			ResetWorldReadyStateTracking();
-		}
-		UE_LOG(LogChunkWorldExtended, Error, TEXT("Cannot start '%s': %s"), *GetName(), *StorageNameError);
+		UE_LOG(LogChunkWorldExtended, Error, TEXT("Cannot start '%s': no WorldGenDef or WorldGenDefType."), *GetName());
 		return;
 	}
+	if (GeneratorShouldBeOnline || IsRunning() || !SessionStorageDirectory.IsEmpty())
+	{
+		StopGen();
+	}
+	if (!SessionStorageDirectory.IsEmpty() || ThreadPool != nullptr)
+	{
+		UE_LOG(LogChunkWorldExtended, Error, TEXT("Cannot restart '%s': preceding session teardown is incomplete."), *GetName());
+		return;
+	}
+	if (!CreateSessionStorage()) return;
 	SyncBlockTypeSchemaRegistry();
 	ResetWorldReadyStateTracking();
 	if (!bStartingForCachedLayoutApply && LayoutRuntimeComponent != nullptr)
 	{
 		LayoutRuntimeComponent->ResetResolvedLayoutRecords(true);
 	}
+	bSessionWritersMayExist = true;
 	Super::StartGen();
+	if (!IsRunning())
+	{
+		// Native validation may already have called our StopGen. Never infer closure from IsRunning alone.
+		if (!SessionStorageDirectory.IsEmpty()) StopGen();
+		return;
+	}
 
 	if (BlockTypeSchemaComponent != nullptr)
 	{
@@ -839,8 +831,11 @@ void AChunkWorldExtended::PreEditChange(FProperty* PropertyThatWillChange)
 
 bool AChunkWorldExtended::CanEditChange(const FProperty* InProperty) const
 {
-	if (InProperty && InProperty->GetFName() == GET_MEMBER_NAME_CHECKED(AChunkWorldExtended, WorldStorageName)
-		&& IsRunning())
+	const FName Name = InProperty ? InProperty->GetFName() : NAME_None;
+	if (Name == GET_MEMBER_NAME_CHECKED(AChunkWorldExtended, SaveTarget)
+		|| Name == GET_MEMBER_NAME_CHECKED(AChunkWorldExtended, CacheTarget)
+		|| Name == GET_MEMBER_NAME_CHECKED(AChunkWorldExtended, AutoSave)
+		|| Name == GET_MEMBER_NAME_CHECKED(AChunkWorldExtended, UseCache))
 	{
 		return false;
 	}

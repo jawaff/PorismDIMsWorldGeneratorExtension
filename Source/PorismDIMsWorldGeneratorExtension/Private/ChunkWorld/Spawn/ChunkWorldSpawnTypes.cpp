@@ -2,6 +2,22 @@
 
 #include "ChunkWorld/Spawn/ChunkWorldSpawnTypes.h"
 
+bool FChunkWorldSpawnFacing::ResolveYaw(const FVector& Location, double& OutYaw) const
+{
+	if (!FMath::IsFinite(Yaw) || Location.ContainsNaN() || (bFaceTarget && Target.ContainsNaN())) return false;
+	OutYaw = FRotator::NormalizeAxis(Yaw);
+	if (bFaceTarget)
+	{
+		const FVector Direction = Target - Location;
+		if (Direction.ContainsNaN()) return false;
+		if (Direction.SizeSquared2D() > UE_SMALL_NUMBER)
+		{
+			OutYaw = FMath::RadiansToDegrees(FMath::Atan2(Direction.Y, Direction.X));
+		}
+	}
+	return true;
+}
+
 DEFINE_LOG_CATEGORY(LogChunkWorldSpawn);
 DEFINE_LOG_CATEGORY(LogChunkWorldSpawnOutOfWorld);
 
