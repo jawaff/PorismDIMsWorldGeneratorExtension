@@ -46,6 +46,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Block|ChunkWorld|Swap")
 	bool TrySetSwapActor(const FIntVector& BlockWorldPos, AActor* SwapActor);
 
+	/** Returns the actor currently associated with this exact block, including before presentation settles. */
+	AActor* GetSwapActorForBlock(const FIntVector& BlockWorldPos) const;
+
 	/** Resolves the represented mesh instance transform currently used for swap actor spawning. */
 	bool TryGetSwapTransformForBlock(const FIntVector& BlockWorldPos, FTransform& OutSwapTransform) const;
 

@@ -848,6 +848,12 @@ void UChunkWorldBlockSwapComponent::UpsertActiveSwap(const FReplicatedChunkWorld
 	ActiveSwaps.Add(SwapItem);
 }
 
+AActor* UChunkWorldBlockSwapComponent::GetSwapActorForBlock(const FIntVector& BlockWorldPos) const
+{
+	const auto* Item = FindActiveSwapByBlockWorldPos(BlockWorldPos);
+	return Item ? Item->SwapActor.Get() : nullptr;
+}
+
 FVector UChunkWorldBlockSwapComponent::GetParkingWorldOffsetValue() const
 {
 	return ParkingWorldOffset;

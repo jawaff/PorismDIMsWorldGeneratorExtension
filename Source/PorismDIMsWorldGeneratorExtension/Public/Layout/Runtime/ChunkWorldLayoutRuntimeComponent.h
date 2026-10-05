@@ -19,6 +19,17 @@
 class AChunkWorldExtended;
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnAutomaticLayoutWriteAttempt, AChunkWorldExtended*, const FBox&);
 
+/** One opt-in semantic block from successful layout writes; identity survives ordinary cache eviction. */
+struct PORISMDIMSWORLDGENERATOREXTENSION_API FLayoutBlockMarker
+{
+	FGuid PlacementId;
+	FLayoutId RootId;
+	FIntVector BlockWorldPos = FIntVector::ZeroValue;
+	FGameplayTag BlockType;
+};
+
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnLayoutBlockMarkersChanged, AChunkWorldExtended*);
+
 class ULayoutProfileAsset;
 class ULayoutWorldBindingAsset;
 class FLayoutActiveBiomeSampler;
@@ -385,6 +396,11 @@ public:
 	/** Game-thread write-attempt boundary, including failures that may have partially written.
 	 * Receivers invalidate old native receipts; this is not a native collision-complete signal. */
 	FOnAutomaticLayoutWriteAttempt OnAutomaticLayoutWriteAttempt;
+
+	/** Game-thread settled marker snapshot changed. Successful writes only; not collision/navigation readiness. */
+	FOnLayoutBlockMarkersChanged OnLayoutBlockMarkersChanged;
+	/** Late subscribers replay this small opt-in set rather than scanning generated chunks or retaining solve payloads. */
+	const TMap<FIntVector, FLayoutBlockMarker>& GetLayoutBlockMarkers() const { return LayoutBlockMarkers; }
 
 	/** Queues loaded coverage from any thread using a zero-based native layer index; grants no Created authority. */
 	void QueueObservedLoadedChunk(const FIntVector& ChunkBlockWorldPos, int32 DetailLevel);
@@ -879,6 +895,10 @@ private:
 	/** Cached deterministic site records keyed by stable root identity. Reservation cells remain site metadata, not cache identity. */
 	UPROPERTY(Transient)
 	TMap<FString, FResolvedLayoutSiteRecord> ResolvedSiteRecords;
+
+	/** Commits markers only after the complete site/connector write batch succeeds. */
+	void PublishLayoutBlockMarkers(FLayoutId RootId, const TSet<FIntVector>& Candidates);
+	TMap<FIntVector, FLayoutBlockMarker> LayoutBlockMarkers;
 
 	/** Stable planning-store keys for resolved site records that came from planning-window discovery. */
 	TMap<FString, FString> PlanningRecordKeysBySiteRecordKey;

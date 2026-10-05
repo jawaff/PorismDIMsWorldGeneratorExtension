@@ -61,6 +61,10 @@ struct FBlockDefinitionBase
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Definition", meta = (DisplayPriority = "6", ToolTip = "If true, this block ignores damage requests entirely."))
 	bool bInvincible = false;
+
+	/** Opt-in semantic marker published after a generated layout finishes its authoritative writes. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Definition", meta = (ToolTip = "Retain and publish this block's generated placement for gameplay consumers before nearby swap actors exist. Does not imply collision or navigation readiness."))
+	bool bPublishLayoutMarker = false;
 };
 
 /**

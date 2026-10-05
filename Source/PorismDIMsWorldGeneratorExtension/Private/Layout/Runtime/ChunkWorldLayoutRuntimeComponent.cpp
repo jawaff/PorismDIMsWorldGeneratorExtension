@@ -4,6 +4,7 @@
 #include "Layout/Runtime/ChunkWorldLayoutRuntimeComponent.h"
 
 #include "ChunkWorld/Actors/ChunkWorldExtended.h"
+#include "ChunkWorld/Components/BlockTypeSchemaComponent.h"
 #include "ChunkWorldStructs/ChunkStructureTemplate.h"
 #include "ChunkWorldStructs/ChunkWorldEnums.h"
 #include "ChunkWorldStructs/ChunkWorldStructs.h"
@@ -1674,7 +1675,8 @@ namespace
 		AChunkWorldExtended* ChunkWorld,
 		const FIntVector& AnchorBlockWorldPos,
 		const int32 YawRotationSteps,
-		FString& OutReport)
+		FString& OutReport,
+		TSet<FIntVector>& MarkerCandidates)
 	{
 		if (Template == nullptr || ChunkWorld == nullptr)
 		{
@@ -1693,6 +1695,17 @@ namespace
 		FString ValidationReport;
 		RuntimeTemplate->ValidateAndRemapForWorld(ChunkWorld, ValidationReport);
 		OutReport = ValidationReport;
+		auto* Schema = ChunkWorld->GetBlockTypeSchemaComponent();
+		TMap<int32, bool> MaterialMarkers, MeshMarkers;
+		const auto IsMarker = [Schema](const int32 Index, const bool bMesh, TMap<int32, bool>& Cache)
+		{
+			if (const bool* Found = Cache.Find(Index)) return *Found;
+			FBlockDefinitionBase Definition;
+			const bool bMarker = Schema && Schema->IsBlockDefinitionLookupReady()
+				&& (bMesh ? Schema->GetBlockDefinitionForMeshIndex(Index, Definition) : Schema->GetBlockDefinitionForMaterialIndex(Index, Definition))
+				&& Definition.bPublishLayoutMarker;
+			Cache.Add(Index, bMarker); return bMarker;
+		};
 
 		TArray<FIntVector> ClearWorldPositions;
 		TArray<int32> ClearBlockMaterials;
@@ -1742,6 +1755,7 @@ namespace
 				BlockWorldPositions.Add(
 					AnchorBlockWorldPos + RotateTemplateRelativeBlockPosYaw(Block.RelativeBlockPos, RuntimeTemplate->SizeInBlocks, NormalizedSteps));
 				BlockMaterials.Add(Block.MaterialIndex);
+				if (IsMarker(Block.MaterialIndex, false, MaterialMarkers)) MarkerCandidates.Add(BlockWorldPositions.Last());
 			}
 		}
 
@@ -1759,6 +1773,7 @@ namespace
 				MeshWorldPositions.Add(
 					AnchorBlockWorldPos + RotateTemplateRelativeBlockPosYaw(Mesh.RelativeBlockPos, RuntimeTemplate->SizeInBlocks, NormalizedSteps));
 				MeshData.Add(RotatedMeshData);
+				if (IsMarker(Mesh.MeshData.MeshId, true, MeshMarkers)) MarkerCandidates.Add(MeshWorldPositions.Last());
 			}
 		}
 
@@ -1784,7 +1799,8 @@ namespace
 		const FSoftObjectPath& TemplatePath,
 		const FIntVector& AnchorBlockWorldPos,
 		const int32 YawRotationSteps,
-		FString& OutFailureReason)
+		FString& OutFailureReason,
+		TSet<FIntVector>& MarkerCandidates)
 	{
 		UChunkStructureTemplate* const Template = Cast<UChunkStructureTemplate>(TemplatePath.TryLoad());
 		if (Template == nullptr)
@@ -1796,7 +1812,7 @@ namespace
 		}
 
 		FString PlacementReport;
-		if (!PlaceTemplateAtYawRotation(Template, ChunkWorld, AnchorBlockWorldPos, YawRotationSteps, PlacementReport))
+		if (!PlaceTemplateAtYawRotation(Template, ChunkWorld, AnchorBlockWorldPos, YawRotationSteps, PlacementReport, MarkerCandidates))
 		{
 			OutFailureReason = FString::Printf(
 				TEXT("Failed to place template path '%s' at anchor=%s. %s"),
@@ -1814,7 +1830,8 @@ namespace
 		ULayoutModuleAsset* Module,
 		const FIntVector& AnchorBlockWorldPos,
 		const int32 YawRotationSteps,
-		FString& OutFailureReason)
+		FString& OutFailureReason,
+		TSet<FIntVector>& MarkerCandidates)
 	{
 		if (Module == nullptr)
 		{
@@ -1833,7 +1850,7 @@ namespace
 		}
 
 		FString PlacementReport;
-		if (!PlaceTemplateAtYawRotation(Template, ChunkWorld, AnchorBlockWorldPos, YawRotationSteps, PlacementReport))
+		if (!PlaceTemplateAtYawRotation(Template, ChunkWorld, AnchorBlockWorldPos, YawRotationSteps, PlacementReport, MarkerCandidates))
 		{
 			OutFailureReason = FString::Printf(
 				TEXT("Failed to place module %s at anchor=%s. %s"),
@@ -1852,7 +1869,8 @@ namespace
 		const FLayoutPlacedModule& Placement,
 		const FIntVector& BundleAnchorBlockWorldPos,
 		const FIntVector& SharedCellSizeInBlocks,
-		FString& OutFailureReason)
+		FString& OutFailureReason,
+		TSet<FIntVector>& MarkerCandidates)
 	{
 		if (Placement.OccupiedLocalCells.Num() <= 1
 			|| Placement.LocalCellFaceRules.Num() != Placement.OccupiedLocalCells.Num())
@@ -1917,7 +1935,8 @@ namespace
 					ChunkWorld,
 					LeafAnchorBlockWorldPos,
 					LeafYawRotationSteps,
-					PlacementReport))
+					PlacementReport,
+					MarkerCandidates))
 			{
 				OutFailureReason = FString::Printf(
 					TEXT("Failed to realize frozen composite local cell %s at anchor=%s. %s"),
@@ -1936,7 +1955,8 @@ namespace
 		const FLayoutPlacedModule& Placement,
 		const FIntVector& BundleAnchorBlockWorldPos,
 		const FIntVector& SharedCellSizeInBlocks,
-		FString& OutFailureReason)
+		FString& OutFailureReason,
+		TSet<FIntVector>& MarkerCandidates)
 	{
 		if (Placement.OccupiedLocalCells.Num() > 1 && !Placement.LocalCellFaceRules.IsEmpty())
 		{
@@ -1945,7 +1965,8 @@ namespace
 				Placement,
 				BundleAnchorBlockWorldPos,
 				SharedCellSizeInBlocks,
-				OutFailureReason);
+				OutFailureReason,
+				MarkerCandidates);
 		}
 
 		// The payload selected by the proof wins over live/rehydrated carriers,
@@ -1953,7 +1974,7 @@ namespace
 		if (!Placement.TemplatePath.IsNull())
 		{
 			return TryPlaceSolvedTemplatePath(ChunkWorld, Placement.TemplatePath,
-				BundleAnchorBlockWorldPos, Placement.YawRotationSteps, OutFailureReason);
+				BundleAnchorBlockWorldPos, Placement.YawRotationSteps, OutFailureReason, MarkerCandidates);
 		}
 		if (Placement.Module != nullptr)
 		{
@@ -1962,7 +1983,8 @@ namespace
 				Placement.Module.Get(),
 				BundleAnchorBlockWorldPos,
 				Placement.YawRotationSteps,
-				OutFailureReason);
+				OutFailureReason,
+				MarkerCandidates);
 		}
 
 		if (Placement.CompositeModule == nullptr)
@@ -1997,7 +2019,8 @@ namespace
 				CompositeCell.Module.Get(),
 				LeafAnchorBlockWorldPos,
 				LeafYawRotationSteps,
-				OutFailureReason))
+				OutFailureReason,
+				MarkerCandidates))
 			{
 				OutFailureReason = FString::Printf(
 					TEXT("Failed to realize composite placement %s leaf %s at localCell=%s anchor=%s. %s"),
@@ -9428,6 +9451,11 @@ void UChunkWorldLayoutRuntimeComponent::ResetResolvedLayoutSiteRecords(const boo
 		RootSpacingReservations.Reset();
 		ResolvedSiteRecords.Reset();
 		PlanningRecordKeysBySiteRecordKey.Reset();
+		if (!LayoutBlockMarkers.IsEmpty())
+		{
+			LayoutBlockMarkers.Reset();
+			OnLayoutBlockMarkersChanged.Broadcast(GetOwningChunkWorld());
+		}
 		return;
 	}
 
@@ -12297,6 +12325,7 @@ bool UChunkWorldLayoutRuntimeComponent::TryRealizeSite(
 		return false;
 	}
 
+	TSet<FIntVector> MarkerCandidates;
 	{
 		PORISM_LAYOUT_PROFILE_SCOPE(Layout_Realization_TemplatePlacements, STAT_PorismLayout_TemplatePlacement);
 		for (const FLayoutPlacedModule& Placement : NormalizedSolvedPayload.SolveResult.Placements)
@@ -12359,7 +12388,8 @@ bool UChunkWorldLayoutRuntimeComponent::TryRealizeSite(
 			Placement,
 			AnchorBlockWorldPos,
 			SharedCellSizeInBlocks,
-			PlacementFailureReason))
+			PlacementFailureReason,
+			MarkerCandidates))
 		{
 			UE_LOG(LogTemp, Verbose, TEXT("[LayoutPipeline] Realization placement failed at cell=%s anchor=%s yaw=%d template=%s source=%s: %s"),
 				*Placement.Cell.ToString(), *AnchorBlockWorldPos.ToString(),
@@ -12417,6 +12447,7 @@ bool UChunkWorldLayoutRuntimeComponent::TryRealizeSite(
 		const FLayoutId RootSolveId = SiteRecord.GetRootPublicationMetadata().RootSolveId;
 		MarkRequiredChunkOriginsStamped(RequiredChunkOrigins, ArtifactId, RootSolveId);
 	}
+	PublishLayoutBlockMarkers(SiteRecord.RootSolveId, MarkerCandidates);
 
 	return true;
 }
@@ -12553,6 +12584,7 @@ bool UChunkWorldLayoutRuntimeComponent::TryRealizeConnector(
 		ConnectorRecord,
 		FrozenTerrainContractOverride->DiagnosticKind);
 
+	TSet<FIntVector> MarkerCandidates;
 	for (const FLayoutPlacedModule& Placement : ConnectorRecord.SolveResult.Placements)
 	{
 		const FLayoutRealizationTemplatePlacementEntry* WritePlanTemplateEntry = nullptr;
@@ -12590,7 +12622,8 @@ bool UChunkWorldLayoutRuntimeComponent::TryRealizeConnector(
 			Placement,
 			AnchorBlockWorldPos,
 			SharedCellSizeInBlocks,
-			PlacementFailureReason))
+			PlacementFailureReason,
+			MarkerCandidates))
 		{
 			SetFailureReason(FString::Printf(
 				TEXT("Failed to realize connector placement at cell=%s anchor=%s. %s"),
@@ -12601,7 +12634,27 @@ bool UChunkWorldLayoutRuntimeComponent::TryRealizeConnector(
 		}
 	}
 
+	PublishLayoutBlockMarkers(ConnectorRecord.SolvedArtifactId, MarkerCandidates);
 	return true;
+}
+
+void UChunkWorldLayoutRuntimeComponent::PublishLayoutBlockMarkers(const FLayoutId RootId, const TSet<FIntVector>& Candidates)
+{
+	auto* World = GetOwningChunkWorld();
+	auto* Schema = World ? World->GetBlockTypeSchemaComponent() : nullptr;
+	if (!World || !World->HasAuthority() || !Schema || !Schema->IsBlockDefinitionLookupReady()) return;
+	bool bChanged = false;
+	for (const FIntVector& Position : Candidates)
+	{
+		FGameplayTag Type; FBlockDefinitionBase Definition;
+		if (!Schema->GetBlockDefinitionForBlockWorldPos(Position, Type, Definition) || !Definition.bPublishLayoutMarker) continue;
+		const auto* Existing = LayoutBlockMarkers.Find(Position);
+		if (Existing && Existing->RootId == RootId && Existing->BlockType == Type) continue;
+		FLayoutBlockMarker Marker; Marker.PlacementId = FGuid::NewGuid(); Marker.RootId = RootId;
+		Marker.BlockWorldPos = Position; Marker.BlockType = Type;
+		LayoutBlockMarkers.Add(Position, MoveTemp(Marker)); bChanged = true;
+	}
+	if (bChanged) OnLayoutBlockMarkersChanged.Broadcast(World);
 }
 
 AChunkWorldExtended* UChunkWorldLayoutRuntimeComponent::GetOwningChunkWorld() const
