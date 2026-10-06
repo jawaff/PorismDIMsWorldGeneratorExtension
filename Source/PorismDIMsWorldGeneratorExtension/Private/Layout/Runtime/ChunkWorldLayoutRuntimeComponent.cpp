@@ -1,7 +1,7 @@
 // Copyright 2026 Spotted Loaf Studio
 
-#include "Layout/Types/LayoutId.h"
 #include "Layout/Runtime/ChunkWorldLayoutRuntimeComponent.h"
+#include "Layout/Types/LayoutId.h"
 
 #include "ChunkWorld/Actors/ChunkWorldExtended.h"
 #include "ChunkWorld/Components/BlockTypeSchemaComponent.h"

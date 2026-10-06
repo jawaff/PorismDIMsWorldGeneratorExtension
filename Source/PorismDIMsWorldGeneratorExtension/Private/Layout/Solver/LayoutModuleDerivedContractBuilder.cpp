@@ -1,7 +1,7 @@
 // Copyright 2026 Spotted Loaf Studio
 
-#include "Layout/Types/LayoutId.h"
 #include "Layout/Solver/LayoutModuleDerivedContractBuilder.h"
+#include "Layout/Types/LayoutId.h"
 
 #include "Layout/Solver/LayoutSolveSnapshotValidation.h"
 

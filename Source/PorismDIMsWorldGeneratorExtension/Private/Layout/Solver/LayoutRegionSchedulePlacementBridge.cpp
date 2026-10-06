@@ -1,7 +1,7 @@
 // Copyright 2026 Spotted Loaf Studio
 
-#include "Layout/Types/LayoutId.h"
 #include "LayoutRegionSchedulePlacementBridge.h"
+#include "Layout/Types/LayoutId.h"
 #include "LayoutSolveExecutionBudget.h"
 #include "Layout/Async/LayoutChildSolveHandoff.h"
 #include "Layout/Contracts/LayoutContractModeAdapter.h"

@@ -1,7 +1,7 @@
 // Copyright 2026 Spotted Loaf Studio
 
-#include "Layout/Types/LayoutId.h"
 #include "Layout/Runtime/LayoutWorldBindingRuntimeHelpers.h"
+#include "Layout/Types/LayoutId.h"
 
 #include "ChunkWorld/ChunkWorldCore.h"
 #include "Layout/Assets/LayoutProfileAsset.h"

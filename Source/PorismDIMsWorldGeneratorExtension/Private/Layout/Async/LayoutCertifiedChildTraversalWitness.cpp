@@ -1,7 +1,7 @@
 // Copyright 2026 Spotted Loaf Studio
 
-#include "Layout/Types/LayoutId.h"
 #include "Layout/Async/LayoutCertifiedChildTraversalWitness.h"
+#include "Layout/Types/LayoutId.h"
 
 FLayoutChildTraversalWitnessMappingArtifact LayoutCertifiedChildTraversalWitness::BuildExplicitTraversalWitnessArtifact(
 	const TArray<FLayoutId>& SelectedTraversalCapabilityIds)

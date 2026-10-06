@@ -1,7 +1,7 @@
 // Copyright 2026 Spotted Loaf Studio
 
-#include "Layout/Types/LayoutId.h"
 #include "Layout/Terrain/LayoutTerrainPathEvidence.h"
+#include "Layout/Types/LayoutId.h"
 
 bool LayoutTerrainPathEvidence::TryBuildProducedArtifact(
 	const FLayoutId ArtifactId,

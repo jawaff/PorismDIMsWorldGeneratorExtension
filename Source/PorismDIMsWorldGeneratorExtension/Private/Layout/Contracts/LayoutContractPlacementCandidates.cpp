@@ -1,7 +1,7 @@
 // Copyright 2026 Spotted Loaf Studio
 
-#include "Layout/Types/LayoutId.h"
 #include "Layout/Contracts/LayoutContractPlacementCandidates.h"
+#include "Layout/Types/LayoutId.h"
 
 #include "Layout/Planning/LayoutSiteReservation.h"
 

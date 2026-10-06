@@ -1,7 +1,7 @@
 // Copyright 2026 Spotted Loaf Studio
 
-#include "Layout/Types/LayoutId.h"
 #include "Layout/Terrain/LayoutTerrainSampling.h"
+#include "Layout/Types/LayoutId.h"
 
 #include "ChunkWorld/ChunkWorldCore.h"
 #include "Layout/Diagnostics/LayoutGenerationProfiling.h"

@@ -1,7 +1,7 @@
 // Copyright 2026 Spotted Loaf Studio
 
-#include "Layout/Types/LayoutId.h"
 #include "Layout/Solver/LayoutProfileSolver.h"
+#include "Layout/Types/LayoutId.h"
 #include "Layout/Solver/LayoutPlacementOccupancy.h"
 #include "Layout/Solver/LayoutProfileSolverInternal.h"
 #include "Layout/Solver/LayoutSolveExecutionBudget.h"

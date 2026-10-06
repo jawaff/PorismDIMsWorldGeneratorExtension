@@ -1,7 +1,7 @@
 // Copyright 2026 Spotted Loaf Studio
 
-#include "Layout/Types/LayoutId.h"
 #include "Layout/Terrain/LayoutPocketVoidEvidence.h"
+#include "Layout/Types/LayoutId.h"
 
 bool LayoutPocketVoidEvidence::TryBuildProducedArtifact(
 	const FLayoutId ArtifactId,

@@ -1,7 +1,7 @@
 // Copyright 2026 Spotted Loaf Studio
 
-#include "Layout/Types/LayoutId.h"
 #include "Layout/Contracts/LayoutContractModeAdapter.h"
+#include "Layout/Types/LayoutId.h"
 #include "Layout/Terrain/LayoutTerrainPlacementEvidence.h"
 
 namespace LayoutContractStandardAdapter

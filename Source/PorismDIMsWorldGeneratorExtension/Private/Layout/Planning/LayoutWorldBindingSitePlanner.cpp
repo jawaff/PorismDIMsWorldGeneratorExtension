@@ -1,7 +1,7 @@
 // Copyright 2026 Spotted Loaf Studio
 
-#include "Layout/Types/LayoutId.h"
 #include "Layout/Planning/LayoutWorldBindingSitePlanner.h"
+#include "Layout/Types/LayoutId.h"
 #include "Layout/Solver/LayoutStandaloneRegionRequestBuilder.h"
 
 #include "Biome/Noise/WorldGenScaleContext.h"

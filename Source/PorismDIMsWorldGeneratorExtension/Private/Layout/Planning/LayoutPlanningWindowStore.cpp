@@ -1,7 +1,7 @@
 // Copyright 2026 Spotted Loaf Studio
 
-#include "Layout/Types/LayoutId.h"
 #include "Layout/Planning/LayoutPlanningWindowStore.h"
+#include "Layout/Types/LayoutId.h"
 #include "Layout/Contracts/LayoutContractPipeline.h"
 #include "Layout/Runtime/LayoutRealizationWritePlan.h"
 
