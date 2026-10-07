@@ -861,6 +861,20 @@ void UChunkWorldReadinessFreezeComponent::TrySettleRuntimeSession()
 		RuntimeSession.State = EChunkWorldRuntimeReadinessState::WaitingForClientReady;
 		return;
 	}
+	if (RuntimeSettlementGate.IsBound())
+	{
+		const FGuid CheckedSession = RuntimeSession.SessionId;
+		FString Rejection;
+		const bool bAllowed = RuntimeSettlementGate.Execute(Rejection);
+		if (RuntimeSession.SessionId != CheckedSession || IsRuntimeSessionTerminal() || !IsValid(GetOwner())) return;
+		if (!bAllowed)
+		{
+			if (!Rejection.IsEmpty())
+				SetRuntimeTerminal(EChunkWorldRuntimeReadinessState::Failed, EChunkWorldRuntimeReadinessFailure::InvalidRequest, Rejection);
+			else RuntimeSession.State = EChunkWorldRuntimeReadinessState::WaitingForServerReady;
+			return;
+		}
+	}
 	FTransform SettledTransform;
 	EChunkWorldRuntimeReadinessFailure Failure = EChunkWorldRuntimeReadinessFailure::NoSettledSurface;
 	FString FailureReason;

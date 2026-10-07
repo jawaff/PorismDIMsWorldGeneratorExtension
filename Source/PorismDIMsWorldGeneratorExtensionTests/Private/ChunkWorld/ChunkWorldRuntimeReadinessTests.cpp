@@ -73,6 +73,48 @@ namespace
 	}
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FChunkWorldRuntimeSettlementGateTest,
+	"PorismExtension.ChunkWorld.ReadinessFreeze.Runtime.GameplaySettlementGate",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FChunkWorldRuntimeSettlementGateTest::RunTest(const FString& Parameters)
+{
+	FRuntimeReadinessTestContext Context;
+	if (!TestTrue(TEXT("Authority context"), Context.Initialize())) return false;
+	Context.World->SpawnActor<AChunkWorldReadinessTestSurface>();
+	auto* Freeze = Context.Pawn->GetTestFreeze();
+	const auto StartAndReady = [&]()
+	{
+		TestTrue(TEXT("Session starts"), Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), false, {}).IsValid());
+		Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Freeze->GetRuntimeReadinessSession().ReadinessId);
+	};
+	bool bAllow = false;
+	Freeze->RuntimeSettlementGate.BindLambda([&](FString&) { return bAllow; });
+	StartAndReady();
+	TestTrue(TEXT("Game initialization can retain freeze after terrain is ready"), Freeze->IsReadinessFreezeActive());
+	TestEqual(TEXT("Wait does not report settlement"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::WaitingForServerReady);
+	bAllow = true;
+	Freeze->Advance();
+	TestEqual(TEXT("Ready game state permits existing bounded settlement"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Settled);
+
+	Freeze->RuntimeSettlementGate.BindLambda([](FString& Reason) { Reason = TEXT("Source policy changed."); return false; });
+	StartAndReady();
+	TestEqual(TEXT("Invalidated policy fails closed"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Failed);
+	TestTrue(TEXT("Rejected policy cannot release movement"), Freeze->IsReadinessFreezeActive());
+
+	Freeze->RuntimeSettlementGate.BindLambda([&](FString&)
+	{
+		Freeze->CancelRuntimeReadinessSession(Freeze->GetRuntimeReadinessSession().SessionId);
+		return true;
+	});
+	StartAndReady();
+	TestEqual(TEXT("Reentrant cancellation cannot settle a retired session"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Canceled);
+	Freeze->RuntimeSettlementGate.Unbind();
+	StartAndReady();
+	TestEqual(TEXT("An unbound gate leaves normal settlement intact"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Settled);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FChunkWorldRuntimeSafePlacementTest,
 	"PorismExtension.ChunkWorld.ReadinessFreeze.Runtime.SafePlacement",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

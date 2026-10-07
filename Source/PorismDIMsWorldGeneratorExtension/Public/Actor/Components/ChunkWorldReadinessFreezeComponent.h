@@ -14,6 +14,9 @@ class UChunkWorldLayoutRuntimeComponent;
 class UMovementComponent;
 class UPrimitiveComponent;
 
+/** Optional game-owned authority check before terrain settlement. False + empty reason waits; false + reason fails closed. */
+DECLARE_DELEGATE_RetVal_OneParam(bool, FChunkWorldRuntimeSettlementGate, FString&);
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FPorismStartupFreezeSignature);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnChunkWorldRuntimeClientReady, FGuid, SessionId, FGuid, ReadinessId);
 
@@ -117,6 +120,11 @@ class PORISMDIMSWORLDGENERATOREXTENSION_API UChunkWorldReadinessFreezeComponent 
 public:
 	/** Creates a readiness-freeze component with startup freeze enabled by default. */
 	UChunkWorldReadinessFreezeComponent();
+
+	/** Optional authority gate, evaluated on the game thread immediately before settlement.
+	 * The caller owns any wait deadline and binding lifetime. It must not release or mutate this session.
+	 * Cancellation/replacement during the callback is detected and cannot settle the old session. */
+	FChunkWorldRuntimeSettlementGate RuntimeSettlementGate;
 
 	/** Returns true while this component is still holding the owner in its startup-frozen state. */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "ChunkWorld|Startup")
