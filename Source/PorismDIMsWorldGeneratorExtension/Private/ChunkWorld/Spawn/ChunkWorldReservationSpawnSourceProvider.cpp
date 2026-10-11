@@ -113,6 +113,12 @@ void UChunkWorldReservationSpawnSourceProvider::GatherSpawnCandidates(
 
 	TArray<FBiomeStrategyReservationFieldBinding> FieldBindings;
 	UBiomeStrategyBindingLibrary::QueryWorldGenReservationFields(ChunkWorld, ChunkWorld->WorldGenDef, AuthoredQueryBounds, FieldBindings);
+	FieldBindings.RemoveAll([&Request](const FBiomeStrategyReservationFieldBinding& Binding)
+	{
+		return Binding.Field.FieldKind != EReservationFieldKind::Spawn
+			|| !Binding.Field.FieldTags.HasAll(Request.RequiredSpawnTags)
+			|| !FGameplayTagContainer(Binding.RowBinding.BiomeTag).HasAll(Request.RequiredBiomeTags);
+	});
 	FieldBindings.Sort([](const FBiomeStrategyReservationFieldBinding& Left, const FBiomeStrategyReservationFieldBinding& Right)
 	{
 		return Left.Field.DebugPath < Right.Field.DebugPath;
@@ -120,6 +126,8 @@ void UChunkWorldReservationSpawnSourceProvider::GatherSpawnCandidates(
 
 	const int32 CandidateLimit = FMath::Min(FMath::Max(1, MaximumCandidatesPerQuery), FMath::Max(0, QueryContext.MaximumCandidates));
 	const int32 InitialCandidateCount = OutCandidates.Num();
+	const int32 SamplesPerField = FMath::Min(FMath::Clamp(Request.CandidatesPerReservation, 1, 16),
+		FMath::Max(1, CandidateLimit / FMath::Max(1, FieldBindings.Num())));
 	for (const FBiomeStrategyReservationFieldBinding& Binding : FieldBindings)
 	{
 		if (OutCandidates.Num() - InitialCandidateCount >= CandidateLimit)
@@ -183,50 +191,60 @@ void UChunkWorldReservationSpawnSourceProvider::GatherSpawnCandidates(
 			continue;
 		}
 
-		// Area selection remains randomized; physical placement starts at this area's center.
-		const FVector2D AuthoredXY(SampleBounds.GetCenter());
-		double SurfaceZBlock = 0.0;
-		if (!TryResolveTopTheoreticalSurface(Binding, *ChunkWorld, ScaleContext, AuthoredXY, SurfaceZBlock))
+		FRandomStream Random(HashCombine(GetTypeHash(Request.RequestId), GetTypeHash(Binding.Field.DebugPath)));
+		const double Phase = Random.FRand() * 2.0 * PI;
+		for (int32 Sample = 0; Sample < SamplesPerField && OutCandidates.Num() - InitialCandidateCount < CandidateLimit; ++Sample)
 		{
-			continue;
-		}
-
-		const FVector RawSurfacePoint = ScaleContext.AuthoredBlockPositionToRawBlock(FVector(AuthoredXY.X, AuthoredXY.Y, SurfaceZBlock));
-		const FVector TheoreticalLocation = ChunkWorld->GetActorTransform().TransformPosition(RawSurfacePoint * ScaleContext.BaseBlockSize);
-		if (!FMath::IsFinite(TheoreticalLocation.X) || !FMath::IsFinite(TheoreticalLocation.Y) || !FMath::IsFinite(TheoreticalLocation.Z))
-		{
-			continue;
-		}
-		if (WorldQueryBounds.IsValid != 0)
-		{
-			if (CandidateBounds.Max.X < WorldQueryBounds.Min.X || CandidateBounds.Min.X > WorldQueryBounds.Max.X
-				|| CandidateBounds.Max.Y < WorldQueryBounds.Min.Y || CandidateBounds.Min.Y > WorldQueryBounds.Max.Y)
+			FVector2D AuthoredXY(SampleBounds.GetCenter());
+			if (Sample > 0)
+			{
+				const double Angle = Phase + 2.0 * PI * (Sample - 1) / (SamplesPerField - 1);
+				const FVector Extent = SampleBounds.GetExtent();
+				AuthoredXY += FVector2D(FMath::Cos(Angle) * Extent.X, FMath::Sin(Angle) * Extent.Y) * .75;
+			}
+			double SurfaceZBlock = 0.0;
+			if (!TryResolveTopTheoreticalSurface(Binding, *ChunkWorld, ScaleContext, AuthoredXY, SurfaceZBlock))
 			{
 				continue;
 			}
 
-			CandidateBounds.Min.X = FMath::Max(CandidateBounds.Min.X, WorldQueryBounds.Min.X);
-			CandidateBounds.Min.Y = FMath::Max(CandidateBounds.Min.Y, WorldQueryBounds.Min.Y);
-			CandidateBounds.Max.X = FMath::Min(CandidateBounds.Max.X, WorldQueryBounds.Max.X);
-			CandidateBounds.Max.Y = FMath::Min(CandidateBounds.Max.Y, WorldQueryBounds.Max.Y);
-		}
-		if (TheoreticalLocation.X < CandidateBounds.Min.X || TheoreticalLocation.X > CandidateBounds.Max.X
-			|| TheoreticalLocation.Y < CandidateBounds.Min.Y || TheoreticalLocation.Y > CandidateBounds.Max.Y)
-		{
-			continue;
-		}
+			const FVector RawSurfacePoint = ScaleContext.AuthoredBlockPositionToRawBlock(FVector(AuthoredXY.X, AuthoredXY.Y, SurfaceZBlock));
+			const FVector TheoreticalLocation = ChunkWorld->GetActorTransform().TransformPosition(RawSurfacePoint * ScaleContext.BaseBlockSize);
+			if (!FMath::IsFinite(TheoreticalLocation.X) || !FMath::IsFinite(TheoreticalLocation.Y) || !FMath::IsFinite(TheoreticalLocation.Z))
+			{
+				continue;
+			}
+			if (WorldQueryBounds.IsValid != 0)
+			{
+				if (CandidateBounds.Max.X < WorldQueryBounds.Min.X || CandidateBounds.Min.X > WorldQueryBounds.Max.X
+					|| CandidateBounds.Max.Y < WorldQueryBounds.Min.Y || CandidateBounds.Min.Y > WorldQueryBounds.Max.Y)
+				{
+					continue;
+				}
 
-		FChunkWorldSpawnCandidate& Candidate = OutCandidates.AddDefaulted_GetRef();
-		Candidate.SourceFamily = EChunkWorldSpawnSourceFamily::ReservationField;
-		Candidate.SourceKind = TEXT("SpawnReservationField");
-		Candidate.SourceId = FName(*Binding.Field.DebugPath);
-		Candidate.SearchBounds = CandidateBounds;
-		Candidate.TheoreticalLocation = TheoreticalLocation;
-		Candidate.Facing = Facing;
-		Candidate.TheoreticalSurfaceZ = TheoreticalLocation.Z;
-		Candidate.SpawnTags = Binding.Field.FieldTags;
-		Candidate.BiomeTags = MoveTemp(BiomeTags);
-		Candidate.DebugLabel = Binding.Field.DebugPath;
+				CandidateBounds.Min.X = FMath::Max(CandidateBounds.Min.X, WorldQueryBounds.Min.X);
+				CandidateBounds.Min.Y = FMath::Max(CandidateBounds.Min.Y, WorldQueryBounds.Min.Y);
+				CandidateBounds.Max.X = FMath::Min(CandidateBounds.Max.X, WorldQueryBounds.Max.X);
+				CandidateBounds.Max.Y = FMath::Min(CandidateBounds.Max.Y, WorldQueryBounds.Max.Y);
+			}
+			if (TheoreticalLocation.X < CandidateBounds.Min.X || TheoreticalLocation.X > CandidateBounds.Max.X
+				|| TheoreticalLocation.Y < CandidateBounds.Min.Y || TheoreticalLocation.Y > CandidateBounds.Max.Y)
+			{
+				continue;
+			}
+
+			FChunkWorldSpawnCandidate& Candidate = OutCandidates.AddDefaulted_GetRef();
+			Candidate.SourceFamily = EChunkWorldSpawnSourceFamily::ReservationField;
+			Candidate.SourceKind = TEXT("SpawnReservationField");
+			Candidate.SourceId = FName(*Binding.Field.DebugPath);
+			Candidate.SearchBounds = CandidateBounds;
+			Candidate.TheoreticalLocation = TheoreticalLocation;
+			Candidate.Facing = Facing;
+			Candidate.TheoreticalSurfaceZ = TheoreticalLocation.Z;
+			Candidate.SpawnTags = Binding.Field.FieldTags;
+			Candidate.BiomeTags = BiomeTags;
+			Candidate.DebugLabel = Binding.Field.DebugPath;
+		}
 	}
 }
 

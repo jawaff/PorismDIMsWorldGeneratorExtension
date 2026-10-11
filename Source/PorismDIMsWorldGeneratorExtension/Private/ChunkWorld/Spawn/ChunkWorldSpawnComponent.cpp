@@ -647,6 +647,28 @@ bool UChunkWorldSpawnComponent::SelectCandidateForCurrentFamily(const FGuid& Tic
 		return false;
 	}
 
+	if (CandidateScore.IsBound())
+	{
+		double BestScore = -TNumericLimits<double>::Max();
+		TMap<const FChunkWorldSpawnCandidate*, double> Scores;
+		for (const FCompatiblePair& Pair : CompatiblePairs)
+		{
+			if (Scores.Contains(Pair.Candidate)) continue;
+			if (!CandidateScore.IsBound()) { OutFailureReason = TEXT("Candidate policy withdrew during evaluation."); return false; }
+			const double Score = CandidateScore.Execute(Request, *Pair.Candidate);
+			const FSpawnTicketRecord* Current = TicketRecords.Find(TicketId);
+			if (!Current || Current->State != EChunkWorldSpawnTicketState::Pending) return false;
+			Scores.Add(Pair.Candidate, Score);
+			if (FMath::IsFinite(Score)) BestScore = FMath::Max(BestScore, Score);
+		}
+		CompatiblePairs.RemoveAll([&](const FCompatiblePair& Pair)
+		{
+			const double Score = Scores.FindChecked(Pair.Candidate);
+			return !FMath::IsFinite(Score) || !FMath::IsNearlyEqual(Score, BestScore, 1.e-6);
+		});
+		if (CompatiblePairs.IsEmpty()) { OutFailureReason = TEXT("No finite candidate passed game policy."); return false; }
+	}
+
 	double TotalWeight = 0.0;
 	for (const FCompatiblePair& Pair : CompatiblePairs)
 	{
@@ -768,7 +790,7 @@ bool UChunkWorldSpawnComponent::TryBuildCandidateCacheKey(const FChunkWorldSpawn
 
 	ProviderKeys.Sort();
 	OutCacheKey = FString::Printf(
-		TEXT("%s|%s|%s|%s,%s,%s,%s|%s|%s|%d|%s"),
+		TEXT("%s|%s|%s|%s|%s,%s,%s|%s|%s|%d|%d|%s"),
 		*UEnum::GetValueAsString(SourceFamily),
 		*Request.RequiredSpawnTags.ToStringSimple(),
 		*Request.RequiredBiomeTags.ToStringSimple(),
@@ -779,6 +801,7 @@ bool UChunkWorldSpawnComponent::TryBuildCandidateCacheKey(const FChunkWorldSpawn
 		*FormatCacheReal(Request.MinimumSearchDistance),
 		*FormatCacheReal(Request.PreferredSearchRadius),
 		MaximumCandidatesPerProvider,
+		Request.CandidatesPerReservation,
 		*FString::Join(ProviderKeys, TEXT("|")));
 	return true;
 }
@@ -873,7 +896,8 @@ bool UChunkWorldSpawnComponent::IsPendingRequestValid(const FChunkWorldSpawnRequ
 		OutFailureReason = TEXT("Unique reservation assignment requires a valid request owner and only the ReservationField family.");
 		return false;
 	}
-	if (!FMath::IsFinite(Request.PreferredSearchOrigin.X)
+	if ((Request.bHasPreviousSubjectLocation && Request.PreviousSubjectLocation.ContainsNaN())
+		|| !FMath::IsFinite(Request.PreferredSearchOrigin.X)
 		|| !FMath::IsFinite(Request.PreferredSearchOrigin.Y)
 		|| !FMath::IsFinite(Request.PreferredSearchOrigin.Z)
 		|| !FMath::IsFinite(Request.MinimumSearchDistance)
@@ -882,7 +906,7 @@ bool UChunkWorldSpawnComponent::IsPendingRequestValid(const FChunkWorldSpawnRequ
 		|| Request.PreferredSearchRadius < 0.0f)
 	{
 		OutFailureCategory = EChunkWorldSpawnFailureCategory::RequestInvalid;
-		OutFailureReason = TEXT("Spawn requests require finite, non-negative search distances and a finite search origin.");
+		OutFailureReason = TEXT("Spawn requests require finite positional hints and finite, non-negative search distances.");
 		return false;
 	}
 	if (Request.SubjectBinding.RequestOwner.IsStale())

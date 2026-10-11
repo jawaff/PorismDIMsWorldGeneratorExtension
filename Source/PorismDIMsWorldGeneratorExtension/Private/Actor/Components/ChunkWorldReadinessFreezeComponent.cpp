@@ -879,7 +879,11 @@ void UChunkWorldReadinessFreezeComponent::TrySettleRuntimeSession()
 	EChunkWorldRuntimeReadinessFailure Failure = EChunkWorldRuntimeReadinessFailure::NoSettledSurface;
 	FString FailureReason;
 	bool bCollisionPending = false;
-	if (!TryBuildRuntimeSettledTransform(SettledTransform, Failure, FailureReason, bCollisionPending))
+	const FGuid ScoredSession = RuntimeSession.SessionId;
+	const FGuid ScoredReadiness = RuntimeSession.ReadinessId;
+	const bool bHasSettlement = TryBuildRuntimeSettledTransform(SettledTransform, Failure, FailureReason, bCollisionPending);
+	if (IsRuntimeSessionTerminal() || RuntimeSession.SessionId != ScoredSession || RuntimeSession.ReadinessId != ScoredReadiness) return;
+	if (!bHasSettlement)
 	{
 		if (bCollisionPending)
 		{
@@ -971,15 +975,21 @@ bool UChunkWorldReadinessFreezeComponent::TryBuildRuntimeSettledTransform(
 	FRandomStream Random(static_cast<int32>(GetTypeHash(RuntimeSession.SessionId)));
 	const int32 Attempts = FMath::Clamp(RuntimeSettlementCandidateCount, 1, 64);
 	FVector SettledLocation = FVector::ZeroVector;
+	int32 OutsideXY = 0, Misses = 0;
 	bool bFound = false;
+	const FGuid ScoringSession = RuntimeSession.SessionId;
+	const FGuid ScoringReadiness = RuntimeSession.ReadinessId;
+	const bool bScoreCandidates = RuntimeCandidateScore.IsBound();
+	double BestScore = -TNumericLimits<double>::Max();
 	for (int32 Attempt = 0; Attempt < Attempts; ++Attempt)
 	{
 		const double X = Attempt == 0 ? Location.X : FMath::Lerp(Min.X, Max.X, Random.FRand());
 		const double Y = Attempt == 0 ? Location.Y : FMath::Lerp(Min.Y, Max.Y, Random.FRand());
-		if (X < Min.X || X > Max.X || Y < Min.Y || Y > Max.Y) continue;
+		if (X < Min.X || X > Max.X || Y < Min.Y || Y > Max.Y) { ++OutsideXY; continue; }
 		FHitResult Hit;
 		if (!World->SweepSingleByProfile(Hit, FVector(X, Y, StartZ), FVector(X, Y, EndZ), FQuat::Identity, RuntimeSettlementCollisionProfile, Shape, Params) || !Hit.bBlockingHit)
 		{
+			++Misses;
 			// An empty query is conclusive only once collision covers its entire scan.
 			bOutCollisionPending |= !RuntimeSession.ChunkWorld || !ChunkWorldReadinessFreeze::HasCollisionCoverage(*RuntimeSession.ChunkWorld,
 				FBox(FVector(X - Radius, Y - Radius, EndZ - HalfHeight), FVector(X + Radius, Y + Radius, StartZ + HalfHeight)));
@@ -1019,12 +1029,24 @@ bool UChunkWorldReadinessFreezeComponent::TryBuildRuntimeSettledTransform(
 			}
 		}
 		if (bOccupied) continue;
+		if (bScoreCandidates)
+		{
+			if (!RuntimeCandidateScore.IsBound()) return false;
+			const double Score = RuntimeCandidateScore.Execute(Candidate);
+			if (IsRuntimeSessionTerminal() || RuntimeSession.SessionId != ScoringSession || RuntimeSession.ReadinessId != ScoringReadiness) return false;
+			if (!FMath::IsFinite(Score) || (bFound && Score <= BestScore)) continue;
+			BestScore = Score;
+		}
 		SettledLocation = Candidate;
 		bFound = true;
-		break;
+		if (!bScoreCandidates) break;
 	}
 	if (!bFound)
 	{
+		// Native completion can precede collision activation during a chunk visibility handoff.
+		// Keep an entirely empty query batch retryable within the existing collision deadline;
+		// metadata coverage alone cannot prove that a surface is queryable yet.
+		bOutCollisionPending |= Misses > 0 && Misses + OutsideXY == Attempts;
 		OutFailureReason = FString::Printf(
 			TEXT("No safe blocking surface found inside bounded candidate region. Owner=%s CapsuleCenter=(%s) CapsuleOffset=(%s) Radius=%.3f HalfHeight=%.3f ScanZ=[%.3f,%.3f] RegionMin=(%s) RegionMax=(%s) Profile=%s Attempts=%d CollisionPending=%d"),
 			*GetNameSafe(Owner), *Location.ToString(), *CapsuleOffset.ToString(), Radius, HalfHeight, EndZ, StartZ,

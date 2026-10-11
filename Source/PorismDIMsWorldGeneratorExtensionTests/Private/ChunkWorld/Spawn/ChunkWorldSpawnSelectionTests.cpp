@@ -60,6 +60,44 @@ namespace
 	}
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FChunkWorldSpawnCandidateScoreTest,
+	"PorismExtension.ChunkWorld.Spawn.Selection.LiveCandidateScore",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FChunkWorldSpawnCandidateScoreTest::RunTest(const FString& Parameters)
+{
+	FSelectionContext Context;
+	if (!TestTrue(TEXT("Authority world"), Context.Initialize())) return false;
+	auto* Provider = NewObject<UChunkWorldSpawnTestSourceProvider>(Context.ChunkWorld);
+	Provider->Candidates = {MakeCandidate(TEXT("Left")), MakeCandidate(TEXT("Right")), MakeCandidate(TEXT("Invalid"))};
+	Context.SpawnComponent->RegisterSpawnSourceProvider(AsSourceProvider(Provider));
+	FName Preferred = TEXT("Left");
+	Context.SpawnComponent->CandidateScore.BindLambda([&](const FChunkWorldSpawnRequest&, const FChunkWorldSpawnCandidate& Candidate)
+	{
+		return Candidate.SourceId == TEXT("Invalid") ? std::numeric_limits<double>::quiet_NaN()
+			: Candidate.SourceId == Preferred ? 10.0 : 0.0;
+	});
+	auto Request = MakeRequest();
+	for (FName Side : {FName(TEXT("Left")), FName(TEXT("Right"))})
+	{
+		Preferred = Side;
+		const auto Ticket = Context.SpawnComponent->SubmitSpawnRequest(Request);
+		Context.SpawnComponent->Advance();
+		FChunkWorldSpawnResult Result;
+		TestTrue(TEXT("Ranked request resolves"), Context.SpawnComponent->GetSpawnTicketResult(Ticket, Result) && Result.bSuccess);
+		TestEqual(TEXT("Live policy wins over lottery and invalid scores"), Result.SelectedSourceId, Side);
+	}
+	const auto Canceled = Context.SpawnComponent->SubmitSpawnRequest(Request);
+	Context.SpawnComponent->CandidateScore.BindLambda([&](const FChunkWorldSpawnRequest&, const FChunkWorldSpawnCandidate&)
+	{
+		Context.SpawnComponent->CancelSpawnTicket(Canceled);
+		return 100.0;
+	});
+	Context.SpawnComponent->Advance();
+	TestEqual(TEXT("Reentrant cancellation cannot approve a scored ticket"), Context.SpawnComponent->GetSpawnTicketState(Canceled), EChunkWorldSpawnTicketState::Canceled);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FChunkWorldSpawnUniqueReservationTest,
 	"PorismExtension.ChunkWorld.Spawn.Selection.UniqueReservations",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

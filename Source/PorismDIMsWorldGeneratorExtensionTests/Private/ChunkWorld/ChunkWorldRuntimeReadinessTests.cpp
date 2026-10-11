@@ -73,6 +73,41 @@ namespace
 	}
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FChunkWorldRuntimeCandidateScoreTest,
+	"PorismExtension.ChunkWorld.ReadinessFreeze.Runtime.CandidateRanking",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FChunkWorldRuntimeCandidateScoreTest::RunTest(const FString& Parameters)
+{
+	FRuntimeReadinessTestContext Context;
+	if (!TestTrue(TEXT("Authority context"), Context.Initialize())) return false;
+	Context.World->SpawnActor<AChunkWorldReadinessTestSurface>();
+	auto* Freeze = Context.Pawn->GetTestFreeze();
+	double BestX = -TNumericLimits<double>::Max();
+	int32 Samples = 0;
+	Freeze->RuntimeCandidateScore.BindLambda([&](const FVector& Point)
+	{
+		++Samples;
+		BestX = FMath::Max(BestX, Point.X);
+		return Point.X;
+	});
+	Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), false, {});
+	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Freeze->GetRuntimeReadinessSession().ReadinessId);
+	TestEqual(TEXT("Ranked physical placement settles"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Settled);
+	TestTrue(TEXT("Final placement evaluates alternatives instead of first-valid fallback"), Samples > 1);
+	TestEqual(TEXT("Highest live score chooses the settled location"), Context.Pawn->GetActorLocation().X, BestX);
+	Freeze->RuntimeCandidateScore.BindLambda([&](const FVector&)
+	{
+		Freeze->CancelRuntimeReadinessSession(Freeze->GetRuntimeReadinessSession().SessionId);
+		return 100.0;
+	});
+	Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), false, {});
+	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Freeze->GetRuntimeReadinessSession().ReadinessId);
+	TestEqual(TEXT("Scoring cannot release a reentrantly canceled session"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Canceled);
+	TestTrue(TEXT("Canceled session remains frozen"), Freeze->IsReadinessFreezeActive());
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FChunkWorldRuntimeSettlementGateTest,
 	"PorismExtension.ChunkWorld.ReadinessFreeze.Runtime.GameplaySettlementGate",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -620,7 +655,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	"PorismExtension.ChunkWorld.ReadinessFreeze.Runtime.NoSurface",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-/** Verifies no bounded blocking surface produces structured failure while retaining freeze. */
+/** Native readiness can precede query collision activation; retry empty sweeps without releasing an unsafe pawn. */
 bool FChunkWorldRuntimeReadinessNoSurfaceTest::RunTest(const FString& Parameters)
 {
 	FRuntimeReadinessTestContext Context;
@@ -629,12 +664,37 @@ bool FChunkWorldRuntimeReadinessNoSurfaceTest::RunTest(const FString& Parameters
 		return false;
 	}
 
+	auto* Surface = Context.World->SpawnActor<AChunkWorldReadinessTestSurface>();
+	UBoxComponent* Collision = Surface ? Surface->FindComponentByClass<UBoxComponent>() : nullptr;
+	if (!TestNotNull(TEXT("Surface collision exists"), Collision)) return false;
+	Collision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	UChunkWorldReadinessTestFreezeComponent* const Freeze = Context.Pawn->GetTestFreeze();
 	const FGuid SessionId = Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), false, {});
 	TestTrue(TEXT("Authority starts no-surface session"), SessionId.IsValid());
 	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Freeze->GetRuntimeReadinessSession().ReadinessId);
+	TestEqual(TEXT("Empty queries remain retryable after native readiness"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::WaitingForServerReady);
+	TestTrue(TEXT("Retry does not release movement"), Freeze->IsReadinessFreezeActive());
+	// This fixture settles on scene geometry: no voxel-collision layer can account for the pending retry.
+	bool bHasVoxelCollisionLayer = false;
+	for (const CChunkData* Layer : Context.ChunkWorld->WorldChunks)
+		bHasVoxelCollisionLayer |= Layer->Collision || Layer->InstancedMeshCollision;
+	TestFalse(TEXT("Retry covers empty queries without missing native coverage"), bHasVoxelCollisionLayer);
+
+	Collision->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	Freeze->Advance();
+	TestEqual(TEXT("Collision activation settles the original session"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Settled);
+	TestEqual(TEXT("Retry does not create a new spawn operation"), Freeze->GetRuntimeReadinessSession().SessionId, SessionId);
+	TestFalse(TEXT("Safe settlement releases the pawn"), Freeze->IsReadinessFreezeActive());
+
+	Collision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), false, {});
+	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Freeze->GetRuntimeReadinessSession().ReadinessId);
+	FindFProperty<FFloatProperty>(UChunkWorldReadinessFreezeComponent::StaticClass(), TEXT("RuntimeSettlementCollisionTimeoutSeconds"))->SetPropertyValue_InContainer(Freeze, 0.0f);
+	Freeze->Advance();
 	TestEqual(TEXT("No surface retains structured failure"), Freeze->GetRuntimeReadinessSession().Failure, EChunkWorldRuntimeReadinessFailure::NoSettledSurface);
 	TestEqual(TEXT("No surface retains freeze terminal state"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Failed);
+	TestTrue(TEXT("Persistent misses still expire at the collision deadline"), Freeze->GetRuntimeReadinessSession().DebugReason.Contains(TEXT("Settlement collision wait expired.")));
+	TestTrue(TEXT("Expired collision wait cannot release the pawn"), Freeze->IsReadinessFreezeActive());
 	return true;
 }
 

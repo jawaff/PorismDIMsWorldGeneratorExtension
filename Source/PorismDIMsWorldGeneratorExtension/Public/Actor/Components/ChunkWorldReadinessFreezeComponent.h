@@ -16,6 +16,7 @@ class UPrimitiveComponent;
 
 /** Optional game-owned authority check before terrain settlement. False + empty reason waits; false + reason fails closed. */
 DECLARE_DELEGATE_RetVal_OneParam(bool, FChunkWorldRuntimeSettlementGate, FString&);
+DECLARE_DELEGATE_RetVal_OneParam(double, FChunkWorldRuntimeCandidateScore, const FVector&);
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FPorismStartupFreezeSignature);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnChunkWorldRuntimeClientReady, FGuid, SessionId, FGuid, ReadinessId);
@@ -125,6 +126,10 @@ public:
 	 * The caller owns any wait deadline and binding lifetime. It must not release or mutate this session.
 	 * Cancellation/replacement during the callback is detected and cannot settle the old session. */
 	FChunkWorldRuntimeSettlementGate RuntimeSettlementGate;
+
+	/** Optional live game policy for physically valid capsule centers. Highest finite score wins within
+	 * the existing bounded sample count; nonfinite rejects a sample. Unbound retains first-valid placement. */
+	FChunkWorldRuntimeCandidateScore RuntimeCandidateScore;
 
 	/** Returns true while this component is still holding the owner in its startup-frozen state. */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "ChunkWorld|Startup")

@@ -12,6 +12,8 @@
 class AActor;
 class AChunkWorldExtended;
 
+DECLARE_DELEGATE_RetVal_TwoParams(double, FChunkWorldSpawnCandidateScore, const FChunkWorldSpawnRequest&, const FChunkWorldSpawnCandidate&);
+
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnChunkWorldSubjectOutOfWorld, const FChunkWorldOutOfWorldEvent&);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnChunkWorldSpawnResolvedNative, const FChunkWorldSpawnResult&);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnChunkWorldSpawnResolved, const FChunkWorldSpawnResult&, Result);
@@ -60,6 +62,11 @@ public:
 
 	/** Native authority-side mirror of the resolved location event for C++ consumers and automation. */
 	FOnChunkWorldSpawnResolvedNative OnSpawnResolvedNative;
+
+	/** Optional game-thread policy on compatible candidates after live gathering/cache retrieval.
+	 * Highest finite score wins; normal subject weighting breaks ties. Nonfinite scores reject candidates.
+	 * Must not mutate candidates. Ticket cancellation/replacement during callbacks is revalidated. */
+	FChunkWorldSpawnCandidateScore CandidateScore;
 
 	/** Broadcast when a game-registered generic actor crosses the generic out-of-world boundary. */
 	FOnChunkWorldSubjectOutOfWorld OnSubjectOutOfWorld;

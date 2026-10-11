@@ -174,6 +174,17 @@ struct PORISMDIMSWORLDGENERATOREXTENSION_API FChunkWorldSpawnRequest
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Chunk World|Spawn", meta = (ToolTip = "Randomly assign an unclaimed ReservationField source, then reuse it for this stable subject and request owner. Requires a valid request owner and only the ReservationField family. Other subjects cannot use the assigned source. Disable for shared team spawn areas."))
 	bool bAssignUniqueReservation = false;
 
+	/** Bounded spatial alternatives per matching field, shared fairly within the provider candidate budget. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Chunk World|Spawn", meta = (ClampMin = "1", ClampMax = "16", ToolTip = "Requested points per reservation (1-16). One uses the center; multiple points sample the interior. The provider total budget still bounds all fields together."))
+	int32 CandidatesPerReservation = 1;
+
+	/** Optional previous subject position for ranking; independent of provider query bounds. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Chunk World|Spawn", meta = (ToolTip = "Enable the previous-position hint for respawn/recovery ranking. Does not move or widen the provider search volume."))
+	bool bHasPreviousSubjectLocation = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Chunk World|Spawn", meta = (EditCondition = "bHasPreviousSubjectLocation", ToolTip = "Previous subject position in world centimetres. Ranking may prefer another location; preferred search origin and approved bounds remain authoritative."))
+	FVector PreviousSubjectLocation = FVector::ZeroVector;
+
 	/** Optional world location used by origin-relative providers. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Chunk World|Spawn", meta = (ToolTip = "Optional world location used by origin-relative providers."))
 	FVector PreferredSearchOrigin = FVector::ZeroVector;
