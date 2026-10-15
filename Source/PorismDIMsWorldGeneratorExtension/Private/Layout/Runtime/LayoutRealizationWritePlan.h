@@ -265,7 +265,8 @@ namespace LayoutRealizationWritePlan
 		FString& OutFailureReason);
 #endif
 
-	/** Revalidates frozen authority before replay. An optional synchronous material reader supplies observed-LOD data without changing support search or writes. */
+	/** Revalidates frozen authority before replay. An optional synchronous material reader supplies observed-LOD data without changing support search or writes.
+	 * Terrain and reserved-open clears queue their own normal collision refresh; completion does not imply navigation is ready. */
 	PORISMDIMSWORLDGENERATOREXTENSION_API bool ApplyTerrainWriteReplay(
 		AChunkWorldCore* ChunkWorld,
 		const FLayoutRealizationWritePlan& WritePlan,

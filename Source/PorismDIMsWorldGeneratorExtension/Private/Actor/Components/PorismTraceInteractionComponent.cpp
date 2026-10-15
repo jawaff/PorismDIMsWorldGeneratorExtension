@@ -295,7 +295,8 @@ void UPorismTraceInteractionComponent::PerformTrace()
 	}
 	const bool bChanged = LastTraceResult.TargetType != NewResult.TargetType
 		|| LastTraceResult.InteractableActor != NewResult.InteractableActor
-		|| LastTraceResult.bHasHit != NewResult.bHasHit;
+		|| LastTraceResult.bHasHit != NewResult.bHasHit
+		|| LastTraceResult.bIsInteractable != NewResult.bIsInteractable;
 	const bool bBlockChanged = DidBlockInteractionResultChange(bHasActiveBlockInteraction, LastBlockInteractionResult, bHasNewBlockResult, NewBlockResult);
 
 	const FPorismTraceInteractionResult PreviousResult = LastTraceResult;
@@ -435,7 +436,9 @@ bool UPorismTraceInteractionComponent::TryBuildActorResult(const FHitResult& Hit
 	InOutResult.bHasHit = true;
 	InOutResult.Hit = Hit;
 	InOutResult.InteractableActor = HitActor;
-	InOutResult.bIsInteractable = true;
+	// Retain the raw actor for explicitly tagged actions, but offer ordinary Use only while eligible.
+	// The regular trace cadence observes busy/consumed/enabled changes without requiring a different hit.
+	InOutResult.bIsInteractable = CanInteractWithActor(HitActor, FGameplayTag());
 	InOutResult.TargetType = EPorismTraceInteractionTargetType::Actor;
 	return true;
 }
@@ -502,8 +505,8 @@ void UPorismTraceInteractionComponent::BroadcastInteractionSuccess(const FPorism
 
 void UPorismTraceInteractionComponent::BroadcastInteractionTransition(const FPorismTraceInteractionResult& PreviousResult, const FPorismTraceInteractionResult& NewResult, bool bHadPreviousBlockResult, const FChunkWorldBlockInteractionResult& PreviousBlockResult, bool bHasNewBlockResult, const FChunkWorldBlockInteractionResult& NewBlockResult)
 {
-	const bool bActorChanged = PreviousResult.TargetType == EPorismTraceInteractionTargetType::Actor
-		&& (NewResult.TargetType != EPorismTraceInteractionTargetType::Actor || PreviousResult.InteractableActor != NewResult.InteractableActor);
+	const bool bActorChanged = PreviousResult.TargetType == EPorismTraceInteractionTargetType::Actor && PreviousResult.bIsInteractable
+		&& (NewResult.TargetType != EPorismTraceInteractionTargetType::Actor || !NewResult.bIsInteractable || PreviousResult.InteractableActor != NewResult.InteractableActor);
 	if (bActorChanged && PreviousResult.InteractableActor)
 	{
 		OnActorInteractionEnded.Broadcast(PreviousResult.InteractableActor);
@@ -516,8 +519,8 @@ void UPorismTraceInteractionComponent::BroadcastInteractionTransition(const FPor
 		OnBlockInteractionEnded.Broadcast(PreviousBlockResult);
 	}
 
-	const bool bNewActor = NewResult.TargetType == EPorismTraceInteractionTargetType::Actor
-		&& (PreviousResult.TargetType != EPorismTraceInteractionTargetType::Actor || PreviousResult.InteractableActor != NewResult.InteractableActor);
+	const bool bNewActor = NewResult.TargetType == EPorismTraceInteractionTargetType::Actor && NewResult.bIsInteractable
+		&& (PreviousResult.TargetType != EPorismTraceInteractionTargetType::Actor || !PreviousResult.bIsInteractable || PreviousResult.InteractableActor != NewResult.InteractableActor);
 	if (bNewActor && NewResult.InteractableActor)
 	{
 		OnActorInteractionStarted.Broadcast(NewResult.InteractableActor);
@@ -578,6 +581,11 @@ void UPorismTraceInteractionComponent::ExecuteActorInteraction(AActor* Actor, co
 		return;
 	}
 
+	// Capture the accepted target before callbacks can consume it or refresh focus.
+	FPorismTraceInteractionResult Confirmed = LastTraceResult;
+	Confirmed.TargetType = EPorismTraceInteractionTargetType::Actor;
+	Confirmed.InteractableActor = Actor;
+	Confirmed.bIsInteractable = true;
 	if (Actor->GetClass()->ImplementsInterface(UPorismInteractableInterface::StaticClass()))
 	{
 		IPorismInteractableInterface::Execute_HandleInteractionByPawn(Actor, PawnOwner, InteractionTag);
@@ -589,7 +597,7 @@ void UPorismTraceInteractionComponent::ExecuteActorInteraction(AActor* Actor, co
 		{
 			IPorismInteractableInterface::Execute_HandleLocalInteractionByPawn(Actor, PawnOwner, InteractionTag);
 		}
-		BroadcastInteractionSuccess(LastTraceResult);
+		BroadcastInteractionSuccess(Confirmed);
 	}
 	else
 	{
@@ -833,14 +841,13 @@ void UPorismTraceInteractionComponent::ClientConfirmActorInteraction_Implementat
 		return;
 	}
 
-	if (TargetActor->GetClass()->ImplementsInterface(UPorismInteractableInterface::StaticClass()))
-	{
-		IPorismInteractableInterface::Execute_HandleLocalInteractionByPawn(TargetActor, PawnOwner, InteractionTag);
-	}
-
 	FPorismTraceInteractionResult Result = LastTraceResult;
 	Result.TargetType = EPorismTraceInteractionTargetType::Actor;
 	Result.InteractableActor = TargetActor;
 	Result.bIsInteractable = true;
+	if (TargetActor->GetClass()->ImplementsInterface(UPorismInteractableInterface::StaticClass()))
+	{
+		IPorismInteractableInterface::Execute_HandleLocalInteractionByPawn(TargetActor, PawnOwner, InteractionTag);
+	}
 	BroadcastInteractionSuccess(Result);
 }

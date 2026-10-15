@@ -98,7 +98,9 @@ public:
 	/** Applies authorized geometry on the game thread after the caller's fresh-chunk gate.
 	 * Samples all deferred fill support materials before the first write; leaves frozen
 	 * contracts unchanged and fails without writing if any required material is unavailable.
-	 * A supplied reader selects observed LOD data; without one, direct callers use native finest-layer reads. */
+	 * A supplied reader selects observed LOD data; without one, direct callers use native finest-layer reads.
+	 * Every written terrain/border chunk queues normal collision/navigation regeneration independently
+	 * of later template placements; successful return means writes accepted, not navigation settled. */
 	static bool ApplyFrozenTerrainContract(
 		AChunkWorldCore* ChunkWorld,
 		const FLayoutFrozenTerrainContract& FrozenTerrainContract,

@@ -1366,6 +1366,8 @@ bool FLayoutContractPipeline::ApplyFrozenTerrainContract(
 		Materials.Add(Material);
 	}
 
-	ChunkWorld->SetBlockValuesByBlockWorldPos(Positions, Materials, false);
+	// Terrain-only and border chunks may never receive a later template placement.
+	// Schedule their real collision work now; deferred navigation must not outlive an unqueued edit.
+	ChunkWorld->SetBlockValuesByBlockWorldPos(Positions, Materials, true);
 	return true;
 }

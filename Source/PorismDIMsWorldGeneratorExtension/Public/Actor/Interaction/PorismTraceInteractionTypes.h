@@ -30,7 +30,7 @@ struct FPorismTraceInteractionResult
 	UPROPERTY(BlueprintReadOnly, Category = "Porism|Interaction")
 	bool bHasHit = false;
 
-	/** True when the hit actor passed the configured interactable-interface checks. */
+	/** For actor focus, ordinary untagged Use is currently eligible. Success notifications reflect the accepted requested action. */
 	UPROPERTY(BlueprintReadOnly, Category = "Porism|Interaction")
 	bool bIsInteractable = false;
 

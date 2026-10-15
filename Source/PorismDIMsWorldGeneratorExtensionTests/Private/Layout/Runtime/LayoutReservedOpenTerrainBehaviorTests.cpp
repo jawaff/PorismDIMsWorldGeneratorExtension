@@ -2,6 +2,7 @@
 
 #include "ChunkWorld/ChunkWorldCore.h"
 #include "Misc/AutomationTest.h"
+#include <algorithm>
 
 #include "Layout/Runtime/ChunkWorldLayoutRuntimeComponent.h"
 #include "Layout/Support/LayoutTestUtilities.h"
@@ -325,6 +326,14 @@ bool FLayoutReservedOpenTerrainClearBehaviorTest::RunTest(const FString& Paramet
 	FLayoutRealizationWritePlanExecutionState ExecutionState;
 	TestTrue(TEXT("ClearReservedCell applies through terrain replay"), LayoutRealizationWritePlan::ApplyTerrainWriteReplay(Harness.World, WritePlan, Contract, ExecutionState, FailureReason));
 	TestTrue(TEXT("ClearReservedCell terrain replay completes before templates"), ExecutionState.bTerrainReplayApplied);
+	{
+		// Removed cells have no structural placement that could later refresh their collision.
+		std::lock_guard<std::mutex> Lock(Harness.World->ChunkUpdateCalls.Mutex);
+		const auto& Queue = Harness.World->ChunkUpdateCalls.Data[0];
+		const FIntVector Key = Harness.World->BlockWorldPosToChunkGridPos(ClearCell.VolumeMinBlockWorldPos, Harness.World->WorldChunks[0]);
+		TestTrue(TEXT("Reserved-open terrain queues collision without a later template"),
+			std::find(Queue.begin(), Queue.end(), Key) != Queue.end());
+	}
 	for (const FLayoutRealizationTerrainWriteEntry& ClearWrite : Excavation.ReservedOpenClearWrites)
 	{
 		TestEqual(TEXT("ClearReservedCell mutates every selected block"), Harness.World->GetBlockValueByBlockWorldPos(ClearWrite.BlockWorldPos, ERessourceType::MaterialIndex, 0), EmptyMaterial);

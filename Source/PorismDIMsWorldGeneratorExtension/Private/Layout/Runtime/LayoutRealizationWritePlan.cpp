@@ -956,7 +956,8 @@ bool LayoutRealizationWritePlan::ApplyTerrainWriteReplay(
 			Positions.Add(ClearWrite.BlockWorldPos);
 			Materials.Add(ClearWrite.Material);
 		}
-		ChunkWorld->SetBlockValuesByBlockWorldPos(Positions, Materials, false);
+		// Reserved-open cells have no structural carrier to trigger a subsequent refresh.
+		ChunkWorld->SetBlockValuesByBlockWorldPos(Positions, Materials, true);
 	}
 	ExecutionState.bTerrainReplayApplied = true;
 	return true;

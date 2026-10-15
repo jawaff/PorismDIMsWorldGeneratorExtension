@@ -42,11 +42,11 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Block|ChunkWorld|Interaction")
 	bool HasActiveBlockInteraction() const { return bHasActiveBlockInteraction; }
 
-	/** Returns the currently selected actor target when the trace resolved an interactable actor. */
+	/** Returns the actor currently eligible for ordinary untagged Use. Disabled/busy targets remain in the raw trace for tagged actions. */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Porism|Interaction")
-	AActor* GetCurrentBestInteractableActor() const { return LastTraceResult.TargetType == EPorismTraceInteractionTargetType::Actor ? LastTraceResult.InteractableActor : nullptr; }
+	AActor* GetCurrentBestInteractableActor() const { return LastTraceResult.TargetType == EPorismTraceInteractionTargetType::Actor && LastTraceResult.bIsInteractable ? LastTraceResult.InteractableActor : nullptr; }
 
-	/** Returns whether the trace currently has any valid interaction target at all. */
+	/** Returns whether a raw actor/block candidate is selected. Actor eligibility is action-specific and rechecked when executing. */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Porism|Interaction")
 	bool HasValidInteractionTarget() const { return LastTraceResult.TargetType != EPorismTraceInteractionTargetType::None; }
 
@@ -88,6 +88,7 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Porism|Interaction")
 	FOnPorismInteractionResult OnInteractionSucceeded;
 
+	/** Ordinary Use became available on the focused actor; includes eligibility changes without a different hit. */
 	UPROPERTY(BlueprintAssignable, Category = "Porism|Interaction|Actor")
 	FOnPorismActorInteractionChanged OnActorInteractionStarted;
 

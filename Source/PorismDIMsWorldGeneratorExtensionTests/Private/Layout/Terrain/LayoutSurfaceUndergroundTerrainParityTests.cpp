@@ -10,6 +10,7 @@
 #include "Layout/Terrain/LayoutTerrainSampling.h"
 
 #include "Misc/AutomationTest.h"
+#include <algorithm>
 #include "Layout/Support/LayoutWorldTestUtilities.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -504,6 +505,17 @@ bool FLayoutTerrainFillProducerChainTest::RunTest(const FString& Parameters)
 			40 + FMath::Abs(Write.BlockWorldPos.X) % 5, false);
 	const bool bApplied = FLayoutContractPipeline::ApplyFrozenTerrainContract(Harness.World, Contract.FrozenTerrainContract, Failure);
 	if (!TestTrue(*FString::Printf(TEXT("Producer output realizes: %s"), *Failure), bApplied)) return false;
+	{
+		// Terrain-only support/ramp chunks have no later template write to refresh them.
+		std::lock_guard<std::mutex> Lock(Harness.World->ChunkUpdateCalls.Mutex);
+		const auto& Queue = Harness.World->ChunkUpdateCalls.Data[0];
+		TSet<FIntVector> RequiredKeys;
+		for (const auto& Write : Writes)
+			RequiredKeys.Add(Harness.World->BlockWorldPosToChunkGridPos(Write.BlockWorldPos, Harness.World->WorldChunks[0]));
+		for (const FIntVector& Key : RequiredKeys)
+			TestTrue(*FString::Printf(TEXT("Terrain-only chunk %s gets a real collision refresh"), *Key.ToString()),
+				std::find(Queue.begin(), Queue.end(), Key) != Queue.end());
+	}
 	for (const auto& Write : Writes)
 		TestEqual(TEXT("Realized foundation and ramp use the column support material"),
 			Harness.World->GetBlockValueByBlockWorldPos(Write.BlockWorldPos, ERessourceType::MaterialIndex, 0),
