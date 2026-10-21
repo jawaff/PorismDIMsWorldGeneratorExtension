@@ -5,6 +5,7 @@
 #include "Biome/Noise/Foundation/InfinitePlaneFoundationPayloads.h"
 #include "Biome/Noise/Foundation/VoidFoundationPayloads.h"
 #include "Biome/Noise/Foundation/FoundationTerrainProfileOps.h"
+#include "Biome/Noise/Foundation/LandformFoundationOps.h"
 #include "Biome/Noise/Island/IslandBiomeStrategyPayloads.h"
 #include "Biome/Noise/FoundationFastNoiseLibrary.h"
 #include "Biome/Noise/ReservationFastNoiseLibrary.h"
@@ -1589,6 +1590,10 @@ namespace
 		{
 			return BuildVCutDomainForPayload(Editor, *VCutPayload, ScaleContext);
 		}
+		if (LandformFoundation::PayloadType(Provider.ProviderType))
+		{
+			return LandformFoundation::Build(Editor, Provider, ScaleContext, true);
+		}
 
 		return MakeIslandZero(Editor);
 	}
@@ -1829,6 +1834,13 @@ namespace
 		const FFoundationProviderDefinition& Provider,
 		const FResolvedWorldGenScaleContext& ScaleContext)
 	{
+		if (LandformFoundation::PayloadType(Provider.ProviderType))
+		{
+			FNodeLink Density = LandformFoundation::Build(Editor, Provider, ScaleContext, false);
+			return IsIslandNodeValid(Density)
+				? Editor->AddFloat(Editor->MultiplyFloat(Density, InternalTerrainDensityScale), InternalSurfaceSolidBias)
+				: MakeIslandZero(Editor);
+		}
 		if (const FInfinitePlaneFoundationPayload* PlanePayload = GetInfinitePlaneFoundationPayload(Provider))
 		{
 			const float SurfaceZNoise = static_cast<float>(ScaleContext.AuthoredBlockPositionToNoise(FVector(0.0, 0.0, PlanePayload->SurfaceZ)).Z);

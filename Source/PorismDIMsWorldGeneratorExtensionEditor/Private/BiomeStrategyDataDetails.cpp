@@ -54,6 +54,14 @@ namespace
 			return TEXT("Multi Instance");
 		case EFoundationProviderType::VCutVoid:
 			return TEXT("V Cut Void");
+		case EFoundationProviderType::ArchBridge:
+			return TEXT("Arch Bridge");
+		case EFoundationProviderType::Mountain:
+			return TEXT("Mountain");
+		case EFoundationProviderType::Column:
+			return TEXT("Column / Mesa");
+		case EFoundationProviderType::PitVoid:
+			return TEXT("Pit Void");
 		default:
 			return TEXT("Unknown");
 		}

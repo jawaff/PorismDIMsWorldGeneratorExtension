@@ -4,6 +4,7 @@
 
 #include "Biome/Noise/Foundation/InfinitePlaneFoundationPayloads.h"
 #include "Biome/Noise/Foundation/VoidFoundationPayloads.h"
+#include "Biome/Noise/Foundation/LandformFoundationOps.h"
 #include "Biome/Noise/Foundation/FoundationTerrainProfilePayloads.h"
 #include "Biome/Noise/Foundation/FoundationTerrainProfileOps.h"
 #include "Biome/Noise/Island/IslandBiomeStrategyPayloads.h"
@@ -119,6 +120,10 @@ namespace
 		switch (ProviderType)
 		{
 		case EFoundationProviderType::InfinitePlane:
+		case EFoundationProviderType::ArchBridge:
+		case EFoundationProviderType::Mountain:
+		case EFoundationProviderType::Column:
+		case EFoundationProviderType::PitVoid:
 			TerrainProfile.InitializeAs<FFlatFoundationTerrainProfilePayload>();
 			break;
 		case EFoundationProviderType::VCutVoid:
@@ -163,6 +168,12 @@ namespace
 		if (OutMultiPayload != nullptr)
 		{
 			*OutMultiPayload = nullptr;
+		}
+		if (UScriptStruct* PayloadType = LandformFoundation::PayloadType(ProviderType))
+		{
+			if (ProviderPayload.GetScriptStruct() == PayloadType) return false;
+			ProviderPayload.InitializeAs(PayloadType);
+			return true;
 		}
 
 		switch (ProviderType)
@@ -297,9 +308,9 @@ namespace
 
 	bool NormalizePrototypeProviderForEditor(FFoundationProviderPrototypeDefinition& PrototypeProvider);
 
-	bool ForceVCutProviderToSubtractiveVoid(FFoundationProviderDefinition& Provider)
+	bool ForceVoidProviderContribution(FFoundationProviderDefinition& Provider)
 	{
-		if (Provider.ProviderType != EFoundationProviderType::VCutVoid
+		if ((Provider.ProviderType != EFoundationProviderType::VCutVoid && Provider.ProviderType != EFoundationProviderType::PitVoid)
 			|| Provider.ContributionType == EFoundationContributionType::SubtractiveVoid)
 		{
 			return false;
@@ -322,9 +333,9 @@ namespace
 			}
 
 			FMultiInstanceFoundationPayload* MultiPayload = nullptr;
-			bChanged = ForceVCutProviderToSubtractiveVoid(*ChildProvider) || bChanged;
+			bChanged = ForceVoidProviderContribution(*ChildProvider) || bChanged;
 			bChanged = EnsureProviderPayloadForType(ChildProvider->ProviderType, ChildProvider->ProviderPayload, &MultiPayload) || bChanged;
-			if (ChildProvider->ContributionType == EFoundationContributionType::AdditiveBiome
+			if ((ChildProvider->ContributionType == EFoundationContributionType::AdditiveBiome || ChildProvider->ProviderType == EFoundationProviderType::PitVoid)
 				&& ChildProvider->ProviderType != EFoundationProviderType::MultiInstance
 				&& ChildProvider->ProviderType != EFoundationProviderType::VCutVoid)
 			{
@@ -343,7 +354,7 @@ namespace
 				if (PrototypeProvider != nullptr)
 				{
 					bChanged = NormalizePrototypeProviderForEditor(*PrototypeProvider) || bChanged;
-					if (PrototypeProvider->ProviderType == EFoundationProviderType::VCutVoid
+					if ((PrototypeProvider->ProviderType == EFoundationProviderType::VCutVoid || PrototypeProvider->ProviderType == EFoundationProviderType::PitVoid)
 						&& ChildProvider->ContributionType != EFoundationContributionType::SubtractiveVoid)
 					{
 						ChildProvider->ContributionType = EFoundationContributionType::SubtractiveVoid;
@@ -392,9 +403,9 @@ namespace
 	bool NormalizeProviderDefinitionForEditor(FFoundationProviderDefinition& Provider)
 	{
 		FMultiInstanceFoundationPayload* MultiPayload = nullptr;
-		bool bChanged = ForceVCutProviderToSubtractiveVoid(Provider);
+		bool bChanged = ForceVoidProviderContribution(Provider);
 		bChanged = EnsureProviderPayloadForType(Provider.ProviderType, Provider.ProviderPayload, &MultiPayload) || bChanged;
-		if (Provider.ContributionType == EFoundationContributionType::AdditiveBiome
+		if ((Provider.ContributionType == EFoundationContributionType::AdditiveBiome || Provider.ProviderType == EFoundationProviderType::PitVoid)
 			&& Provider.ProviderType != EFoundationProviderType::MultiInstance
 			&& Provider.ProviderType != EFoundationProviderType::VCutVoid)
 		{
@@ -413,7 +424,7 @@ namespace
 			if (PrototypeProvider != nullptr)
 			{
 				bChanged = NormalizePrototypeProviderForEditor(*PrototypeProvider) || bChanged;
-				if (PrototypeProvider->ProviderType == EFoundationProviderType::VCutVoid
+				if ((PrototypeProvider->ProviderType == EFoundationProviderType::VCutVoid || PrototypeProvider->ProviderType == EFoundationProviderType::PitVoid)
 					&& Provider.ContributionType != EFoundationContributionType::SubtractiveVoid)
 				{
 					Provider.ContributionType = EFoundationContributionType::SubtractiveVoid;
@@ -1267,6 +1278,7 @@ namespace
 		{
 			TransformVCutPayload(*VCutPayload, OffsetBlocks, UniformScale);
 		}
+		LandformFoundation::Transform(Provider, OffsetBlocks, UniformScale);
 		ApplyFoundationTerrainProfileUniformScale(Provider.TerrainProfile, UniformScale);
 
 		for (FReservationDefinition& Reservation : Provider.Reservations)
@@ -1681,6 +1693,14 @@ bool FBiomeStrategyValidationResult::HasWarnings() const
 FFoundationProviderQueryCapabilities UBiomeStrategyData::GetProviderQueryCapabilities(const FFoundationProviderDefinition& Provider)
 {
 	FFoundationProviderQueryCapabilities Capabilities;
+	if (UScriptStruct* PayloadType = LandformFoundation::PayloadType(Provider.ProviderType))
+	{
+		if (Provider.ProviderPayload.GetScriptStruct() == PayloadType)
+		{
+			Capabilities.VolumeQueryMode = EFoundationProviderVolumeQueryMode::Finite;
+		}
+		return Capabilities;
+	}
 	switch (Provider.ProviderType)
 	{
 	case EFoundationProviderType::Island:
@@ -1734,6 +1754,10 @@ bool UBiomeStrategyData::QueryProviderBounds(
 	else if (Provider.ProviderType == EFoundationProviderType::VCutVoid)
 	{
 		Bounds = MakeVCutProviderBounds(Provider);
+	}
+	else if (LandformFoundation::PayloadType(Provider.ProviderType))
+	{
+		Bounds = LandformFoundation::Bounds(Provider);
 	}
 	OutBounds.bValid = Bounds.IsValid != 0;
 	if (!Bounds.IsValid)
@@ -2494,9 +2518,9 @@ FBiomeStrategyValidationResult UBiomeStrategyData::ValidateStrategy() const
 
 	auto ValidateFoundationTerrainProfile = [&AddError](const FFoundationProviderDefinition& Provider, const FString& Path) -> void
 	{
-		if (Provider.ContributionType == EFoundationContributionType::SubtractiveVoid)
+		if (Provider.ContributionType == EFoundationContributionType::SubtractiveVoid && Provider.ProviderType != EFoundationProviderType::PitVoid)
 		{
-			// The terrain profile field is hidden for void providers and ignored by runtime builders.
+			// Only pit voids use the shared profile, to shape their carved floor.
 			return;
 		}
 
@@ -2700,6 +2724,11 @@ FBiomeStrategyValidationResult UBiomeStrategyData::ValidateStrategy() const
 				TEXT("Multi Instance provider does not use Multi Instance Foundation Payload."),
 				TEXT("Replace the Provider Payload with Multi Instance Foundation Payload or change the Provider Type."));
 		}
+		else if (LandformFoundation::PayloadType(Provider.ProviderType))
+		{
+			const FString Error = LandformFoundation::Validate(Provider);
+			if (!Error.IsEmpty()) AddError(Path, Error, TEXT("Correct the landform payload settings; see Foundation Providers authoring documentation."));
+		}
 		else if (const FIslandFoundationShapePayload* IslandPayload = Provider.ProviderPayload.GetPtr<FIslandFoundationShapePayload>())
 		{
 			if (IslandPayload->IslandBody.SideBulgeBlocks < 0.0f
@@ -2776,6 +2805,33 @@ FBiomeStrategyValidationResult UBiomeStrategyData::ValidateStrategy() const
 
 					if (MultiPayload->bRequireNoOverlap)
 					{
+						if (LandformFoundation::PayloadType(MaterializedPrototype.ProviderType))
+						{
+							const FBox Bounds = LandformFoundation::Bounds(MaterializedPrototype);
+							if (Bounds.IsValid)
+							{
+								// Scaling an off-origin prototype also moves its footprint center.
+								const FVector CenterDrift = Bounds.GetCenter().GetAbs()
+									* (0.5f * FMath::Abs(MultiPayload->MaxUniformScale - MultiPayload->MinUniformScale));
+								const FVector Extent = Bounds.GetExtent() * FMath::Max(MultiPayload->MinUniformScale, MultiPayload->MaxUniformScale)
+									+ CenterDrift + FVector(MultiPayload->FootprintPaddingBlocks);
+								bool bOverlap = false;
+								for (int32 A = 0; A < MultiPayload->InstanceCount && !bOverlap; ++A)
+								{
+									for (int32 B = A + 1; B < MultiPayload->InstanceCount; ++B)
+									{
+										const FVector2D Delta = GetMultiInstanceOffsetXY(*MultiPayload, A) - GetMultiInstanceOffsetXY(*MultiPayload, B);
+										if (FMath::Abs(Delta.X) < Extent.X * 2 && FMath::Abs(Delta.Y) < Extent.Y * 2)
+										{
+											bOverlap = true;
+											break;
+										}
+									}
+								}
+								if (bOverlap) AddError(Path, TEXT("Multi Instance landform footprints can overlap at worst-case scale."),
+									TEXT("Increase spacing or disable Require No Overlap for intentional ranges and connected terrain."));
+							}
+						}
 						if (const FIslandFoundationShapePayload* PrototypeIsland = PrototypeProvider->ProviderPayload.GetPtr<FIslandFoundationShapePayload>())
 						{
 							const float WorstCaseRadius = (PrototypeIsland->IslandBody.TopRadius + GetStrategyIslandDomainRadiusPaddingBlocks(*PrototypeIsland))

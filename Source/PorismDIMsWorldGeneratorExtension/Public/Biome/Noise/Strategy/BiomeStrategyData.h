@@ -48,7 +48,19 @@ enum class EFoundationProviderType : uint8
 	VCutVoid,
 
 	/** Deterministic repeated arrangement of one prototype foundation provider. */
-	MultiInstance
+	MultiInstance,
+
+	/** Connected deck spans with a parabolic arched underside. */
+	ArchBridge,
+
+	/** Finite elliptical peak, repeated through Multi-Instance for ranges. */
+	Mountain,
+
+	/** Noisy tapered column; broad top radii form a butte or mesa. */
+	Column,
+
+	/** Finite subtractive bowl/crater with a terrain-profile floor. */
+	PitVoid
 };
 
 /** Deterministic arrangement mode for a multi-instance foundation provider. */
@@ -308,12 +320,12 @@ struct PORISMDIMSWORLDGENERATOREXTENSION_API FFoundationProviderPrototypeDefinit
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Strategy", meta = (BaseStruct = "/Script/PorismDIMsWorldGeneratorExtension.FoundationPayloadBase", ExcludeBaseStruct, ToolTip = "Concrete provider payload consumed by the selected foundation builder. For Island providers, use Island Foundation Shape Payload."))
 	FInstancedStruct ProviderPayload;
 
-	/** Reusable GenA terrain profile used by the repeated additive provider instances. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Strategy|Terrain", meta = (BaseStruct = "/Script/PorismDIMsWorldGeneratorExtension.FoundationTerrainProfilePayloadBase", ExcludeBaseStruct, NoClear, EditCondition = "ProviderType != EFoundationProviderType::MultiInstance && ProviderType != EFoundationProviderType::VCutVoid", EditConditionHides, ToolTip = "Reusable GenA terrain profile used by repeated additive provider instances. Editor normalization replaces empty or provider-incompatible profiles with a provider-appropriate default. V-cut prototypes are subtractive voids and do not use terrain profiles."))
+	/** Surface profile for repeated additive providers, or floor profile for repeated pit voids. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Strategy|Terrain", meta = (BaseStruct = "/Script/PorismDIMsWorldGeneratorExtension.FoundationTerrainProfilePayloadBase", ExcludeBaseStruct, NoClear, EditCondition = "ProviderType != EFoundationProviderType::MultiInstance && ProviderType != EFoundationProviderType::VCutVoid", EditConditionHides, ToolTip = "Surface profile for repeated additive providers, or floor profile for Pit Void. Editor normalization replaces empty or incompatible profiles with defaults. V-cut prototypes do not use terrain profiles."))
 	FInstancedStruct TerrainProfile;
 
 	/** Reservations authored relative to each repeated provider instance's top-center or surface frame. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Strategy", meta = (ToolTip = "Reservations authored relative to each repeated provider instance's top-center or surface frame."))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Strategy", meta = (EditCondition = "ProviderType != EFoundationProviderType::ArchBridge && ProviderType != EFoundationProviderType::Mountain && ProviderType != EFoundationProviderType::Column && ProviderType != EFoundationProviderType::PitVoid", EditConditionHides, ToolTip = "Reservations authored relative to each repeated provider instance's top-center or surface frame. Landforms require an island or plane child as the reservation host."))
 	TArray<FReservationDefinition> Reservations;
 
 	/** Child foundation providers repeated with each prototype instance. */
@@ -393,7 +405,7 @@ struct PORISMDIMSWORLDGENERATOREXTENSION_API FFoundationProviderDefinition : pub
 	FName DebugName = TEXT("Root");
 
 	/** Whether this provider adds terrain to a biome or subtracts terrain from its parent branch. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Strategy", meta = (EditCondition = "ProviderType != EFoundationProviderType::VCutVoid", ToolTip = "Whether this provider adds terrain to a biome or subtracts terrain from its parent branch. V-cut providers are always subtractive voids and do not expose reservations."))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Strategy", meta = (EditCondition = "ProviderType != EFoundationProviderType::VCutVoid && ProviderType != EFoundationProviderType::PitVoid", ToolTip = "Whether this provider adds terrain to a biome or subtracts terrain from its parent branch. V-cut and pit providers are always subtractive voids and do not expose reservations."))
 	EFoundationContributionType ContributionType = EFoundationContributionType::AdditiveBiome;
 
 	/** Biome grouping tag this provider contributes to when additive. */
@@ -408,12 +420,12 @@ struct PORISMDIMSWORLDGENERATOREXTENSION_API FFoundationProviderDefinition : pub
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Strategy", meta = (BaseStruct = "/Script/PorismDIMsWorldGeneratorExtension.FoundationPayloadBase", ExcludeBaseStruct, ToolTip = "Concrete provider payload consumed by the selected foundation builder. Changing Provider Type in the editor replaces stale payload data with the matching default payload."))
 	FInstancedStruct ProviderPayload;
 
-	/** Reusable GenA terrain profile used by additive providers that generate visible terrain. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Strategy|Terrain", meta = (BaseStruct = "/Script/PorismDIMsWorldGeneratorExtension.FoundationTerrainProfilePayloadBase", ExcludeBaseStruct, NoClear, EditCondition = "ContributionType == EFoundationContributionType::AdditiveBiome && ProviderType != EFoundationProviderType::MultiInstance", EditConditionHides, ToolTip = "Reusable GenA terrain profile used by additive providers that generate visible terrain. Editor normalization replaces empty or provider-incompatible profiles with a provider-appropriate default."))
+	/** Surface profile for additive terrain, or floor profile for pit subtraction. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Strategy|Terrain", meta = (BaseStruct = "/Script/PorismDIMsWorldGeneratorExtension.FoundationTerrainProfilePayloadBase", ExcludeBaseStruct, NoClear, EditCondition = "(ContributionType == EFoundationContributionType::AdditiveBiome && ProviderType != EFoundationProviderType::MultiInstance) || ProviderType == EFoundationProviderType::PitVoid", EditConditionHides, ToolTip = "Surface profile for additive terrain, or floor profile for Pit Void subtraction. Editor normalization replaces empty or provider-incompatible profiles with a provider-appropriate default."))
 	FInstancedStruct TerrainProfile;
 
-	/** Reservations authored relative to this provider's top-center/surface frame. Disabled for subtractive void providers. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Strategy", meta = (EditCondition = "ContributionType != EFoundationContributionType::SubtractiveVoid", EditConditionHides, ToolTip = "Reservations authored relative to this provider's top-center or surface frame. Disabled for subtractive void providers."))
+	/** Reservations relative to a supported surface frame. Landforms use island or plane children as reservation hosts. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Strategy", meta = (EditCondition = "ContributionType != EFoundationContributionType::SubtractiveVoid && ProviderType != EFoundationProviderType::ArchBridge && ProviderType != EFoundationProviderType::Mountain && ProviderType != EFoundationProviderType::Column", EditConditionHides, ToolTip = "Reservations authored relative to this provider's top-center or surface frame. Disabled for voids and landforms without surface queries; use an island or plane child as the reservation host."))
 	TArray<FReservationDefinition> Reservations;
 
 	/** Child foundation providers evaluated relative to this provider branch. */

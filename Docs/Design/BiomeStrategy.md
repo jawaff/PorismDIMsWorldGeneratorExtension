@@ -65,7 +65,9 @@ Child providers automatically affect the parent's `DomainNoise` based on their c
 
 That automatic subtraction is the main reason to model related terrain as a provider hierarchy instead of isolated biome rows. A child island, plane patch, or reservation-owning provider with a different tag can claim its own biome without leaving both parent and child domains fighting over the same surface.
 
-For provider families, see [FoundationProviders.md](./BiomeStrategy/FoundationProviders.md).
+Provider families include Island, Infinite Plane, V-Cut Void, Arch Bridge, Mountain, Column/Mesa, Pit Void and Multi-Instance. Pit Void can carve a mountain caldera. Additive landforms reuse the terrain-profile slot for their tops; Pit Void uses it for its carved floor.
+
+For provider settings, examples and query limits, see [FoundationProviders.md](./BiomeStrategy/FoundationProviders.md).
 
 ## Reservations
 Reservations are provider-owned fields for build pads, structure anchors, spawn-readable subfields, and similar biome-owned pockets.

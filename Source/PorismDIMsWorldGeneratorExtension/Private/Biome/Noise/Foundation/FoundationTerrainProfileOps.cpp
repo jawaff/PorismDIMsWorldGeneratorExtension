@@ -1,6 +1,7 @@
 // Copyright 2026 Spotted Loaf Studio
 
 #include "Biome/Noise/Foundation/FoundationTerrainProfileOps.h"
+#include "Biome/Noise/Foundation/LandformFoundationOps.h"
 
 #include "Biome/Noise/Foundation/FoundationTerrainProfilePayloads.h"
 #include "Biome/Noise/Island/IslandBiomeStrategyPayloads.h"
@@ -115,7 +116,7 @@ namespace
 			return IslandPayload->IslandBody.TopRadius;
 		}
 
-		return 0.0f;
+		return LandformFoundation::ProfileRadius(Provider);
 	}
 
 	FNodeLink BuildFlatSurfaceOffset(const void*, const FFoundationTerrainProfileBuildContext&)
@@ -309,9 +310,9 @@ namespace
 		{
 			AddIssue(OutIssues, Path, TEXT("Eroded Edge terrain profile has invalid radius settings."), TEXT("Use zero or positive Radius Override Blocks and set Edge Width Blocks above zero."));
 		}
-		if (Provider.ProviderType != EFoundationProviderType::Island && Profile.RadiusOverrideBlocks <= 0.0f)
+		if (ResolveTerrainProfileProviderRadiusBlocks(Provider, Profile.RadiusOverrideBlocks) <= 0.0f)
 		{
-			AddIssue(OutIssues, Path, TEXT("Eroded Edge terrain profile needs a radius source."), TEXT("Set Radius Override Blocks when the provider is not an island."));
+			AddIssue(OutIssues, Path, TEXT("Eroded Edge terrain profile needs a radius source."), TEXT("Set Radius Override Blocks when the provider has no finite radius."));
 		}
 		if (Profile.EdgeDepthBlocks < 0.0f || Profile.EdgeNoiseAmplitude < 0.0f)
 		{
@@ -613,6 +614,10 @@ namespace
 		switch (ProviderType)
 		{
 		case EFoundationProviderType::Island:
+		case EFoundationProviderType::ArchBridge:
+		case EFoundationProviderType::Mountain:
+		case EFoundationProviderType::Column:
+		case EFoundationProviderType::PitVoid:
 			return EFoundationTerrainProfileProviderSupport::FiniteSurface;
 		case EFoundationProviderType::InfinitePlane:
 			return EFoundationTerrainProfileProviderSupport::InfiniteSurface;
