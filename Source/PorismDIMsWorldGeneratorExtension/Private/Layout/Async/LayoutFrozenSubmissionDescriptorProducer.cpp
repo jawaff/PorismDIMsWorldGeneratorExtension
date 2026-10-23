@@ -465,6 +465,7 @@ bool LayoutFrozenSubmissionDescriptorProducer::TryBuildProducedDescriptorArtifac
 		OutFailureReason);
 }
 
+#if WITH_AUTOMATION_TESTS
 bool LayoutFrozenSubmissionDescriptorProducer::TryBuildSelectedRootScoutResultPrewarmInputFromPlanningRecord(
 	const FLayoutId ArtifactId,
 	const FLayoutId DescriptorId,
@@ -526,6 +527,7 @@ bool LayoutFrozenSubmissionDescriptorProducer::TryBuildSelectedRootScoutResultPr
 	OutInput.Snapshot = Snapshot;
 	return true;
 }
+#endif
 
 bool LayoutFrozenSubmissionDescriptorProducer::TryBuildProducedDescriptorArtifactFromSelectedContinuationScoutResult(
 	const FLayoutSelectedContinuationScoutResultPrewarmDescriptorInput& Input,

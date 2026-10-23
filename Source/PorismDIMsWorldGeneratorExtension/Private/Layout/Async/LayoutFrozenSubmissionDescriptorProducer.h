@@ -196,14 +196,26 @@ namespace LayoutFrozenSubmissionDescriptorProducer
 		const TCHAR* LifecycleContext,
 		FString& OutFailureReason);
 
-#if WITH_AUTOMATION_TESTS
-	/** Test-only selected-root descriptor producer kept so automation can validate typed failure cases; production uses LayoutRegionPrewarmDescriptorProducer. */
+	/** Selected-root artifact construction used by LayoutRegionPrewarmDescriptorProducer. */
 	PORISMDIMSWORLDGENERATOREXTENSION_API bool TryBuildProducedDescriptorArtifactFromSelectedRootScoutResult(
 		const FLayoutSelectedRootScoutResultPrewarmDescriptorInput& Input,
 		FLayoutProducedFrozenDescriptorArtifact& OutArtifact,
 		FString& OutFailureReason);
 
-	/** Test-only selected-root input builder kept so automation can validate planning-record scout metadata; production uses LayoutRegionPrewarmDescriptorProducer. */
+	/** Selected-continuation artifact construction used by LayoutRegionPrewarmDescriptorProducer. */
+	PORISMDIMSWORLDGENERATOREXTENSION_API bool TryBuildProducedDescriptorArtifactFromSelectedContinuationScoutResult(
+		const FLayoutSelectedContinuationScoutResultPrewarmDescriptorInput& Input,
+		FLayoutProducedFrozenDescriptorArtifact& OutArtifact,
+		FString& OutFailureReason);
+
+	/** Selected-child artifact construction used by LayoutRegionPrewarmDescriptorProducer. */
+	PORISMDIMSWORLDGENERATOREXTENSION_API bool TryBuildProducedDescriptorArtifactFromSelectedChildScoutResult(
+		const FLayoutSelectedChildScoutResultPrewarmDescriptorInput& Input,
+		FLayoutProducedFrozenDescriptorArtifact& OutArtifact,
+		FString& OutFailureReason);
+
+#if WITH_AUTOMATION_TESTS
+	/** Test-only selected-root input builder for planning-record scout metadata. */
 	PORISMDIMSWORLDGENERATOREXTENSION_API bool TryBuildSelectedRootScoutResultPrewarmInputFromPlanningRecord(
 		FLayoutId ArtifactId,
 		FLayoutId DescriptorId,
@@ -213,18 +225,6 @@ namespace LayoutFrozenSubmissionDescriptorProducer
 		const FPlannedLayoutSiteRecord& PlanningRecord,
 		const FLayoutPreSubmitFrozenSnapshot& Snapshot,
 		FLayoutSelectedRootScoutResultPrewarmDescriptorInput& OutInput,
-		FString& OutFailureReason);
-
-	/** Test-only selected-continuation descriptor producer kept so automation can validate typed failure cases; production uses LayoutRegionPrewarmDescriptorProducer. */
-	PORISMDIMSWORLDGENERATOREXTENSION_API bool TryBuildProducedDescriptorArtifactFromSelectedContinuationScoutResult(
-		const FLayoutSelectedContinuationScoutResultPrewarmDescriptorInput& Input,
-		FLayoutProducedFrozenDescriptorArtifact& OutArtifact,
-		FString& OutFailureReason);
-
-	/** Test-only selected-child descriptor producer kept so automation can validate typed failure cases; production uses LayoutRegionPrewarmDescriptorProducer. */
-	PORISMDIMSWORLDGENERATOREXTENSION_API bool TryBuildProducedDescriptorArtifactFromSelectedChildScoutResult(
-		const FLayoutSelectedChildScoutResultPrewarmDescriptorInput& Input,
-		FLayoutProducedFrozenDescriptorArtifact& OutArtifact,
 		FString& OutFailureReason);
 
 	/** Test-only descriptor constructor kept so automation can assert store behavior without exposing production seed/snapshot mutation APIs. */

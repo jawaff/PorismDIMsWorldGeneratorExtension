@@ -70,6 +70,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Porism|Interaction")
 	void SetUseThirdPersonTraceDistance(bool bInUseThirdPersonTraceDistance, bool bForceImmediateTrace = true);
 
+	/** Controls periodic polling only. Explicit traces and tracked-block refreshes remain available; cached results are retained. Safe before BeginPlay; repeated calls preserve an active cadence. */
+	UFUNCTION(BlueprintCallable, Category = "Porism|Interaction")
+	void SetPeriodicTraceEnabled(bool bEnabled);
+
+	/** Returns the requested polling policy, including before the component begins play. */
+	UFUNCTION(BlueprintPure, Category = "Porism|Interaction")
+	bool IsPeriodicTraceEnabled() const { return bPeriodicTraceEnabled; }
+
 	/** Forces one immediate trace outside the timer cadence. */
 	UFUNCTION(BlueprintCallable, Category = "Porism|Interaction")
 	void ForceTrace();
@@ -165,6 +173,7 @@ protected:
 
 private:
 	FTimerHandle TraceHandle;
+	bool bPeriodicTraceEnabled = true;
 	FPorismTraceInteractionResult LastTraceResult;
 	FChunkWorldBlockInteractionResult LastBlockInteractionResult;
 	bool bHasActiveBlockInteraction = false;

@@ -26,7 +26,7 @@
 		},
 		{
 			"Name": "PorismDIMsWorldGeneratorExtensionTests",
-			"Type": "Runtime",
+			"Type": "Editor",
 			"LoadingPhase": "Default"
 		}
 	],

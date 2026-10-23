@@ -38,7 +38,7 @@ void UPorismTraceInteractionComponent::BeginPlay()
 
 	RefreshActiveTraceDistance();
 	BindPredictedBlockStateComponent();
-	GetWorld()->GetTimerManager().SetTimer(TraceHandle, this, &UPorismTraceInteractionComponent::PerformTrace, TraceInterval, true);
+	SetPeriodicTraceEnabled(bPeriodicTraceEnabled);
 }
 
 void UPorismTraceInteractionComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -92,6 +92,26 @@ bool UPorismTraceInteractionComponent::GetInteractionTraceView(FVector& OutLocat
 
 	Owner->GetActorEyesViewPoint(OutLocation, OutRotation);
 	return true;
+}
+
+void UPorismTraceInteractionComponent::SetPeriodicTraceEnabled(bool bEnabled)
+{
+	bPeriodicTraceEnabled = bEnabled;
+	UWorld* World = GetWorld();
+	if (!HasBegunPlay() || World == nullptr)
+	{
+		return;
+	}
+
+	FTimerManager& Timers = World->GetTimerManager();
+	if (!bEnabled)
+	{
+		Timers.ClearTimer(TraceHandle);
+	}
+	else if (!Timers.IsTimerActive(TraceHandle))
+	{
+		Timers.SetTimer(TraceHandle, this, &UPorismTraceInteractionComponent::PerformTrace, TraceInterval, true);
+	}
 }
 
 void UPorismTraceInteractionComponent::ForceTrace()

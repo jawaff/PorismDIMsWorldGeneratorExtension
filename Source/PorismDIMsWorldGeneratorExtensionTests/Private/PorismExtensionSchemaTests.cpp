@@ -5,7 +5,7 @@
 #include "Block/BlockTypeSchemaRegistry.h"
 #include "ChunkWorld/Components/BlockTypeSchemaComponent.h"
 #include "Misc/AutomationTest.h"
-#include "NativeGameplayTags.h"
+#include "GameplayTagContainer.h"
 #include "StructUtils/InstancedStruct.h"
 
 #include "PorismExtensionTestTypes.h"
@@ -33,8 +33,6 @@ namespace
 		return Payload;
 	}
 }
-
-UE_DEFINE_GAMEPLAY_TAG(TAG_PorismExtension_TestBlock, "DropType");
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FPorismExtensionCustomDataLayoutRoundTripTest,
@@ -177,11 +175,13 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FPorismExtensionSchemaRegistryLookupTest::RunTest(const FString& Parameters)
 {
+	// Reuse the configured tag; editor tests must not register a second runtime tag source.
+	const FGameplayTag TestBlock = FGameplayTag::RequestGameplayTag(TEXT("DropType"));
 	UBlockTypeSchemaRegistry* Registry = NewObject<UBlockTypeSchemaRegistry>();
 	TestNotNull(TEXT("Registry object is created"), Registry);
 
 	FBlockTypeSchema Row;
-	Row.BlockTypeName = TAG_PorismExtension_TestBlock;
+	Row.BlockTypeName = TestBlock;
 	Row.Definition = MakeExactHealthDefinitionPayload(65, false);
 	Row.CustomData = MakeExactHealthCustomDataPayload(42);
 
@@ -189,18 +189,18 @@ bool FPorismExtensionSchemaRegistryLookupTest::RunTest(const FString& Parameters
 	MutableRows.Add(Row);
 
 	FBlockTypeSchema FoundRow;
-	TestTrue(TEXT("Registry finds authored row by gameplay tag"), Registry->FindBlockTypeDefinition(TAG_PorismExtension_TestBlock, FoundRow));
-	TestEqual(TEXT("Found row keeps the expected gameplay tag"), FoundRow.BlockTypeName, TAG_PorismExtension_TestBlock.GetTag());
+	TestTrue(TEXT("Registry finds authored row by gameplay tag"), Registry->FindBlockTypeDefinition(TestBlock, FoundRow));
+	TestEqual(TEXT("Found row keeps the expected gameplay tag"), FoundRow.BlockTypeName, TestBlock);
 
 	FInstancedStruct DefinitionPayload;
-	TestTrue(TEXT("Registry resolves definition payload"), Registry->TryGetBlockDefinition(TAG_PorismExtension_TestBlock, DefinitionPayload));
+	TestTrue(TEXT("Registry resolves definition payload"), Registry->TryGetBlockDefinition(TestBlock, DefinitionPayload));
 
 	FBlockHealthDefinition HealthDefinition;
 	TestTrue(TEXT("Definition payload converts to shared health definition"), UBlockTypeSchemaBlueprintLibrary::TryGetBlockHealthDefinition(DefinitionPayload, HealthDefinition));
 	TestEqual(TEXT("Resolved max health matches authored definition"), HealthDefinition.MaxHealth, 65);
 
 	FInstancedStruct CustomDataPayload;
-	TestTrue(TEXT("Registry resolves custom-data payload"), Registry->TryGetBlockCustomData(TAG_PorismExtension_TestBlock, CustomDataPayload));
+	TestTrue(TEXT("Registry resolves custom-data payload"), Registry->TryGetBlockCustomData(TestBlock, CustomDataPayload));
 
 	FBlockHealthCustomData HealthCustomData;
 	TestTrue(TEXT("Custom-data payload converts to shared health custom data"), UBlockTypeSchemaBlueprintLibrary::TryGetBlockHealthCustomData(CustomDataPayload, HealthCustomData));
@@ -219,6 +219,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FPorismExtensionSchemaComponentRequiredChannelCountTest::RunTest(const FString& Parameters)
 {
+	const FGameplayTag TestBlock = FGameplayTag::RequestGameplayTag(TEXT("DropType"));
 	UBlockTypeSchemaComponent* SchemaComponent = NewObject<UBlockTypeSchemaComponent>();
 	TestNotNull(TEXT("Schema component is created"), SchemaComponent);
 	TestEqual(TEXT("Missing registry reports zero required channels"), SchemaComponent->GetRequiredCustomDataChannelCount(), 0);
@@ -227,7 +228,7 @@ bool FPorismExtensionSchemaComponentRequiredChannelCountTest::RunTest(const FStr
 	TestNotNull(TEXT("Registry object is created"), Registry);
 
 	FBlockTypeSchema Row;
-	Row.BlockTypeName = TAG_PorismExtension_TestBlock;
+	Row.BlockTypeName = TestBlock;
 	Row.CustomData.InitializeAs<FPorismExtensionDerivedHealthCustomData>();
 
 	TArray<FBlockTypeSchema>& MutableRows = const_cast<TArray<FBlockTypeSchema>&>(Registry->GetBlockTypeDefinitions());

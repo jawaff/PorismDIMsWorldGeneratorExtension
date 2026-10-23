@@ -9,7 +9,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Layout/Support/LayoutWorldTestUtilities.h"
 #include "Misc/AutomationTest.h"
-#include "NativeGameplayTags.h"
+#include "GameplayTagContainer.h"
 #include "StructUtils/InstancedStruct.h"
 
 namespace
@@ -35,8 +35,6 @@ namespace
 		return Payload;
 	}
 }
-
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_PorismExtension_TestBlock);
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FPorismExtensionBlockHitBlueprintLibraryInvalidInputTest,
@@ -89,11 +87,12 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FPorismExtensionBlockHitBlueprintLibraryRegistryPayloadTest::RunTest(const FString& Parameters)
 {
+	const FGameplayTag TestBlock = FGameplayTag::RequestGameplayTag(TEXT("DropType"));
 	UBlockTypeSchemaRegistry* Registry = NewObject<UBlockTypeSchemaRegistry>();
 	TestNotNull(TEXT("Registry object is created"), Registry);
 
 	FBlockTypeSchema Row;
-	Row.BlockTypeName = TAG_PorismExtension_TestBlock;
+	Row.BlockTypeName = TestBlock;
 	Row.Definition = MakeExactHealthDefinitionPayload(72, true);
 	Row.CustomData = MakeExactHealthCustomDataPayload(18);
 
@@ -105,7 +104,7 @@ bool FPorismExtensionBlockHitBlueprintLibraryRegistryPayloadTest::RunTest(const 
 	SchemaComponent->SetBlockTypeSchemaRegistry(Registry);
 
 	FInstancedStruct DefinitionPayload;
-	TestTrue(TEXT("Definition lookup succeeds for the authored block type tag"), UChunkWorldBlockHitBlueprintLibrary::TryGetBlockDefinitionForBlockTypeName(SchemaComponent, TAG_PorismExtension_TestBlock, DefinitionPayload));
+	TestTrue(TEXT("Definition lookup succeeds for the authored block type tag"), UChunkWorldBlockHitBlueprintLibrary::TryGetBlockDefinitionForBlockTypeName(SchemaComponent, TestBlock, DefinitionPayload));
 
 	FBlockHealthDefinition HealthDefinition;
 	TestTrue(TEXT("Resolved definition converts to the shared health definition family"), UBlockTypeSchemaBlueprintLibrary::TryGetBlockHealthDefinition(DefinitionPayload, HealthDefinition));
@@ -113,7 +112,7 @@ bool FPorismExtensionBlockHitBlueprintLibraryRegistryPayloadTest::RunTest(const 
 	TestTrue(TEXT("Resolved definition keeps the authored invincibility flag"), HealthDefinition.bInvincible);
 
 	FInstancedStruct CustomDataPayload;
-	TestTrue(TEXT("Custom-data lookup succeeds for the authored block type tag"), UChunkWorldBlockHitBlueprintLibrary::TryGetBlockCustomDataForBlockTypeName(SchemaComponent, TAG_PorismExtension_TestBlock, CustomDataPayload));
+	TestTrue(TEXT("Custom-data lookup succeeds for the authored block type tag"), UChunkWorldBlockHitBlueprintLibrary::TryGetBlockCustomDataForBlockTypeName(SchemaComponent, TestBlock, CustomDataPayload));
 
 	FBlockHealthCustomData HealthCustomData;
 	TestTrue(TEXT("Resolved custom data converts to the shared health custom-data family"), UBlockTypeSchemaBlueprintLibrary::TryGetBlockHealthCustomData(CustomDataPayload, HealthCustomData));

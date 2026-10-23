@@ -10,6 +10,8 @@ public class PorismDIMsWorldGeneratorExtension : ModuleRules
 	public PorismDIMsWorldGeneratorExtension(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
+		// Layout solve execution catches work exceptions in editor and packaged targets.
+		bEnableExceptions = true;
 
 		PublicDependencyModuleNames.AddRange(new string[]
 		{

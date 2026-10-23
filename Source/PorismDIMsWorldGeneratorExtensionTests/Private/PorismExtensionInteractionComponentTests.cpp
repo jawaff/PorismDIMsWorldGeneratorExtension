@@ -132,6 +132,24 @@ bool FPorismExtensionTraceInteractionConfigurationTest::RunTest(const FString& P
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FPorismExtensionTracePollingPolicyTest,
+	"PorismExtension.TraceInteraction.Component.PollingPolicyBeforePlay",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FPorismExtensionTracePollingPolicyTest::RunTest(const FString& Parameters)
+{
+	AActor* Owner = NewObject<AActor>();
+	auto* Trace = NewObject<UPorismTraceInteractionComponent>(Owner);
+	TestTrue(TEXT("Existing owners retain periodic polling by default"), Trace->IsPeriodicTraceEnabled());
+	Trace->SetPeriodicTraceEnabled(false);
+	Trace->SetPeriodicTraceEnabled(false);
+	TestFalse(TEXT("Polling can be disabled before a world or BeginPlay exists"), Trace->IsPeriodicTraceEnabled());
+	Trace->SetPeriodicTraceEnabled(true);
+	TestTrue(TEXT("Pre-play polling policy can be restored"), Trace->IsPeriodicTraceEnabled());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FPorismExtensionHealthTraceInteractionDefaultStateTest,
 	"PorismExtension.HealthTraceInteraction.Component.DefaultStateRejectsHealthInteraction",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
