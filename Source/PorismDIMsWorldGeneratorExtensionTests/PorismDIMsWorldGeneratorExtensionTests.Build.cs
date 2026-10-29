@@ -26,6 +26,7 @@ public class PorismDIMsWorldGeneratorExtensionTests : ModuleRules
 			"PorismDIMsWorldGeneratorExtension",
 			"PorismDIMsWorldGeneratorExtensionEditor",
 			"InputCore",
+			"Niagara",
 			"Slate",
 			"SlateCore",
 			"UnrealEd"

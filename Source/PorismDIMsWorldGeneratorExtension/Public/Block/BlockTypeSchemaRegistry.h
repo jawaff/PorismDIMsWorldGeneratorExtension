@@ -123,6 +123,10 @@ struct FBlockHealthDefinition : public FBlockDefinitionBase
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Health", meta = (DisplayPriority = "11", ToolTip = "Sound to play when this block type is hit but not destroyed."))
 	TObjectPtr<USoundBase> HitSound = nullptr;
+
+	/** Optional non-lethal impact visual; destruction retains the base definition's separate effect. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Health", meta = (ToolTip = "Niagara for a confirmed non-lethal block impact. The unified presentation consumer places it at the impact anchor; leave empty for no particles."))
+	TObjectPtr<UNiagaraSystem> HitEffect = nullptr;
 };
 
 /**

@@ -6,6 +6,11 @@
 #include "ChunkWorld/Blueprint/ChunkWorldBlockDamageBlueprintLibrary.h"
 #include "ChunkWorld/Blueprint/ChunkWorldBlockHitBlueprintLibrary.h"
 #include "ChunkWorld/Components/BlockTypeSchemaComponent.h"
+#include "ChunkWorld/Components/ChunkWorldBlockPresentationSubsystem.h"
+#include "Materials/Material.h"
+#include "Misc/ScopeExit.h"
+#include "NiagaraSystem.h"
+#include "Sound/SoundWave.h"
 #include "Components/StaticMeshComponent.h"
 #include "Layout/Support/LayoutWorldTestUtilities.h"
 #include "Misc/AutomationTest.h"
@@ -148,6 +153,88 @@ bool FPorismExtensionBlockDamageBlueprintLibraryInvalidInputTest::RunTest(const 
 	TestFalse(TEXT("Runtime health reads reject invalid resolved hits"), UChunkWorldBlockDamageBlueprintLibrary::TryGetRuntimeBlockHealthStateForResolvedBlockHit(ResolvedHit, CurrentHealth, MaxHealth, bIsInvincible, bHasRuntimeHealth, BlockTypeName));
 	TestFalse(TEXT("Block-position health reads reject null chunk worlds"), UChunkWorldBlockDamageBlueprintLibrary::TryGetBlockHealthStateForBlockWorldPos(nullptr, FIntVector::ZeroValue, CurrentHealth, MaxHealth, bIsInvincible, bHasRuntimeHealth, BlockTypeName));
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPorismExtensionCommittedBlockPresentationTest,
+	"PorismExtension.BlockDamage.BlueprintLibrary.CommittedPresentation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FPorismExtensionCommittedBlockPresentationTest::RunTest(const FString& Parameters)
+{
+	auto Harness = PorismLayoutWorldTestUtilities::CreateChunkWorldHarness(nullptr);
+	if (!TestNotNull(TEXT("Running chunk world"), Harness.World)) return false;
+	auto* Schema = Harness.World->GetBlockTypeSchemaComponent();
+	auto* Registry = Schema->GetBlockTypeSchemaRegistry();
+	Harness.World->StopGen();
+	FBlockHealthDefinition Definition;
+	Definition.MaxHealth = 20;
+	Definition.MaterialAsset = UMaterial::GetDefaultMaterial(MD_Surface);
+	Definition.HitSound = NewObject<USoundWave>();
+	Definition.DestroyedSound = NewObject<USoundWave>();
+	Definition.HitEffect = NewObject<UNiagaraSystem>();
+	Definition.DestroyedEffect = NewObject<UNiagaraSystem>();
+	FBlockTypeSchema Row;
+	Row.BlockTypeName = FGameplayTag::RequestGameplayTag(TEXT("DropType"));
+	Row.Definition.InitializeAs<FBlockHealthDefinition>(Definition);
+	Row.CustomData = MakeExactHealthCustomDataPayload(20);
+	auto& Rows = const_cast<TArray<FBlockTypeSchema>&>(Registry->GetBlockTypeDefinitions());
+	Rows.Add(Row);
+	Harness.World->StartGen();
+	if (!TestTrue(TEXT("Schema-backed generator restarted"), Harness.World->IsRunning())) return false;
+	auto* Sink = Harness.World->GetWorld()->GetSubsystem<UChunkWorldBlockPresentationSubsystem>();
+	if (!TestNotNull(TEXT("Presentation integration"), Sink)) return false;
+	TArray<FChunkWorldBlockPresentation> Events;
+	const FDelegateHandle Handle = Sink->OnCommitted.AddLambda([&](const FChunkWorldBlockPresentation& Event) { Events.Add(Event); });
+	ON_SCOPE_EXIT { Sink->OnCommitted.Remove(Handle); };
+	TestTrue(TEXT("Bound integration suppresses legacy playback"), UChunkWorldBlockPresentationSubsystem::HasConsumer(Harness.World->GetWorld()));
+
+	const FIntVector Position(4, 4, 4);
+	Harness.World->SetBlockValueByBlockWorldPos(Position, SinfullMaterial, false);
+	FChunkWorldResolvedBlockHit Hit;
+	if (!TestTrue(TEXT("Real represented block resolves"), UChunkWorldBlockHitBlueprintLibrary::TryResolveDirectBlockHitContextFromBlockWorldPos(Harness.World, Position, Hit))) return false;
+	FChunkWorldBlockHealthDeltaResult Result;
+	TestTrue(TEXT("Initial damage commits"), UChunkWorldBlockDamageBlueprintLibrary::TryApplyBlockDamageForResolvedBlockHit(Hit, 7, Result));
+	if (!TestEqual(TEXT("Initialization and first damage publish once"), Events.Num(), 1)) return false;
+	TestEqual(TEXT("Committed damage, not initial full-health refill"), Events.Last().HealthDelta, -7);
+	TestEqual(TEXT("Nonlethal sound captured"), Events.Last().Sound, Definition.HitSound.Get());
+	TestEqual(TEXT("Nonlethal Niagara captured"), Events.Last().Niagara, Definition.HitEffect.Get());
+	TestTrue(TEXT("Overheal succeeds"), UChunkWorldBlockDamageBlueprintLibrary::TryApplyBlockHealingForResolvedBlockHit(Hit, 100, Result));
+	TestEqual(TEXT("Healing clamps to actual missing health"), Events.Last().HealthDelta, 7);
+	TestNull(TEXT("Healing does not replay impact sound"), Events.Last().Sound);
+	const int32 BeforeNoop = Events.Num();
+	UChunkWorldBlockDamageBlueprintLibrary::TryApplyBlockHealingForResolvedBlockHit(Hit, 100, Result);
+	TestEqual(TEXT("Full-health heal is silent"), Events.Num(), BeforeNoop);
+
+	Rows[0].Definition.GetMutable<FBlockHealthDefinition>().bInvincible = true;
+	Schema->RebuildBlockDefinitionLookupMaps();
+	TestTrue(TEXT("Invincible impact accepted"), UChunkWorldBlockDamageBlueprintLibrary::TryApplyBlockDamageForResolvedBlockHit(Hit, 100, Result));
+	TestEqual(TEXT("Invincible hit publishes one impact"), Events.Num(), BeforeNoop + 1);
+	TestEqual(TEXT("Invincible hit has no damage number"), Events.Last().HealthDelta, 0);
+	TestEqual(TEXT("Invincible hit retains impact sound"), Events.Last().Sound, Definition.HitSound.Get());
+	Rows[0].Definition.GetMutable<FBlockHealthDefinition>().bInvincible = false;
+	Schema->RebuildBlockDefinitionLookupMaps();
+	TestTrue(TEXT("Overkill commits"), UChunkWorldBlockDamageBlueprintLibrary::TryApplyBlockDamageForResolvedBlockHit(Hit, 100, Result));
+	TestEqual(TEXT("Overkill shows remaining health, not requested damage"), Events.Last().HealthDelta, -20);
+	TestTrue(TEXT("Lethal outcome captured"), Events.Last().Result.bDestroyed);
+	TestEqual(TEXT("Destruction sound survives representation removal"), Events.Last().Sound, Definition.DestroyedSound.Get());
+	TestEqual(TEXT("Destruction Niagara survives representation removal"), Events.Last().Niagara, Definition.DestroyedEffect.Get());
+	TestEqual(TEXT("Block identity retained"), Events.Last().Result.BlockWorldPos, Position);
+	TestEqual(TEXT("Representative anchor retained"), Events.Last().Point, Hit.RepresentativeWorldPos);
+	const int32 BeforeRepeated = Events.Num();
+	UChunkWorldBlockDamageBlueprintLibrary::TryApplyBlockDamageForResolvedBlockHit(Hit, 100, Result);
+	TestEqual(TEXT("Repeated stale lethal request cannot replay outcome"), Events.Num(), BeforeRepeated);
+
+	const FIntVector FailedPosition(6, 4, 4);
+	Harness.World->SetBlockValueByBlockWorldPos(FailedPosition, SinfullMaterial, false);
+	UChunkWorldBlockHitBlueprintLibrary::TryResolveDirectBlockHitContextFromBlockWorldPos(Harness.World, FailedPosition, Hit);
+	// A schema/storage mismatch must fail at the real write boundary without publishing proposed health.
+	const TArray<int32> Defaults = Harness.World->RuntimeConfig->CustomFeatureDefaultData;
+	Harness.World->RuntimeConfig->CustomFeatureDefaultData.Reset();
+	AddExpectedError(TEXT("custom-data channels"), EAutomationExpectedErrorFlags::Contains, 5);
+	TestFalse(TEXT("Failed schema write rejects damage"), UChunkWorldBlockDamageBlueprintLibrary::TryApplyBlockDamageForResolvedBlockHit(Hit, 1, Result));
+	Harness.World->RuntimeConfig->CustomFeatureDefaultData = Defaults;
+	TestEqual(TEXT("Failed write publishes nothing"), Events.Num(), BeforeRepeated);
 	return true;
 }
 

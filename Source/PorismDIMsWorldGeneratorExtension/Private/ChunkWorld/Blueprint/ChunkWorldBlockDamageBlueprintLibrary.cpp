@@ -10,6 +10,8 @@
 #include "ChunkWorld/Components/BlockTypeSchemaComponent.h"
 #include "ChunkWorld/Components/ChunkWorldBlockFeedbackComponent.h"
 #include "Engine/AssetManager.h"
+#include "Engine/World.h"
+#include "ChunkWorld/Components/ChunkWorldBlockPresentationSubsystem.h"
 
 namespace
 {
@@ -224,6 +226,17 @@ bool UChunkWorldBlockDamageBlueprintLibrary::TryApplyBlockHealthDeltaForResolved
 		return false;
 	}
 
+	// A lethal commit removes the representation and its initialization marker. Reusing a
+	// captured hit must not reinitialize full health (or mutate a replacement block type).
+	FChunkWorldResolvedBlockHit CurrentHit;
+	if (!UChunkWorldBlockHitBlueprintLibrary::TryResolveDirectBlockHitContextFromBlockWorldPos(
+		ResolvedHit.ChunkWorld, ResolvedHit.BlockWorldPos, CurrentHit)
+		|| CurrentHit.MaterialIndex != ResolvedHit.MaterialIndex || CurrentHit.MeshIndex != ResolvedHit.MeshIndex
+		|| CurrentHit.BlockTypeSchemaComponent != ResolvedHit.BlockTypeSchemaComponent)
+	{
+		return false;
+	}
+
 	OutResult.bHitWasRepresentedBlock = true;
 	OutResult.ChunkWorld = ResolvedHit.ChunkWorld;
 	OutResult.BlockWorldPos = ResolvedHit.BlockWorldPos;
@@ -252,6 +265,30 @@ bool UChunkWorldBlockDamageBlueprintLibrary::TryApplyBlockHealthDeltaForResolved
 	OutResult.BlockTypeName = BlockTypeName;
 	OutResult.bWasInvincible = Definition.bInvincible;
 	OutResult.PreviousHealth = CustomData.Health;
+	// Keep authored assets and coordinates before a lethal schema write removes the representation.
+	USoundBase* HitSound = Definition.HitSound;
+	USoundBase* DestroySound = Definition.DestroyedSound;
+	UNiagaraSystem* HitEffect = Definition.HitEffect;
+	UNiagaraSystem* DestroyEffect = Definition.DestroyedEffect;
+	const int32 MaxHealth = Definition.MaxHealth;
+	const auto PublishPresentation = [&]()
+	{
+		if (!ResolvedHit.ChunkWorld->HasAuthority()) return;
+		auto* Sink = ResolvedHit.ChunkWorld->GetWorld()->GetSubsystem<UChunkWorldBlockPresentationSubsystem>();
+		if (!Sink || !Sink->OnCommitted.IsBound()) return;
+		FChunkWorldBlockPresentation Event;
+		Event.Result = OutResult;
+		Event.Point = ResolvedHit.RepresentativeWorldPos;
+		Event.HealthDelta = bIsHealing
+			? FMath::Max(0, OutResult.NewHealth - FMath::Clamp(OutResult.PreviousHealth, 0, MaxHealth))
+			: -FMath::Max(0, FMath::Clamp(OutResult.PreviousHealth, 0, MaxHealth) - OutResult.NewHealth);
+		if (!bIsHealing)
+		{
+			Event.Sound = OutResult.bDestroyed ? DestroySound : HitSound;
+			Event.Niagara = OutResult.bDestroyed ? DestroyEffect : HitEffect;
+		}
+		Sink->Publish(Event);
+	};
 	int32 NewHealth = CustomData.Health;
 	if (bIsHealing)
 	{
@@ -270,6 +307,7 @@ bool UChunkWorldBlockDamageBlueprintLibrary::TryApplyBlockHealthDeltaForResolved
 		if (Definition.bInvincible)
 		{
 			OutResult.NewHealth = CustomData.Health;
+			PublishPresentation();
 			return true;
 		}
 
@@ -307,6 +345,7 @@ bool UChunkWorldBlockDamageBlueprintLibrary::TryApplyBlockHealthDeltaForResolved
 		return false;
 	}
 
+	PublishPresentation();
 	return true;
 }
 

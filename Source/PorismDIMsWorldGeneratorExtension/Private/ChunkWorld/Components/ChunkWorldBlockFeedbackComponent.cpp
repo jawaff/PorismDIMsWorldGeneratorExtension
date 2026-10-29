@@ -11,6 +11,7 @@
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
 #include "Sound/SoundBase.h"
+#include "ChunkWorld/Components/ChunkWorldBlockPresentationSubsystem.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogChunkWorldBlockFeedback, Log, All);
 
@@ -515,6 +516,9 @@ bool UChunkWorldBlockFeedbackComponent::PlayBlockFeedback(
 	USoundBase* Sound,
 	UNiagaraSystem* NiagaraSystem) const
 {
+	// A game-installed consumer owns both authority and remote presentation. In particular, prediction
+	// and replicated-state coalescing must not produce another sound alongside individual committed outcomes.
+	if (UChunkWorldBlockPresentationSubsystem::HasConsumer(GetWorld())) return false;
 	if ((Sound == nullptr && NiagaraSystem == nullptr) || !ShouldPlayFeedbackAtLocation(WorldLocation))
 	{
 		return false;

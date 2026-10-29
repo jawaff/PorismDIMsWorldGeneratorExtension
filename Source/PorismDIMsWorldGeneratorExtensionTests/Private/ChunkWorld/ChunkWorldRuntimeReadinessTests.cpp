@@ -203,6 +203,25 @@ bool FChunkWorldRuntimeSafePlacementTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Larger pending capsule reserves XY even below terrain with collision disabled"), Context.Pawn->GetActorLocation().SizeSquared2D() >= 3600.0);
 	Pending->Destroy();
 
+	// Held/attached actors are not pawns, but cannot be accepted as a second floor above one.
+	auto* Occupant = Context.World->SpawnActor<AChunkWorldReadinessTestPawn>();
+	AddCapsule(Occupant);
+	Occupant->SetActorLocation(FVector(0.0, 0.0, 100.0));
+	auto* Equipment = Context.World->SpawnActor<AChunkWorldReadinessTestSurface>();
+	Equipment->FindComponentByClass<UBoxComponent>()->SetBoxExtent(FVector(35.0, 35.0, 10.0));
+	Equipment->SetActorLocation(FVector(0.0, 0.0, 320.0));
+	Equipment->SetOwner(Occupant);
+	Settle();
+	TestEqual(TEXT("Pawn-owned support still permits bounded fallback"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Settled);
+	TestTrue(TEXT("Pawn-owned equipment cannot stack a spawn at the occupied center"), Context.Pawn->GetActorLocation().SizeSquared2D() >= 1600.0);
+	TestTrue(TEXT("Pawn-owned equipment cannot supply terrain height"), Context.Pawn->GetActorLocation().Z < 120.0);
+	Equipment->SetOwner(nullptr);
+	Equipment->AttachToActor(Occupant, FAttachmentTransformRules::KeepWorldTransform);
+	Settle();
+	TestTrue(TEXT("Pawn-attached equipment cannot supply terrain height either"), Context.Pawn->GetActorLocation().Z < 120.0);
+	Equipment->Destroy();
+	Occupant->Destroy();
+
 	Floor->SetActorRotation(FRotator(60.0, 0.0, 0.0));
 	Settle();
 	TestEqual(TEXT("Steep support cannot release the pawn"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Failed);

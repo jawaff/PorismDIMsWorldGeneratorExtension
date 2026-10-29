@@ -23,6 +23,16 @@ DEFINE_LOG_CATEGORY_STATIC(LogChunkWorldReadinessFreeze, Log, All);
 
 namespace ChunkWorldReadinessFreeze
 {
+	/** A pawn's hands and equipment are transient occupancy, never terrain support. */
+	bool IsPawnSupport(const AActor* Actor)
+	{
+		for (const AActor* Owner = Actor; Owner; Owner = Owner->GetOwner())
+			if (Owner->IsA<APawn>()) return true;
+		for (const AActor* Parent = Actor; Parent; Parent = Parent->GetAttachParentActor())
+			if (Parent->IsA<APawn>()) return true;
+		return false;
+	}
+
 	/** Read native finest-collision readiness under its visibility/topology fence.
 	 * Ready includes empty chunks; navigation export and navigation demand are irrelevant. */
 	bool HasCollisionCoverage(AChunkWorldExtended& World, const FBox& WorldBounds)
@@ -995,7 +1005,7 @@ bool UChunkWorldReadinessFreezeComponent::TryBuildRuntimeSettledTransform(
 				FBox(FVector(X - Radius, Y - Radius, EndZ - HalfHeight), FVector(X + Radius, Y + Radius, StartZ + HalfHeight)));
 			continue;
 		}
-		if (Hit.bStartPenetrating || (Hit.GetActor() && Hit.GetActor()->IsA<APawn>())
+		if (Hit.bStartPenetrating || ChunkWorldReadinessFreeze::IsPawnSupport(Hit.GetActor())
 			|| (Movement ? !Movement->IsWalkable(Hit) : Hit.ImpactNormal.Z < 0.70710678f)) continue;
 		// Hit.Location is the swept shape center; ImpactPoint + half-height is wrong on slopes.
 		// Chaos can report overlap at exact capsule contact. Use character movement's native
