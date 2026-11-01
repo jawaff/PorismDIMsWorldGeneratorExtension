@@ -15,15 +15,32 @@ DEFINE_LOG_CATEGORY_STATIC(LogChunkWorldBlockHitBlueprintLibrary, Log, All);
 
 namespace
 {
+	// One fallback query owns these samples. Native bulk readers reuse decompressed chunk buffers;
+	// no result survives the query or a subsequent gameplay mutation.
+	struct FBlockHitReadBatch
+	{
+		TArray<FIntVector> Positions;
+		TArray<int> Materials;
+		TArray<FMeshData> Meshes;
+
+		bool Read(AChunkWorld& World)
+		{
+			Materials = World.GetBlockValuesByBlockWorldPos(Positions);
+			Meshes = World.GetMeshDatasByBlockWorldPos(Positions);
+			return Materials.Num() == Positions.Num() && Meshes.Num() == Positions.Num();
+		}
+	};
+
 	struct FOverlayPromotionContext
 	{
 		bool bRestrictPromotionByHitShape = false;
 		FVector ImpactPoint = FVector::ZeroVector;
 		FVector ImpactNormal = FVector::ZeroVector;
 		FVector TraceDirection = FVector::ZeroVector;
+		const FBlockHitReadBatch* ReadBatch = nullptr;
 	};
 
-	bool TryResolveRepresentedBlock(AChunkWorld* ChunkWorld, const FIntVector& CandidateBlockWorldPos, const FVector& RepresentativeWorldPos, EChunkWorldBlockHitResolveSource ResolveSource, FChunkWorldResolvedBlockHit& OutHit);
+	bool TryResolveRepresentedBlock(AChunkWorld* ChunkWorld, const FIntVector& CandidateBlockWorldPos, const FVector& RepresentativeWorldPos, EChunkWorldBlockHitResolveSource ResolveSource, FChunkWorldResolvedBlockHit& OutHit, const FBlockHitReadBatch* ReadBatch = nullptr);
 	bool TryResolvePreferredBlock(
 		AChunkWorld* ChunkWorld,
 		UBlockTypeSchemaComponent* SchemaComponent,
@@ -112,7 +129,8 @@ namespace
 			AboveBlockWorldPos,
 			ChunkWorld->BlockWorldPosToUEWorldPos(AboveBlockWorldPos),
 			EChunkWorldBlockHitResolveSource::LocalProbe,
-			OutOverlayHit))
+			OutOverlayHit,
+			OverlayPromotionContext ? OverlayPromotionContext->ReadBatch : nullptr))
 		{
 			return false;
 		}
@@ -123,15 +141,19 @@ namespace
 	/**
 	 * Resolves one represented block candidate from a specific world position.
 	 */
-	bool TryResolveRepresentedBlock(AChunkWorld* ChunkWorld, const FIntVector& CandidateBlockWorldPos, const FVector& RepresentativeWorldPos, EChunkWorldBlockHitResolveSource ResolveSource, FChunkWorldResolvedBlockHit& OutHit)
+	bool TryResolveRepresentedBlock(AChunkWorld* ChunkWorld, const FIntVector& CandidateBlockWorldPos, const FVector& RepresentativeWorldPos, EChunkWorldBlockHitResolveSource ResolveSource, FChunkWorldResolvedBlockHit& OutHit, const FBlockHitReadBatch* ReadBatch)
 	{
 		if (!IsValid(ChunkWorld))
 		{
 			return false;
 		}
 
-		const int32 CandidateMaterialIndex = ChunkWorld->GetBlockValueByBlockWorldPos(CandidateBlockWorldPos, ERessourceType::MaterialIndex, 0);
-		const int32 CandidateMeshIndex = ChunkWorld->GetMeshDataByBlockWorldPos(CandidateBlockWorldPos).MeshId;
+		const int32 SampleIndex = ReadBatch ? ReadBatch->Positions.IndexOfByKey(CandidateBlockWorldPos) : INDEX_NONE;
+		if (ReadBatch && SampleIndex == INDEX_NONE) return false;
+		const int32 CandidateMaterialIndex = ReadBatch ? ReadBatch->Materials[SampleIndex]
+			: ChunkWorld->GetBlockValueByBlockWorldPos(CandidateBlockWorldPos, ERessourceType::MaterialIndex, 0);
+		const int32 CandidateMeshIndex = ReadBatch ? ReadBatch->Meshes[SampleIndex].MeshId
+			: ChunkWorld->GetMeshDataByBlockWorldPos(CandidateBlockWorldPos).MeshId;
 		if (!IsRepresentedBlockHitVoxel(CandidateMaterialIndex, CandidateMeshIndex))
 		{
 			return false;
@@ -198,7 +220,8 @@ namespace
 			CandidateBlockWorldPos,
 			RepresentativeWorldPos,
 			ResolveSource,
-			CandidateHit);
+			CandidateHit,
+			OverlayPromotionContext ? OverlayPromotionContext->ReadBatch : nullptr);
 
 		if (bHasCandidateHit)
 		{
@@ -309,7 +332,7 @@ bool UChunkWorldBlockHitBlueprintLibrary::TryResolveBlockHitContextFromHitResult
 	const bool bHitInstancedMesh = InstancedMeshComponent != nullptr;
 	const float HalfBlockExtent = ChunkWorld->PrimLayer ? static_cast<float>(ChunkWorld->PrimLayer->BlockSize) * 0.5f : 0.0f;
 	constexpr float ProbeEpsilon = 2.0f;
-	const FOverlayPromotionContext OverlayPromotionContext
+	FOverlayPromotionContext OverlayPromotionContext
 	{
 		true,
 		Hit.ImpactPoint,
@@ -318,8 +341,13 @@ bool UChunkWorldBlockHitBlueprintLibrary::TryResolveBlockHitContextFromHitResult
 	};
 
 	const FChunkWorldHit ChunkWorldHit = ChunkWorld->GetChunkWorldHitByHitResult(Hit, true);
-	const auto TryResolveAndStore = [ChunkWorld, SchemaComponent, &OverlayPromotionContext](const FIntVector& CandidateBlockWorldPos, const FVector& RepresentativeWorldPos, EChunkWorldBlockHitResolveSource ResolveSource, FChunkWorldResolvedBlockHit& OutHit)
+	TArray<FIntVector, TInlineAllocator<7>> EvaluatedCandidates;
+	const auto TryResolveAndStore = [ChunkWorld, SchemaComponent, &OverlayPromotionContext, &EvaluatedCandidates](const FIntVector& CandidateBlockWorldPos, const FVector& RepresentativeWorldPos, EChunkWorldBlockHitResolveSource ResolveSource, FChunkWorldResolvedBlockHit& OutHit)
 	{
+		// Failed probes of the same cell have the same promotion rules within this call. Keep first-hit priority;
+		// never retain misses across calls, where edits or streamed geometry may have changed the representation.
+		if (EvaluatedCandidates.Contains(CandidateBlockWorldPos)) return false;
+		EvaluatedCandidates.Add(CandidateBlockWorldPos);
 		return TryResolvePreferredBlock(
 			ChunkWorld,
 			SchemaComponent,
@@ -381,6 +409,21 @@ bool UChunkWorldBlockHitBlueprintLibrary::TryResolveBlockHitContextFromHitResult
 	if (bHasChunkWorldHit)
 	{
 		ProbeLocations.Add(ChunkWorld->BlockWorldPosToUEWorldPos(ChunkWorldHit.BlockWorldPos));
+	}
+
+	FBlockHitReadBatch ReadBatch;
+	for (const FVector& Probe : ProbeLocations)
+	{
+		const FIntVector Cell = ChunkWorld->UEWorldPosToBlockWorldPos(Probe);
+		if (EvaluatedCandidates.Contains(Cell)) continue;
+		ReadBatch.Positions.AddUnique(Cell);
+		if (ShouldPromoteOverlayBlockFromContext(ChunkWorld, Cell, &OverlayPromotionContext))
+			ReadBatch.Positions.AddUnique(Cell + FIntVector(0, 0, 1));
+	}
+	if (!ReadBatch.Positions.IsEmpty())
+	{
+		if (!ReadBatch.Read(*ChunkWorld)) return false;
+		OverlayPromotionContext.ReadBatch = &ReadBatch;
 	}
 
 	for (const FVector& CandidateProbeLocation : ProbeLocations)

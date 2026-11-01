@@ -331,12 +331,17 @@ void UChunkWorldBlockSwapScannerComponent::GatherSourceCandidateBlocks(AChunkWor
 		}
 
 		FGameplayTag BlockTypeName;
-		FBlockDefinitionBase Definition;
+		FInstancedStruct DefinitionPayload;
+		// Resolution just sampled these indexes on the game thread; schema selection needs no second voxel read.
 		if (!ResolvedHit.BlockTypeSchemaComponent
-			|| !ResolvedHit.BlockTypeSchemaComponent->GetBlockDefinitionForBlockWorldPos(BlockWorldPos, BlockTypeName, Definition))
+			|| !ResolvedHit.BlockTypeSchemaComponent->GetBlockDefinitionForRepresentationIndexes(
+				ResolvedHit.MaterialIndex, ResolvedHit.MeshIndex, BlockTypeName, DefinitionPayload))
 		{
 			continue;
 		}
+		const FBlockDefinitionBase* TypedDefinition = DefinitionPayload.GetPtr<FBlockDefinitionBase>();
+		if (!TypedDefinition) continue;
+		const FBlockDefinitionBase Definition = *TypedDefinition;
 
 		++Diagnostics.SchemaHits;
 		if (Definition.SwapActorClass.IsNull())

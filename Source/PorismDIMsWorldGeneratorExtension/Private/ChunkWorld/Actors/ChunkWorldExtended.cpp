@@ -14,6 +14,7 @@
 #include "ChunkWorld/Components/ChunkWorldBlockFeedbackComponent.h"
 #include "ChunkWorld/Components/ChunkWorldBlockSwapScannerComponent.h"
 #include "ChunkWorld/Components/ChunkWorldBlockSwapComponent.h"
+#include "ChunkWorld/Components/ChunkWorldStreamingMeshComponent.h"
 #include "ChunkWorld/Spawn/ChunkWorldSpawnComponent.h"
 #include "ChunkWorldStructs/ChunkWorldRuntimeStructs.h"
 #include "ChunkWorldStructs/ChunkWorldStructs.h"
@@ -253,6 +254,7 @@ namespace
 
 AChunkWorldExtended::AChunkWorldExtended()
 {
+	MeshComponent = UChunkWorldStreamingMeshComponent::StaticClass();
 	BlockTypeSchemaComponent = CreateDefaultSubobject<UBlockTypeSchemaComponent>(TEXT("BlockTypeSchemaComponent"));
 	BlockFeedbackComponent = CreateDefaultSubobject<UChunkWorldBlockFeedbackComponent>(TEXT("BlockFeedbackComponent"));
 	BlockSwapScannerComponent = CreateDefaultSubobject<UChunkWorldBlockSwapScannerComponent>(TEXT("BlockSwapScannerComponent"));

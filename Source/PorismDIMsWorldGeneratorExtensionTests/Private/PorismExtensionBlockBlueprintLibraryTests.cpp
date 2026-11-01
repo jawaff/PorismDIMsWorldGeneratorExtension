@@ -13,6 +13,7 @@
 #include "Sound/SoundWave.h"
 #include "Components/StaticMeshComponent.h"
 #include "Layout/Support/LayoutWorldTestUtilities.h"
+#include "ChunkWorld/Support/ChunkWorldHitQueryTestTypes.h"
 #include "Misc/AutomationTest.h"
 #include "GameplayTagContainer.h"
 #include "StructUtils/InstancedStruct.h"
@@ -82,6 +83,93 @@ bool FPorismExtensionBlockHitBlueprintLibraryInvalidInputTest::RunTest(const FSt
 	TestTrue(TEXT("Chunk world exposes its block feedback component through the block hit helper"), UChunkWorldBlockHitBlueprintLibrary::GetBlockFeedbackComponentFromChunkWorld(ChunkWorld, FeedbackComponent));
 	TestEqual(TEXT("Resolved feedback component matches the chunk world component"), FeedbackComponent, ChunkWorld->GetBlockFeedbackComponent());
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPorismExtensionBlockHitUniqueProbesTest,
+	"PorismExtension.BlockHit.BlueprintLibrary.UniqueFallbackProbes",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FPorismExtensionBlockHitUniqueProbesTest::RunTest(const FString&)
+{
+	auto* World = GEditor->GetEditorWorldContext().World()->SpawnActor<AChunkWorldHitQueryTestWorld>();
+	FLayoutTestWorldSupport::InitializeTransientChunkWorld(World, FIntVector(16), TEXT("HitQueryTest"));
+	ON_SCOPE_EXIT { FLayoutTestWorldSupport::ShutdownTransientChunkWorld(World); World->Destroy(); };
+	auto* Component = NewObject<UStaticMeshComponent>(World);
+	FHitResult Hit;
+	Hit.Component = Component;
+	// Native collision identity is absent: exercise the real local fallback used by stale hits.
+	AddExpectedError(TEXT("HitCheck FAIL"), EAutomationExpectedErrorFlags::Contains, 4);
+	for (const FVector Point : {FVector(4.25), FVector(-4.25)})
+	{
+		Hit.ImpactPoint = Point;
+		const FIntVector Cell = World->UEWorldPosToBlockWorldPos(Point);
+		World->MaterialValues.Reset();
+		World->MaterialReads.Reset();
+		FChunkWorldResolvedBlockHit Resolved;
+		TestFalse(TEXT("Coincident empty probes remain a miss"),
+			UChunkWorldBlockHitBlueprintLibrary::TryResolveBlockHitContextFromHitResult(Hit, FVector::ZeroVector, Resolved));
+		const int32 CellReads = World->MaterialReads.FilterByPredicate([&](const FIntVector& Read) { return Read == Cell; }).Num();
+		AddInfo(FString::Printf(TEXT("HIT_QUERY empty cell=%s candidate_reads=%d total_material_reads=%d"),
+			*Cell.ToString(), CellReads, World->MaterialReads.Num()));
+		TestEqual(TEXT("Each fallback candidate is resolved once within the call"), CellReads, 1);
+		TestFalse(TEXT("A miss does not publish a stale block"), Resolved.bHasBlock);
+
+		World->MaterialValues.Add(Cell, SinfullMaterial);
+		World->MaterialReads.Reset();
+		TestTrue(TEXT("An edit is visible on the next independent hit query"),
+			UChunkWorldBlockHitBlueprintLibrary::TryResolveBlockHitContextFromHitResult(Hit, FVector::ZeroVector, Resolved));
+		TestEqual(TEXT("The edited candidate retains priority"), Resolved.BlockWorldPos, Cell);
+		TestEqual(TEXT("The first successful probe retains its representative point"), Resolved.RepresentativeWorldPos, Point);
+		TestEqual(TEXT("The successful fallback source is retained"), Resolved.ResolveSource, EChunkWorldBlockHitResolveSource::LocalProbe);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPorismExtensionBlockHitBatchedFallbackTest,
+	"PorismExtension.BlockHit.BlueprintLibrary.BatchedFallbackReads",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FPorismExtensionBlockHitBatchedFallbackTest::RunTest(const FString&)
+{
+	auto* World = GEditor->GetEditorWorldContext().World()->SpawnActor<AChunkWorldHitQueryTestWorld>();
+	FLayoutTestWorldSupport::InitializeTransientChunkWorld(World, FIntVector(16), TEXT("BatchedHitQuery"));
+	ON_SCOPE_EXIT { FLayoutTestWorldSupport::ShutdownTransientChunkWorld(World); World->Destroy(); };
+	FHitResult Hit;
+	Hit.Component = NewObject<UStaticMeshComponent>(World);
+	AddExpectedError(TEXT("HitCheck FAIL"), EAutomationExpectedErrorFlags::Contains, 8);
+	for (const FVector Point : {FVector(4.25), FVector(-4.25)})
+	{
+		Hit.ImpactPoint = Point;
+		const FIntVector Cell = World->UEWorldPosToBlockWorldPos(Point);
+		World->MaterialValues.Reset();
+		World->MaterialReadBatches = 0;
+		FChunkWorldResolvedBlockHit Resolved;
+		TestFalse(TEXT("Empty fallback remains unresolved"),
+			UChunkWorldBlockHitBlueprintLibrary::TryResolveBlockHitContextFromHitResult(Hit, FVector::ZeroVector, Resolved));
+		TestEqual(TEXT("Fallback candidate and overlay use one native material batch"), World->MaterialReadBatches, 1);
+		World->MaterialValues.Add(Cell, SinfullMaterial);
+		World->MaterialReadBatches = 0;
+		TestTrue(TEXT("The next query sees edited material without retained misses"),
+			UChunkWorldBlockHitBlueprintLibrary::TryResolveBlockHitContextFromHitResult(Hit, FVector::ZeroVector, Resolved));
+		TestEqual(TEXT("Hit resolution also uses one native material batch"), World->MaterialReadBatches, 1);
+		TestEqual(TEXT("Candidate priority is unchanged"), Resolved.BlockWorldPos, Cell);
+		TestEqual(TEXT("Representative position is unchanged"), Resolved.RepresentativeWorldPos, Point);
+
+		FMeshData Mesh;
+		Mesh.MeshId = 19;
+		World->SetMeshDataByBlockWorldPos(Cell + FIntVector(0, 0, 1), Mesh, false);
+		TestTrue(TEXT("Batched reads retain live overlay promotion"),
+			UChunkWorldBlockHitBlueprintLibrary::TryResolveBlockHitContextFromHitResult(Hit, FVector::ZeroVector, Resolved));
+		TestEqual(TEXT("Overlay keeps its position"), Resolved.BlockWorldPos, Cell + FIntVector(0, 0, 1));
+		TestEqual(TEXT("Overlay keeps its native mesh ID"), Resolved.MeshIndex, 19);
+		Mesh.MeshId = 23;
+		World->SetMeshDataByBlockWorldPos(Cell, Mesh, false);
+		TestTrue(TEXT("A direct mesh retains priority over the overlay"),
+			UChunkWorldBlockHitBlueprintLibrary::TryResolveBlockHitContextFromHitResult(Hit, FVector::ZeroVector, Resolved));
+		TestEqual(TEXT("Direct mesh keeps its position"), Resolved.BlockWorldPos, Cell);
+		TestEqual(TEXT("Direct mesh keeps its native mesh ID"), Resolved.MeshIndex, 23);
+	}
 	return true;
 }
 

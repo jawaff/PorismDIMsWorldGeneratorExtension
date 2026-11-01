@@ -41,6 +41,8 @@ public:
 
 	/**
 	 * Resolves the chunk-world hit into a reusable block context that can be shared by trace and damage components.
+	 * Fallback cells and eligible overlays share bounded native bulk reads, then evaluate in original priority order.
+	 * Coincident cells are sampled once per fallback batch; no result survives into a later query or gameplay mutation.
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Porism|ChunkWorld|Block")
 	static bool TryResolveBlockHitContextFromHitResult(const FHitResult& Hit, const FVector& TraceDirection, FChunkWorldResolvedBlockHit& OutResolvedHit);

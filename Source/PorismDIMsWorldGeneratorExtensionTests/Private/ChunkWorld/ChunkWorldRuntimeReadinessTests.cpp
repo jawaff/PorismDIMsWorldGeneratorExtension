@@ -717,6 +717,57 @@ bool FChunkWorldRuntimeReadinessNoSurfaceTest::RunTest(const FString& Parameters
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FChunkWorldRuntimeReadinessMixedPawnHitsTest,
+	"PorismExtension.ChunkWorld.ReadinessFreeze.Runtime.MixedPawnHitsWaitForTerrain",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FChunkWorldRuntimeReadinessMixedPawnHitsTest::RunTest(const FString& Parameters)
+{
+	for (const bool bPenetratingPawnHit : {false, true})
+	{
+		FRuntimeReadinessTestContext Context;
+		if (!TestTrue(TEXT("Authority fixture initializes"), Context.Initialize())) return false;
+		auto* Floor = Context.World->SpawnActor<AChunkWorldReadinessTestSurface>();
+		auto* FloorCollision = Floor->FindComponentByClass<UBoxComponent>();
+		FloorCollision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		auto* OtherPawn = Context.World->SpawnActor<AChunkWorldReadinessTestPawn>();
+		auto* Equipment = Context.World->SpawnActor<AChunkWorldReadinessTestSurface>();
+		Equipment->SetOwner(OtherPawn);
+		Equipment->FindComponentByClass<UBoxComponent>()->SetBoxExtent(FVector(5.0, 5.0, bPenetratingPawnHit ? 100.0 : 10.0));
+		Equipment->SetActorLocation(FVector(0.0, 0.0, bPenetratingPawnHit ? 999.0 : 320.0));
+		FHitResult Hit;
+		TestTrue(TEXT("Center query encounters pawn-owned geometry"), Context.World->SweepSingleByProfile(Hit,
+			FVector(0.0, 0.0, 999.0), FVector(0.0, 0.0, -99.0), FQuat::Identity, TEXT("BlockAll"),
+			FCollisionShape::MakeSphere(1.0f), FCollisionQueryParams(SCENE_QUERY_STAT(ReadinessMixedPawnHits), false, Context.Pawn)));
+		TestEqual(TEXT("Center blocker belongs to the other pawn"), Hit.GetActor(), static_cast<AActor*>(Equipment));
+		TestEqual(TEXT("Fixture covers ordinary and penetrating pawn hits"), Hit.bStartPenetrating != 0, bPenetratingPawnHit);
+
+		auto* Freeze = Context.Pawn->GetTestFreeze();
+		const FGuid Session = Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), false, {});
+		Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Freeze->GetRuntimeReadinessSession().ReadinessId);
+		TestEqual(TEXT("A rejected pawn hit cannot terminate missing-terrain recovery"), Freeze->GetRuntimeReadinessSession().State,
+			EChunkWorldRuntimeReadinessState::WaitingForServerReady);
+		TestTrue(TEXT("Mixed queries cannot release an unsafe pawn"), Freeze->IsReadinessFreezeActive());
+		FloorCollision->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+		Freeze->Advance();
+		TestEqual(TEXT("Later terrain settles the same operation"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Settled);
+		TestEqual(TEXT("Retry preserves session identity"), Freeze->GetRuntimeReadinessSession().SessionId, Session);
+		TestTrue(TEXT("Pawn-owned geometry never supplies the accepted floor"), Context.Pawn->GetActorLocation().Z < 100.0);
+
+		FloorCollision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Context.Pawn->SetActorLocation(FVector(0.0, 0.0, 100.0));
+		Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), false, {});
+		Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Freeze->GetRuntimeReadinessSession().ReadinessId);
+		FindFProperty<FFloatProperty>(UChunkWorldReadinessFreezeComponent::StaticClass(), TEXT("RuntimeSettlementCollisionTimeoutSeconds"))->SetPropertyValue_InContainer(Freeze, 0.0f);
+		Freeze->Advance();
+		TestEqual(TEXT("Persistent mixed misses still fail at the collision deadline"), Freeze->GetRuntimeReadinessSession().State,
+			EChunkWorldRuntimeReadinessState::Failed);
+		TestTrue(TEXT("Failure came from bounded collision recovery"), Freeze->GetRuntimeReadinessSession().DebugReason.Contains(TEXT("Settlement collision wait expired.")));
+		TestTrue(TEXT("Expired mixed queries retain freeze"), Freeze->IsReadinessFreezeActive());
+	}
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FChunkWorldRuntimeReadinessTimeoutTest,
 	"PorismExtension.ChunkWorld.ReadinessFreeze.Runtime.ClientAcknowledgementTimeout",

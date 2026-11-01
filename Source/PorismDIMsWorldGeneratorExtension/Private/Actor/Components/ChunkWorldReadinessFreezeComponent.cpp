@@ -985,7 +985,7 @@ bool UChunkWorldReadinessFreezeComponent::TryBuildRuntimeSettledTransform(
 	FRandomStream Random(static_cast<int32>(GetTypeHash(RuntimeSession.SessionId)));
 	const int32 Attempts = FMath::Clamp(RuntimeSettlementCandidateCount, 1, 64);
 	FVector SettledLocation = FVector::ZeroVector;
-	int32 OutsideXY = 0, Misses = 0;
+	int32 OutsideXY = 0, Misses = 0, PawnHits = 0;
 	bool bFound = false;
 	const FGuid ScoringSession = RuntimeSession.SessionId;
 	const FGuid ScoringReadiness = RuntimeSession.ReadinessId;
@@ -1005,8 +1005,9 @@ bool UChunkWorldReadinessFreezeComponent::TryBuildRuntimeSettledTransform(
 				FBox(FVector(X - Radius, Y - Radius, EndZ - HalfHeight), FVector(X + Radius, Y + Radius, StartZ + HalfHeight)));
 			continue;
 		}
-		if (Hit.bStartPenetrating || ChunkWorldReadinessFreeze::IsPawnSupport(Hit.GetActor())
-			|| (Movement ? !Movement->IsWalkable(Hit) : Hit.ImpactNormal.Z < 0.70710678f)) continue;
+		// Even an initial overlap with a pawn says nothing about terrain collision readiness.
+		if (ChunkWorldReadinessFreeze::IsPawnSupport(Hit.GetActor())) { ++PawnHits; continue; }
+		if (Hit.bStartPenetrating || (Movement ? !Movement->IsWalkable(Hit) : Hit.ImpactNormal.Z < 0.70710678f)) continue;
 		// Hit.Location is the swept shape center; ImpactPoint + half-height is wrong on slopes.
 		// Chaos can report overlap at exact capsule contact. Use character movement's native
 		// minimum floor clearance, not a terrain-height correction or an untested offset.
@@ -1054,9 +1055,9 @@ bool UChunkWorldReadinessFreezeComponent::TryBuildRuntimeSettledTransform(
 	if (!bFound)
 	{
 		// Native completion can precede collision activation during a chunk visibility handoff.
-		// Keep an entirely empty query batch retryable within the existing collision deadline;
-		// metadata coverage alone cannot prove that a surface is queryable yet.
-		bOutCollisionPending |= Misses > 0 && Misses + OutsideXY == Attempts;
+		// Pawn-only blockers cannot turn missing-terrain queries into a conclusive result.
+		// Retry within the existing deadline; actual terrain/clearance rejections remain conclusive.
+		bOutCollisionPending |= Misses > 0 && Misses + PawnHits + OutsideXY == Attempts;
 		OutFailureReason = FString::Printf(
 			TEXT("No safe blocking surface found inside bounded candidate region. Owner=%s CapsuleCenter=(%s) CapsuleOffset=(%s) Radius=%.3f HalfHeight=%.3f ScanZ=[%.3f,%.3f] RegionMin=(%s) RegionMax=(%s) Profile=%s Attempts=%d CollisionPending=%d"),
 			*GetNameSafe(Owner), *Location.ToString(), *CapsuleOffset.ToString(), Radius, HalfHeight, EndZ, StartZ,
