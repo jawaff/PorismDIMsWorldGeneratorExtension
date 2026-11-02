@@ -28,5 +28,9 @@ struct FLayoutStartupCoverage
 	/** Parallel to Walkers/Targets; invalid boxes retain indexing for walkers with no required footprint. */
 	TArray<FBox> BoundsInBlocks;
 	uint64 Revision = 0;
+#if WITH_DEV_AUTOMATION_TESTS
+	/** Counts actual recursive builds so regression tests distinguish reuse from equivalent recomputation. */
+	uint64 WalkerBoundsBuilds = 0;
+#endif
 	double NextDiagnosticTime = 0;
 };

@@ -576,6 +576,80 @@ bool FChunkWorldRuntimeReadinessLODCountTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FChunkWorldRuntimeReadinessCoverageReuseTest,
+	"PorismExtension.ChunkWorld.ReadinessFreeze.Runtime.CoverageReuse",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+/** Incremental envelopes must equal a fresh full build through walker and shared-geometry changes. */
+bool FChunkWorldRuntimeReadinessCoverageReuseTest::RunTest(const FString& Parameters)
+{
+	FRuntimeReadinessTestContext Context;
+	if (!TestTrue(TEXT("Authority world initializes"), Context.Initialize())) return false;
+	Context.ChunkWorld->StopGen();
+	FChunkDataParams Finest = Context.ChunkWorld->WorldGenDef->WorldChunks[0];
+	FChunkDataParams Middle = Finest, Coarse = Finest;
+	Middle.BlockSizeMulti = 2.0;
+	Middle.SectorCount = FIntVector(2);
+	Coarse.BlockSizeMulti = 4.0;
+	Coarse.SectorCount = FIntVector(3);
+	Context.ChunkWorld->WorldGenDef->WorldChunks = {Coarse, Middle, Finest};
+	Context.ChunkWorld->SaveTarget += TEXT("/CoverageReuse");
+	Context.ChunkWorld->StartGen();
+	if (!TestEqual(TEXT("Three layers available"), Context.ChunkWorld->GetChunkLayerCount(), 3)) return false;
+	if (!Context.ChunkWorld->HasRegisteredChunkWorldWalker(Context.Pawn->GetTestWalker()))
+		Context.ChunkWorld->AddChunkWorldWalker(Context.Pawn->GetTestWalker());
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	auto* Remote = Context.World->SpawnActor<AChunkWorldReadinessTestPawn>(
+		AChunkWorldReadinessTestPawn::StaticClass(), FTransform(FVector(64, 8, 8)), SpawnParameters);
+	if (!TestNotNull(TEXT("Second walker spawns"), Remote)) return false;
+	Context.ChunkWorld->AddChunkWorldWalker(Remote->GetTestWalker());
+	auto* Layout = Context.ChunkWorld->GetLayoutRuntimeComponent();
+	auto VerifyCold = [&](const TCHAR* Description)
+	{
+		Layout->RefreshStartupCoverage();
+		const auto ExpectedBounds = Layout->StartupCoverage->BoundsInBlocks;
+		const auto ExpectedWalkers = Layout->StartupCoverage->Walkers;
+		Layout->InvalidateStartupCoverage();
+		Layout->RefreshStartupCoverage();
+		TestTrue(Description, Layout->StartupCoverage->BoundsInBlocks == ExpectedBounds);
+		TestTrue(TEXT("Full build preserves walker-to-bound indexing"), Layout->StartupCoverage->Walkers == ExpectedWalkers);
+	};
+	VerifyCold(TEXT("Initial envelopes match full build"));
+	TestEqual(TEXT("Both walkers have indexed envelopes"), Layout->StartupCoverage->Walkers.Num(), 2);
+	const auto InitialRevision = Layout->StartupCoverage->Revision;
+	Layout->RefreshStartupCoverage();
+	TestEqual(TEXT("Unchanged refresh retains revision"), Layout->StartupCoverage->Revision, InitialRevision);
+	const int32 RemoteIndex = Layout->StartupCoverage->Walkers.IndexOfByKey(TWeakObjectPtr<UObject>(Remote->GetTestWalker()));
+	if (!TestTrue(TEXT("Remote walker is indexed"), RemoteIndex != INDEX_NONE)) return false;
+	const FBox RemoteBounds = Layout->StartupCoverage->BoundsInBlocks[RemoteIndex];
+	const uint64 BuildsBeforeMove = Layout->StartupCoverage->WalkerBoundsBuilds;
+	Context.Pawn->SetActorLocation(FVector(48, 8, 8));
+	Layout->RefreshStartupCoverage();
+	TestEqual(TEXT("Only the changed target is recursively rebuilt"), Layout->StartupCoverage->WalkerBoundsBuilds - BuildsBeforeMove, uint64(1));
+	TestTrue(TEXT("One moving target preserves stationary envelope"), Layout->StartupCoverage->BoundsInBlocks[RemoteIndex] == RemoteBounds);
+	VerifyCold(TEXT("Selective movement matches full build"));
+	Remote->SetActorLocation(FVector(-64, -32, 8));
+	VerifyCold(TEXT("Negative-coordinate movement matches full build"));
+	Context.ChunkWorld->FrameViewRangeFactorNow *= 2.0;
+	VerifyCold(TEXT("Changed refinement ranges match full build"));
+	Layout->ReadinessLODCount = 2;
+	VerifyCold(TEXT("Changed required layer invalidates all envelopes"));
+	Context.ChunkWorld->SetActorTransform(FTransform(FRotator(0, 30, 0), FVector(40, -20, 5)));
+	VerifyCold(TEXT("World transform change matches full build"));
+	Context.ChunkWorld->RemoveChunkWorldWalker(Context.Pawn->GetTestWalker());
+	VerifyCold(TEXT("Walker removal preserves remaining indexing"));
+	TestEqual(TEXT("Removed walker has no retained envelope"), Layout->StartupCoverage->Walkers.Num(), 1);
+	Context.ChunkWorld->AddChunkWorldWalker(Context.Pawn->GetTestWalker());
+	VerifyCold(TEXT("Walker reordering and re-registration match full build"));
+	Context.ChunkWorld->StopGen();
+	Layout->RefreshStartupCoverage();
+	TestTrue(TEXT("Stopped generation clears cached envelopes"), Layout->StartupCoverage->BoundsInBlocks.IsEmpty());
+	Context.ChunkWorld->StartGen();
+	VerifyCold(TEXT("Restarted generation builds fresh envelopes"));
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FChunkWorldRuntimeReadinessFinestCoverageTest,
 	"PorismExtension.ChunkWorld.ReadinessFreeze.Runtime.FinestCoverage",

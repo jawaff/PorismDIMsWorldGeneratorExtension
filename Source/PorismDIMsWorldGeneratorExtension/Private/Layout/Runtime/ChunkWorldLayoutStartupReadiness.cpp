@@ -6,6 +6,7 @@
 #include "LayoutPlanningAreaQueue.h"
 #include "LayoutStartupCoverage.h"
 #include "Misc/ScopeLock.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 
 void UChunkWorldLayoutRuntimeComponent::SetStartupCoverageRequired(UObject* Consumer, const bool bRequired,
 	const TConstArrayView<TWeakObjectPtr<UObject>> Walkers)
@@ -43,6 +44,7 @@ void UChunkWorldLayoutRuntimeComponent::InvalidateStartupCoverage()
 
 void UChunkWorldLayoutRuntimeComponent::RefreshStartupCoverage()
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(Layout_RefreshStartupCoverage);
 	if (!PlanningAreaQueue) return;
 	if (!StartupCoverage) StartupCoverage = MakeShared<FLayoutStartupCoverage>();
 	auto& Coverage = *StartupCoverage;
@@ -129,20 +131,28 @@ void UChunkWorldLayoutRuntimeComponent::RefreshStartupCoverage()
 			Target.RefinementRanges.Add(World->WorldChunks[Layer]->ViewDistance * Multipliers[Layer] * EffectiveRange);
 	}
 	const FVector Reach = GetAutomaticLayoutReachInBlocks();
-	if (Targets == Coverage.Targets && Walkers == Coverage.Walkers && Shapes == Coverage.LayerShapes
+	const bool bSameGeometry = Shapes == Coverage.LayerShapes
 		&& Coverage.FirstRequiredDetailLevel == FirstRequiredDetailLevel
-		&& Coverage.LayoutReach == Reach && Coverage.BlockSize == BlockSize && Coverage.Transform.Equals(World->GetTransform(), 0.0)) return;
-	Coverage.Targets = MoveTemp(Targets);
-	Coverage.Walkers = MoveTemp(Walkers);
-	Coverage.LayerShapes = MoveTemp(Shapes);
-	Coverage.FirstRequiredDetailLevel = FirstRequiredDetailLevel;
-	Coverage.BlockSize = BlockSize;
-	Coverage.LayoutReach = Reach;
-	Coverage.Transform = World->GetTransform();
-	Coverage.BoundsInBlocks.Reset();
-	++Coverage.Revision;
-	for (const auto& Target : Coverage.Targets)
+		&& Coverage.LayoutReach == Reach && Coverage.BlockSize == BlockSize
+		&& Coverage.Transform.Equals(World->GetTransform(), 0.0);
+	if (Targets == Coverage.Targets && Walkers == Coverage.Walkers && bSameGeometry) return;
+	TRACE_CPUPROFILER_EVENT_SCOPE(Layout_RebuildStartupCoverage);
+	TArray<FBox> NextBounds;
+	NextBounds.Reserve(Targets.Num());
+	for (int32 Index = 0; Index < Targets.Num(); ++Index)
 	{
+		const auto& Target = Targets[Index];
+		// Bounds depend on the complete target and shared geometry, not walker identity.
+		// Reordered/new walkers fall back to rebuilding unless their indexed target is identical.
+		if (bSameGeometry && Coverage.Targets.IsValidIndex(Index) && Coverage.Targets[Index] == Target)
+		{
+			NextBounds.Add(Coverage.BoundsInBlocks[Index]);
+			continue;
+		}
+		TRACE_CPUPROFILER_EVENT_SCOPE(Layout_BuildWalkerCoverage);
+#if WITH_DEV_AUTOMATION_TESTS
+		++Coverage.WalkerBoundsBuilds;
+#endif
 		FBox WalkerBounds(ForceInit);
 		TFunction<void(int32, FIntVector)> Visit = [&](const int32 LayerIndex, const FIntVector Key)
 		{
@@ -174,8 +184,17 @@ void UChunkWorldLayoutRuntimeComponent::RefreshStartupCoverage()
 		for (int32 Y = 1 - Target.RootLimits.Y; Y < Target.RootLimits.Y; ++Y)
 		for (int32 Z = 1 - Target.RootLimits.Z; Z < Target.RootLimits.Z; ++Z)
 			Visit(0, Target.RootCenter + FIntVector(X, Y, Z));
-		Coverage.BoundsInBlocks.Add(WalkerBounds);
+		NextBounds.Add(WalkerBounds);
 	}
+	Coverage.Targets = MoveTemp(Targets);
+	Coverage.Walkers = MoveTemp(Walkers);
+	Coverage.LayerShapes = MoveTemp(Shapes);
+	Coverage.FirstRequiredDetailLevel = FirstRequiredDetailLevel;
+	Coverage.BlockSize = BlockSize;
+	Coverage.LayoutReach = Reach;
+	Coverage.Transform = World->GetTransform();
+	Coverage.BoundsInBlocks = MoveTemp(NextBounds);
+	++Coverage.Revision;
 	TArray<FBox> PriorityBounds;
 	for (const FBox& Bounds : Coverage.BoundsInBlocks)
 		if (Bounds.IsValid) PriorityBounds.Add(Bounds.ExpandBy(Reach));

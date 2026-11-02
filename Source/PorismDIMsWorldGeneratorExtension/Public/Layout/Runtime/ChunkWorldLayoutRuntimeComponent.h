@@ -635,6 +635,7 @@ private:
 	mutable double EditorDebugStatsVisibleUntil = 0.0;
 	bool bReportedEditorStatsDraw = false;
 	friend class FChunkWorldRuntimeReadinessLODCountTest;
+	friend class FChunkWorldRuntimeReadinessCoverageReuseTest;
 	friend class FLayoutContinuationSettlementTest;
 	friend class FLayoutRootSpacingRuntimeTest;
 	friend class FLayoutPlanningAreaQueueTest;
