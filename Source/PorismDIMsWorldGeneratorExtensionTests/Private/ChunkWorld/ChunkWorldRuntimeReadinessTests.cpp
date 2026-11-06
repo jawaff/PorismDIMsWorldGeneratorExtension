@@ -275,7 +275,13 @@ bool FChunkWorldRuntimeCollisionCoverageTest::RunTest(const FString& Parameters)
 	}
 	Freeze->Advance();
 	TestEqual(TEXT("Native empty-collision readiness completes body clearance"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Settled);
+	const auto SettledReceipt = Freeze->GetRuntimeReadinessSession();
 	Chunk->IsReady = false;
+	Freeze->Advance();
+	// Settlement receipts describe a completed operation, not a live arbitrary-destination collision lease.
+	TestEqual(TEXT("Native invalidation does not reopen completed settlement"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Settled);
+	TestTrue(TEXT("Matching terminal acknowledgement is idempotence, not current collision proof"),
+		Freeze->AcknowledgeOwningClientRuntimeReady(Context.Controller, SettledReceipt.SessionId, SettledReceipt.ReadinessId));
 	Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), false, {});
 	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Freeze->GetRuntimeReadinessSession().ReadinessId);
 	FindFProperty<FFloatProperty>(UChunkWorldReadinessFreezeComponent::StaticClass(), TEXT("RuntimeSettlementCollisionTimeoutSeconds"))->SetPropertyValue_InContainer(Freeze, 0.0f);
@@ -302,6 +308,13 @@ bool FChunkWorldRuntimeCollisionCoverageTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Complete client search footprint publishes acknowledgement"), Context.Controller->ClientReadyCount, 1);
 	Freeze->Advance();
 	TestEqual(TEXT("Coverage acknowledgement publishes only once"), Context.Controller->ClientReadyCount, 1);
+	const auto LocalReceipt = Freeze->GetRuntimeReadinessSession();
+	TestTrue(TEXT("Local publication is available for controller reconciliation"), Freeze->IsLocalRuntimeReadyForAcknowledgement());
+	Chunk->IsReady = false;
+	Freeze->Advance();
+	TestEqual(TEXT("Native collision loss alone does not create a new spatial receipt"), Freeze->GetRuntimeReadinessSession().ReadinessId, LocalReceipt.ReadinessId);
+	TestTrue(TEXT("Published receipt is not a live owner collision query"), Freeze->IsLocalRuntimeReadyForAcknowledgement());
+	Chunk->IsReady = true;
 	return true;
 }
 
