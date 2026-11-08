@@ -32,7 +32,6 @@ void FLayoutTestWorldSupport::InitializeTransientChunkWorld(
 	ShutdownTransientChunkWorld(World);
 
 	World->WorldGenDef = NewObject<UWorldGenDef>(World);
-	World->WorldGenDefPredefined = true;
 	World->WorldGenDef->BaseBlockSize = 1;
 	World->WorldGenDef->ChunkBlockSize = ChunkBlockSize;
 	World->WorldGenDef->ChunkCacheFileSize = 4;

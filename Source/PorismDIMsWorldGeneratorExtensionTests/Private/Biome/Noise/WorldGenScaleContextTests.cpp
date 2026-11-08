@@ -23,7 +23,6 @@ namespace
 
 		AChunkWorldExtended* const ChunkWorld = EditorWorld->SpawnActor<AChunkWorldExtended>();
 		ChunkWorld->WorldGenDef = NewObject<UWorldGenDef>(ChunkWorld);
-		ChunkWorld->WorldGenDefPredefined = true;
 		ChunkWorld->WorldGenDef->BaseBlockSize = BaseBlockSize;
 		ChunkWorld->WorldGenDef->NoiseScale = NoiseScale;
 		ChunkWorld->WorldGenDef->ChunkBlockSize = ChunkBlockSize;

@@ -430,6 +430,39 @@ bool FChunkWorldRuntimeReadinessServerSettlementTest::RunTest(const FString& Par
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FChunkWorldRuntimeReadinessObservationDrainTest,
+	"PorismExtension.ChunkWorld.ReadinessFreeze.Runtime.ObservationDrain",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FChunkWorldRuntimeReadinessObservationDrainTest::RunTest(const FString& Parameters)
+{
+	FRuntimeReadinessTestContext Context;
+	if (!TestTrue(TEXT("Authority context"), Context.Initialize())) return false;
+	Context.World->SpawnActor<AChunkWorldReadinessTestSurface>();
+	auto* Freeze = Context.Pawn->GetTestFreeze();
+	auto* Layout = Context.ChunkWorld->GetLayoutRuntimeComponent();
+	const FGuid Session = Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), true, {});
+	const FGuid Receipt = Freeze->GetRuntimeReadinessSession().ReadinessId;
+	Layout->QueueObservedLoadedChunk(Context.ChunkWorld->UEWorldPosToBlockWorldPos(Context.Pawn->GetActorLocation()), 0);
+	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Receipt);
+	TestTrue(TEXT("Owner acknowledges matching receipt"), Freeze->AcknowledgeOwningClientRuntimeReady(Context.Controller, Session, Receipt));
+	TestEqual(TEXT("Queued observations still block settlement"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::WaitingForLayouts);
+	Layout->ProcessQueuedLayoutWorkNow();
+	Freeze->Advance();
+	TestEqual(TEXT("Draining observations without terrain writes preserves receipt"), Freeze->GetRuntimeReadinessSession().ReadinessId, Receipt);
+	TestEqual(TEXT("Native/client receipts converge without a new terrain event"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Settled);
+
+	Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), true, {});
+	const FGuid BeforeWrite = Freeze->GetRuntimeReadinessSession().ReadinessId;
+	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), BeforeWrite);
+	Layout->OnAutomaticLayoutWriteAttempt.Broadcast(Context.ChunkWorld, FBox(FVector(-50), FVector(50)));
+	TestNotEqual(TEXT("Actual terrain write invalidates receipts"), Freeze->GetRuntimeReadinessSession().ReadinessId, BeforeWrite);
+	TestFalse(TEXT("Write requires a fresh native receipt"), Freeze->GetRuntimeReadinessSession().bServerWalkerReady);
+	TestFalse(TEXT("Write requires a fresh owner receipt"), Freeze->GetRuntimeReadinessSession().bOwningClientReady);
+	TestFalse(TEXT("Write remains frozen"), Freeze->GetRuntimeReadinessSession().State == EChunkWorldRuntimeReadinessState::Settled);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FChunkWorldRuntimeReadinessOffsetCapsuleTest,
 	"PorismExtension.ChunkWorld.ReadinessFreeze.Runtime.OffsetCapsule",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

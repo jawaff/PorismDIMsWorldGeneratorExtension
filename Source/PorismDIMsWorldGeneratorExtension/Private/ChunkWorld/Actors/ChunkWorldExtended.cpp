@@ -384,7 +384,7 @@ bool AChunkWorldExtended::PrepareRuntimeWorldGenDefForGeneration()
 				*GetNameSafe(this),
 				*GetNameSafe(RuntimeWorldGenDef));
 		}
-		WorldGenDef = RuntimeWorldGenDef;
+		AdoptRuntimeWorldGenDef(RuntimeWorldGenDef);
 		return true;
 	}
 

@@ -1001,7 +1001,6 @@ bool FLayoutWorldBindingSitePlannerResolvesCenteredObservedChunkFiniteAxisBounds
 	}
 
 	ChunkWorld->WorldGenDef = NewObject<UWorldGenDef>(ChunkWorld);
-	ChunkWorld->WorldGenDefPredefined = true;
 	ChunkWorld->WorldGenDef->BaseBlockSize = 1;
 	ChunkWorld->WorldGenDef->NoiseScale = FVector::OneVector;
 	ChunkWorld->WorldGenDef->ChunkBlockSize = FIntVector(16, 24, 256);

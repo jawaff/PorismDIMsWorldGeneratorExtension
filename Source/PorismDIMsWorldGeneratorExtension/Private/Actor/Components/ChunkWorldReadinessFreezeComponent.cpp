@@ -431,8 +431,9 @@ void UChunkWorldReadinessFreezeComponent::CacheAndApplyFreezeState()
 		else
 		{
 			MovementComponent->StopMovementImmediately();
-			MovementComponent->Deactivate();
 		}
+		// Character movement RPCs check activity, not tick state; late packets must not undo the freeze.
+		MovementComponent->Deactivate();
 		MovementComponent->SetComponentTickEnabled(false);
 	}
 	TInlineComponentArray<UPrimitiveComponent*> PrimitiveComponents(Owner);
@@ -473,7 +474,6 @@ void UChunkWorldReadinessFreezeComponent::RestoreFrozenState()
 				CharacterMovement->GravityScale = State.GravityScale;
 			}
 		}
-		MovementComponent->SetComponentTickEnabled(State.bTickEnabled);
 		if (State.bWasActive)
 		{
 			MovementComponent->Activate(true);
@@ -482,6 +482,8 @@ void UChunkWorldReadinessFreezeComponent::RestoreFrozenState()
 		{
 			MovementComponent->Deactivate();
 		}
+		// Activate/Deactivate change ticking; restore the separately captured tick policy last.
+		MovementComponent->SetComponentTickEnabled(State.bTickEnabled);
 	}
 	for (const FPrimitiveFreezeState& State : FrozenPrimitiveStates)
 	{
@@ -797,11 +799,10 @@ void UChunkWorldReadinessFreezeComponent::TrySettleRuntimeSession()
 		RuntimeSession.State = EChunkWorldRuntimeReadinessState::WaitingForLayouts;
 		return;
 	}
+	// Draining observations does not mutate terrain. Actual writes invalidate receipts in
+	// HandleAutomaticLayoutWrite; rearming here can discard the very native receipt that drained the wait.
 	if (RuntimeSession.State == EChunkWorldRuntimeReadinessState::WaitingForLayouts)
-	{
-		RearmRuntimeReadiness();
-		return;
-	}
+		RuntimeSession.State = EChunkWorldRuntimeReadinessState::WaitingForServerReady;
 	if (!RuntimeSession.bServerWalkerReady) return;
 	if (RuntimeSession.bRequiresOwningClientReady && !RuntimeSession.bOwningClientReady)
 	{
