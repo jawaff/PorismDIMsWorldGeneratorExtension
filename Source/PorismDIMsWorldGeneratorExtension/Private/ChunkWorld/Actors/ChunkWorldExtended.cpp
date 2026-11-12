@@ -1193,6 +1193,18 @@ void AChunkWorldExtended::WriteBlockValuesAndUpdate(const TArray<SBlockChangeCal
 		}
 	}
 
+	if (HasAuthority() && BlockRepresentationWriteEvent.IsBound())
+	{
+		for (const auto& Change : NetBlockChangeCalls)
+		{
+			if (Change.chunkDataIndex < 0 || Change.chunkDataIndex >= static_cast<int32>(WorldChunks.size())) continue;
+			const auto* ChunkData = WorldChunks[Change.chunkDataIndex];
+			if (!ChunkData || ChunkData != PrimLayer) continue;
+			const FIntVector Position = ChunkGridPosToBlockWorldPos(Change.chunkPose, ChunkData)
+				+ BlockChunkIndexToBlockChunkPos(Change.blockChunkIndex, ChunkData);
+			BlockRepresentationWriteEvent.Broadcast(this, Position);
+		}
+	}
 	Super::WriteBlockValuesAndUpdate(NetBlockChangeCalls, bRefreshChunks);
 
 	if (BlockSwapComponent != nullptr)
@@ -1257,6 +1269,18 @@ void AChunkWorldExtended::WriteMeshDataAndUpdate(const TArray<SMeshChangeCall>& 
 		}
 	}
 
+	if (HasAuthority() && BlockRepresentationWriteEvent.IsBound())
+	{
+		for (const auto& Change : NetMeshChangeCalls)
+		{
+			if (Change.chunkDataIndex < 0 || Change.chunkDataIndex >= static_cast<int32>(WorldChunks.size())) continue;
+			const auto* ChunkData = WorldChunks[Change.chunkDataIndex];
+			if (!ChunkData || ChunkData != PrimLayer) continue;
+			const FIntVector Position = ChunkGridPosToBlockWorldPos(Change.chunkPose, ChunkData)
+				+ BlockChunkIndexToBlockChunkPos(Change.blockChunkIndex, ChunkData);
+			BlockRepresentationWriteEvent.Broadcast(this, Position);
+		}
+	}
 	Super::WriteMeshDataAndUpdate(NetMeshChangeCalls, bRefreshChunks);
 
 	if (BlockSwapComponent != nullptr)

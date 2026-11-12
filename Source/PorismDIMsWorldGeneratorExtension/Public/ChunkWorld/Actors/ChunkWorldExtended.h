@@ -91,6 +91,7 @@ struct FChunkWorldSettledBlockTransition
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnChunkWorldSettledBlockTransition, AChunkWorldExtended*, ChunkWorld, const FChunkWorldSettledBlockTransition&, Transition);
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnChunkWorldBlockRepresentationWrite, AChunkWorldExtended*, const FIntVector&);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnChunkWorldReady, AChunkWorldExtended*, ChunkWorld);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnChunkWorldRuntimeWalkerReady, AChunkWorldExtended*, ChunkWorld, UObject*, Walker, FGuid, SessionId);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnChunkWorldObservedChunkLifecycle, AChunkWorldExtended*, ChunkWorld, const FChunkWorldObservedChunkLifecycleEvent&, Event);
@@ -247,6 +248,10 @@ public:
 	/** Broadcast after one locally settled replicated block transition is observed on this chunk world. */
 	UPROPERTY(BlueprintAssignable, Category = "Block|ChunkWorld")
 	FOnChunkWorldSettledBlockTransition OnSettledBlockTransition;
+
+	/** Authority-only notification before a primary-resolution material/mesh write. Subscribers may invalidate
+	 * work addressed to the old representation, but must not mutate the world from this callback. Health writes do not fire it. */
+	FOnChunkWorldBlockRepresentationWrite& OnBlockRepresentationWrite() { return BlockRepresentationWriteEvent; }
 
 	/** Broadcast when every currently registered walker has reached a startup-safe ready chunk on this world. */
 	UPROPERTY(BlueprintAssignable, Category = "ChunkWorld|Startup")
@@ -461,6 +466,8 @@ private:
 
 	/** Deferred block custom-data notifications coalesced until the next tick so reads see settled runtime state. */
 	TMap<FIntVector, FDeferredBlockCustomDataChange> DeferredBlockCustomDataChanges;
+
+	FOnChunkWorldBlockRepresentationWrite BlockRepresentationWriteEvent;
 
 	/** Short-lived guard against double destruction presentation for one logical block position. */
 	TSet<FIntVector> ReservedDestructionPresentationBlocks;
