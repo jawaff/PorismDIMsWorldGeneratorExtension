@@ -155,6 +155,7 @@ public:
 	}
 
 	/** Starts authority-owned settlement, superseding an automatic startup session but never another explicit request.
+	 * Final placement excludes other live pawn capsule footprints in XY regardless of height, collision or readiness state.
 	 * Returns the stable operation id, or an invalid id on rejection. */
 	UFUNCTION(BlueprintCallable, Category = "ChunkWorld|Runtime Readiness", meta = (AutoCreateRefTerm = "Facing"))
 	FGuid StartRuntimeReadinessSession(AChunkWorldExtended* ChunkWorld, const FChunkWorldSpawnRegion& CandidateRegion, bool bRequireOwningClientReady, const FChunkWorldSpawnFacing& Facing);

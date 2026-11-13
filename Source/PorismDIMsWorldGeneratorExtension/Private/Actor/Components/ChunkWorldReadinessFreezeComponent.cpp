@@ -970,10 +970,9 @@ bool UChunkWorldReadinessFreezeComponent::TryBuildRuntimeSettledTransform(
 			if (!Other) continue;
 			const FVector Delta = Other->CalcBounds(Other->GetComponentTransform()).Origin - Candidate;
 			const float OtherRadius = Other->GetScaledCapsuleRadius();
-			const auto* OtherFreeze = It->FindComponentByClass<UChunkWorldReadinessFreezeComponent>();
-			const double GapZ = OtherFreeze && (OtherFreeze->IsRuntimeFreezeActive() || OtherFreeze->IsStartupFreezeActive()) ? 0.0
-				: FMath::Max(0.0, FMath::Abs(Delta.Z) - (HalfHeight - Radius) - (Other->GetScaledCapsuleHalfHeight() - OtherRadius));
-			if (Delta.SizeSquared2D() + GapZ * GapZ < FMath::Square(double(Radius + OtherRadius)))
+			// Loading, readiness lifts and airborne movement must not free a pawn's landing footprint.
+			// Live capsule XY remains occupied regardless of height, collision or freeze state.
+			if (Delta.SizeSquared2D() < FMath::Square(double(Radius + OtherRadius)))
 			{
 				bOccupied = true;
 				break;

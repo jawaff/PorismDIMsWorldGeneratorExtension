@@ -196,6 +196,10 @@ bool FChunkWorldRuntimeSafePlacementTest::RunTest(const FString& Parameters)
 	auto* Pending = Context.World->SpawnActor<AChunkWorldReadinessTestPawn>();
 	AddCapsule(Pending)->SetCapsuleSize(40.0f, 80.0f);
 	Pending->SetActorLocation(FVector(0.0, 0.0, -500.0));
+	TestFalse(TEXT("Loading occupant has no active readiness freeze yet"), Pending->GetTestFreeze()->IsReadinessFreezeActive());
+	Settle();
+	TestEqual(TEXT("Pre-readiness occupant still permits clear alternative"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Settled);
+	TestTrue(TEXT("Loading capsule reserves XY before readiness starts, despite height and disabled collision"), Context.Pawn->GetActorLocation().SizeSquared2D() >= 3600.0);
 	Context.ChunkWorld->AddChunkWorldWalker(Pending->GetTestWalker());
 	Pending->GetTestFreeze()->StartRuntimeReadinessSession(Context.ChunkWorld, Region, false, {});
 	Settle();
@@ -206,6 +210,13 @@ bool FChunkWorldRuntimeSafePlacementTest::RunTest(const FString& Parameters)
 	// Held/attached actors are not pawns, but cannot be accepted as a second floor above one.
 	auto* Occupant = Context.World->SpawnActor<AChunkWorldReadinessTestPawn>();
 	AddCapsule(Occupant);
+	for (const double Height : {-500.0, 1500.0})
+	{
+		Occupant->SetActorLocation(FVector(0.0, 0.0, Height));
+		Settle();
+		TestEqual(TEXT("Height-independent occupancy retains a bounded alternative"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Settled);
+		TestTrue(FString::Printf(TEXT("Unfrozen occupant at Z=%.0f still excludes its XY"), Height), Context.Pawn->GetActorLocation().SizeSquared2D() >= 1600.0);
+	}
 	Occupant->SetActorLocation(FVector(0.0, 0.0, 100.0));
 	auto* Equipment = Context.World->SpawnActor<AChunkWorldReadinessTestSurface>();
 	Equipment->FindComponentByClass<UBoxComponent>()->SetBoxExtent(FVector(35.0, 35.0, 10.0));
@@ -220,7 +231,15 @@ bool FChunkWorldRuntimeSafePlacementTest::RunTest(const FString& Parameters)
 	Settle();
 	TestTrue(TEXT("Pawn-attached equipment cannot supply terrain height either"), Context.Pawn->GetActorLocation().Z < 120.0);
 	Equipment->Destroy();
+	Occupant->SetActorLocation(FVector(0.0, 0.0, 1500.0));
+	Occupant->FindComponentByClass<UCapsuleComponent>()->SetCapsuleSize(500.0f, 500.0f);
+	Settle();
+	TestEqual(TEXT("Fully occupied XY fails instead of stacking at another height"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Failed);
+	TestTrue(TEXT("No free footprint keeps the owner frozen"), Freeze->IsReadinessFreezeActive());
 	Occupant->Destroy();
+	Settle();
+	TestEqual(TEXT("Destroying the occupant releases its footprint"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Settled);
+	TestTrue(TEXT("Released center can be reused"), FVector2D(Context.Pawn->GetActorLocation()).IsNearlyZero());
 
 	Floor->SetActorRotation(FRotator(60.0, 0.0, 0.0));
 	Settle();
