@@ -79,7 +79,7 @@ The reservation provider starts at the center of the field's allowed XY bounds. 
 
 Runtime readiness tries that provisional center first, then bounded random alternatives seeded by the stable readiness session ID. `RuntimeSettlementCandidateCount` defaults to 32 and clamps to 1..64. Each accepted position must fit the full upright capsule inside the approved region, have walkable non-participant support, and pass final overlap checks. Explicit capsule occupancy includes live and frozen/pending pawns even when pawn collision responses ignore each other. Actor lifetime owns occupancy; a failed actor remains an obstacle until its owner removes it.
 
-A floor hit does not prove empty headroom. The component checks native finest-collision cells throughout the final body volume and rejects queued terrain edits. An empty sweep remains pending until its whole scan has collision coverage. Worlds configured without voxel collision can settle on ordinary scene geometry. A busy native visibility pass defers the query without spinning. `RuntimeSettlementCollisionTimeoutSeconds` defaults to 20 after other readiness prerequisites finish; expiry retains freeze. Pending layout work keeps its existing retryable policy.
+A floor hit does not prove empty headroom. The component checks native finest-collision cells throughout the final body volume and rejects queued terrain edits. An empty sweep remains pending until its whole scan has collision coverage. Worlds configured without voxel collision can settle on ordinary scene geometry. A busy native visibility pass defers the query without spinning. Pending collision, layout work and owning-client acknowledgement keep the same session retryable without an elapsed deadline. Slow loading cannot permanently freeze the subject by exhausting a timer. The bounded candidate count, source region and all placement checks still apply.
 
 `RuntimeSettlementZOffset` requests contact clearance, with `UCharacterMovementComponent::MIN_FLOOR_DIST` as the minimum. Exact capsule contact can count as overlap in Chaos, so this uses the engine's standing clearance rather than changing terrain prediction. Larger authored clearance still must fit bounds and pass overlap checks. Target-facing then preserves the accepted capsule center while changing yaw.
 
@@ -113,11 +113,11 @@ const FGuid SessionId = Freeze->StartRuntimeReadinessSession(
     Result.Facing);
 ```
 
-Bind client-side `OnOwningClientRuntimeReady`. The event waits for the local native walker receipt, layout readiness and collision coverage throughout the approved candidate region, including possible sideways fallback positions. Missing cells or queued edits defer publication; repeated ticks publish only once per readiness generation. This conservative check can reach the existing client timeout when part of the region remains unloaded, even if a nearer server candidate would be safe.
+Bind client-side `OnOwningClientRuntimeReady`. The event waits for the local native walker receipt, layout readiness and collision coverage throughout the approved candidate region, including possible sideways fallback positions. Missing cells or queued edits defer publication; repeated ticks publish only once per readiness generation. The session keeps waiting while part of the region remains unloaded, even if a nearer server candidate would be safe. A slow or background client can finish later without a replacement spawn or reconnect.
 
-Send session and readiness ids through the game-owned reliable server RPC. Server RPC must validate its controller and call component acknowledgement path. Component rejects wrong session, wrong controller, wrong pawn, missing tracked walker, invalid region, or terminal state.
+Send session and readiness ids through the game-owned reliable server RPC. Server RPC must validate its controller and call component acknowledgement path. Component rejects stale session/receipt identities without changing the current operation. A matching acknowledgement with invalid ownership, tracked walker or region fails closed. Duplicate matching terminal receipts are idempotent and cannot reopen an operation.
 
-Bind `OnRuntimeReadinessSettled` for gameplay after server release. Bind `OnRuntimeReadinessFailed` for session recovery policy. Timeout, missing surface, invalid acknowledgement, and world teardown retain freeze.
+Bind `OnRuntimeReadinessSettled` for gameplay after server release. Bind `OnRuntimeReadinessFailed` for session recovery policy. Invalid requests, conclusive unsafe placement, invalid acknowledgement and world teardown retain freeze. Pending client or collision work does not emit a failure solely because loading took longer.
 
 Game owns disconnect and return-to-menu behavior. Extension does not kick players or teleport them elsewhere.
 
@@ -148,6 +148,7 @@ Use runtime readiness for join, respawn, and runtime spawn. Late registrations d
 | Signal | Game response |
 | --- | --- |
 | Failed/canceled ticket | log request id/category; clear game pending state; choose project retry policy |
+| Pending native/layout/collision work or client acknowledgement | retain loading and freeze; continue the same bounded operation until ready, canceled or torn down |
 | `OnRuntimeReadinessFailed` | keep subject frozen; inspect `Session.Failure` and `DebugReason`; apply game recovery policy |
 | Ticket/result no longer available | game retained it beyond terminal retention; submit new request or retain needed result state locally |
 

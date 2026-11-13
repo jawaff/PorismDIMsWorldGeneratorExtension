@@ -42,7 +42,6 @@ enum class EChunkWorldRuntimeReadinessFailure : uint8
 	None UMETA(DisplayName = "None"),
 	InvalidRequest UMETA(DisplayName = "Invalid Request"),
 	WalkerUnavailable UMETA(DisplayName = "Walker Unavailable"),
-	ClientAcknowledgementTimeout UMETA(DisplayName = "Client Acknowledgement Timeout"),
 	InvalidClientAcknowledgement UMETA(DisplayName = "Invalid Client Acknowledgement"),
 	InvalidTraceProfile UMETA(DisplayName = "Invalid Trace Profile"),
 	NoSettledSurface UMETA(DisplayName = "No Settled Surface"),
@@ -155,6 +154,7 @@ public:
 	}
 
 	/** Starts authority-owned settlement, superseding an automatic startup session but never another explicit request.
+	 * Slow native/layout/collision work and owning-client acknowledgements remain pending without an elapsed deadline.
 	 * Final placement excludes other live pawn capsule footprints in XY regardless of height, collision or readiness state.
 	 * Returns the stable operation id, or an invalid id on rejection. */
 	UFUNCTION(BlueprintCallable, Category = "ChunkWorld|Runtime Readiness", meta = (AutoCreateRefTerm = "Facing"))
@@ -237,14 +237,6 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ChunkWorld|Runtime Readiness", meta = (ClampMin = "1", ClampMax = "64", ToolTip = "Try the source center first, then this bounded number of deterministic randomized positions inside its approved region. Increase only for densely occupied reservations."))
 	int32 RuntimeSettlementCandidateCount = 32;
 
-	/** Bounds the wait for collision at searched positions after native/layout/client prerequisites finish. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ChunkWorld|Runtime Readiness", meta = (ClampMin = "0.0", ToolTip = "Seconds to wait for searched chunk collision after other readiness gates pass. Expiry retains freeze and reports failure; it never approves unloaded terrain."))
-	float RuntimeSettlementCollisionTimeoutSeconds = 20.0f;
-
-	/** Maximum authority wait for required owning-client finest-detail acknowledgement. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ChunkWorld|Runtime Readiness", meta = (ClampMin = "0.0", UIMin = "0.0", ToolTip = "Maximum authority wait for required owning-client finest-detail acknowledgement. Zero fails immediately when acknowledgement is required."))
-	float RuntimeClientReadyTimeoutSeconds = 20.0f;
-
 private:
 	struct FObservedChunkWorldState
 	{
@@ -285,7 +277,7 @@ private:
 	/** Starts local per-walker tracking for replicated runtime session without global actor discovery. */
 	void StartLocalRuntimeWalkerTracking();
 	void StopLocalRuntimeWalkerTracking();
-	/** Pending terrain/layout work keeps the session retryable regardless of elapsed time; release still requires native receipts and safe settlement. */
+	/** Pending terrain/layout/collision work and client receipts never expire; cancellation, teardown and invalid placement remain terminal. */
 	void TrySettleRuntimeSession();
 	/** Defers owning-client acknowledgement until its local event-owned startup footprint is complete. */
 	void TryAcknowledgeLocalCoverage();
@@ -330,8 +322,6 @@ private:
 	TWeakObjectPtr<AChunkWorldExtended> RuntimeTrackedChunkWorld;
 	FGuid RuntimeTrackedReadinessId;
 	float StartupFreezeElapsedSeconds = 0.0f;
-	double RuntimeSessionStartTimeSeconds = 0.0;
-	double RuntimeSettlementWaitStartSeconds = -1.0;
 	FGuid LastRuntimeStartedNotificationId;
 	FGuid LastRuntimeTerminalNotificationId;
 	bool bStartupFreezeActive = false;

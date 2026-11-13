@@ -23,11 +23,6 @@ void UChunkWorldReadinessTestFreezeComponent::EmitRuntimeReady(AChunkWorldExtend
 	}
 }
 
-void UChunkWorldReadinessTestFreezeComponent::SetClientReadyTimeout(const float TimeoutSeconds)
-{
-	RuntimeClientReadyTimeoutSeconds = TimeoutSeconds;
-}
-
 void UChunkWorldReadinessTestFreezeComponent::SetSettlementCollisionProfile(const FName CollisionProfile)
 {
 	RuntimeSettlementCollisionProfile = CollisionProfile;

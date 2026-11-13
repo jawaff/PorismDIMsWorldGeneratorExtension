@@ -303,12 +303,21 @@ bool FChunkWorldRuntimeCollisionCoverageTest::RunTest(const FString& Parameters)
 		Freeze->AcknowledgeOwningClientRuntimeReady(Context.Controller, SettledReceipt.SessionId, SettledReceipt.ReadinessId));
 	Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), false, {});
 	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Freeze->GetRuntimeReadinessSession().ReadinessId);
-	FindFProperty<FFloatProperty>(UChunkWorldReadinessFreezeComponent::StaticClass(), TEXT("RuntimeSettlementCollisionTimeoutSeconds"))->SetPropertyValue_InContainer(Freeze, 0.0f);
-	Freeze->Advance();
-	TestEqual(TEXT("Collision wait has a terminal bound"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Failed);
-	TestTrue(TEXT("Timeout does not release to visible but incomplete scene geometry"), Freeze->GetRuntimeReadinessSession().DebugReason.Contains(TEXT("collision wait expired")));
-
+	const FGuid DelayedCollisionSession = Freeze->GetRuntimeReadinessSession().SessionId;
+	const double CollisionWaitStarted = Context.World->GetTimeSeconds();
+	for (int32 Frame = 0; Frame < 480; ++Frame)
+	{
+		Context.World->Tick(LEVELTICK_TimeOnly, 0.25f);
+		Freeze->Advance(0.25f);
+	}
+	TestTrue(TEXT("Collision delay exceeds the former deadline"), Context.World->GetTimeSeconds() - CollisionWaitStarted > 100.0);
+	TestEqual(TEXT("Slow collision stays pending"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::WaitingForServerReady);
+	TestTrue(TEXT("Visible scene geometry cannot bypass pending native collision"), Freeze->IsReadinessFreezeActive());
 	Chunk->IsReady = true;
+	Freeze->Advance();
+	TestEqual(TEXT("Late native collision settles the same operation"), Freeze->GetRuntimeReadinessSession().SessionId, DelayedCollisionSession);
+	TestEqual(TEXT("Late collision completes without a new request"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Settled);
+
 	FChunkWorldSpawnRegion ClientRegion;
 	ClientRegion.Minimum = FVector(1.0, 1.0, 17.0);
 	ClientRegion.Maximum = FVector(31.0, 15.0, 31.0);
@@ -317,6 +326,13 @@ bool FChunkWorldRuntimeCollisionCoverageTest::RunTest(const FString& Parameters)
 	Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, ClientRegion, true, {});
 	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Freeze->GetRuntimeReadinessSession().ReadinessId);
 	TestEqual(TEXT("Client cannot acknowledge while a fallback cell is missing"), Context.Controller->ClientReadyCount, 0);
+	for (int32 Frame = 0; Frame < 480; ++Frame)
+	{
+		Context.World->Tick(LEVELTICK_TimeOnly, 0.25f);
+		Freeze->Advance(0.25f);
+	}
+	TestEqual(TEXT("Slow local coverage cannot publish a premature acknowledgement"), Context.Controller->ClientReadyCount, 0);
+	TestEqual(TEXT("Slow local coverage retains the client wait"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::WaitingForClientReady);
 	Target.Pos = FIntVector(24, 8, 24);
 	const FIntVector NeighborKey(1, 0, 1);
 	Context.ChunkWorld->CheckChunkPos(Target, NeighborKey, -1, nullptr, nullptr, 0, Context.ChunkWorld->WorldChunks.back());
@@ -837,6 +853,15 @@ bool FChunkWorldRuntimeReadinessNoSurfaceTest::RunTest(const FString& Parameters
 	for (const CChunkData* Layer : Context.ChunkWorld->WorldChunks)
 		bHasVoxelCollisionLayer |= Layer->Collision || Layer->InstancedMeshCollision;
 	TestFalse(TEXT("Retry covers empty queries without missing native coverage"), bHasVoxelCollisionLayer);
+	const double Started = Context.World->GetTimeSeconds();
+	for (int32 Frame = 0; Frame < 480; ++Frame)
+	{
+		Context.World->Tick(LEVELTICK_TimeOnly, 0.25f);
+		Freeze->Advance(0.25f);
+	}
+	TestTrue(TEXT("Surface activation delay exceeds the former deadline"), Context.World->GetTimeSeconds() - Started > 100.0);
+	TestEqual(TEXT("Slow surface activation remains retryable"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::WaitingForServerReady);
+	TestEqual(TEXT("Missing collision alone is not a terminal failure"), Freeze->GetRuntimeReadinessSession().Failure, EChunkWorldRuntimeReadinessFailure::None);
 
 	Collision->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	Freeze->Advance();
@@ -845,14 +870,15 @@ bool FChunkWorldRuntimeReadinessNoSurfaceTest::RunTest(const FString& Parameters
 	TestFalse(TEXT("Safe settlement releases the pawn"), Freeze->IsReadinessFreezeActive());
 
 	Collision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), false, {});
-	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Freeze->GetRuntimeReadinessSession().ReadinessId);
-	FindFProperty<FFloatProperty>(UChunkWorldReadinessFreezeComponent::StaticClass(), TEXT("RuntimeSettlementCollisionTimeoutSeconds"))->SetPropertyValue_InContainer(Freeze, 0.0f);
+	const FGuid CanceledSession = Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), false, {});
+	const FGuid CanceledReceipt = Freeze->GetRuntimeReadinessSession().ReadinessId;
+	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), CanceledReceipt);
+	TestTrue(TEXT("Pending collision wait remains explicitly cancelable"), Freeze->CancelRuntimeReadinessSession(CanceledSession));
+	Collision->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), CanceledReceipt);
 	Freeze->Advance();
-	TestEqual(TEXT("No surface retains structured failure"), Freeze->GetRuntimeReadinessSession().Failure, EChunkWorldRuntimeReadinessFailure::NoSettledSurface);
-	TestEqual(TEXT("No surface retains freeze terminal state"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Failed);
-	TestTrue(TEXT("Persistent misses still expire at the collision deadline"), Freeze->GetRuntimeReadinessSession().DebugReason.Contains(TEXT("Settlement collision wait expired.")));
-	TestTrue(TEXT("Expired collision wait cannot release the pawn"), Freeze->IsReadinessFreezeActive());
+	TestEqual(TEXT("Late collision cannot revive a canceled operation"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Canceled);
+	TestTrue(TEXT("Cancellation still retains safety freeze"), Freeze->IsReadinessFreezeActive());
 	return true;
 }
 
@@ -887,48 +913,75 @@ bool FChunkWorldRuntimeReadinessMixedPawnHitsTest::RunTest(const FString& Parame
 		TestEqual(TEXT("A rejected pawn hit cannot terminate missing-terrain recovery"), Freeze->GetRuntimeReadinessSession().State,
 			EChunkWorldRuntimeReadinessState::WaitingForServerReady);
 		TestTrue(TEXT("Mixed queries cannot release an unsafe pawn"), Freeze->IsReadinessFreezeActive());
+		const double Started = Context.World->GetTimeSeconds();
+		for (int32 Frame = 0; Frame < 480; ++Frame)
+		{
+			Context.World->Tick(LEVELTICK_TimeOnly, 0.25f);
+			Freeze->Advance(0.25f);
+		}
+		TestTrue(TEXT("Mixed collision delay exceeds the former deadline"), Context.World->GetTimeSeconds() - Started > 100.0);
+		TestEqual(TEXT("Slow terrain with pawn-only hits remains pending"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::WaitingForServerReady);
 		FloorCollision->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 		Freeze->Advance();
 		TestEqual(TEXT("Later terrain settles the same operation"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Settled);
 		TestEqual(TEXT("Retry preserves session identity"), Freeze->GetRuntimeReadinessSession().SessionId, Session);
 		TestTrue(TEXT("Pawn-owned geometry never supplies the accepted floor"), Context.Pawn->GetActorLocation().Z < 100.0);
 
-		FloorCollision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		Context.Pawn->SetActorLocation(FVector(0.0, 0.0, 100.0));
-		Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), false, {});
-		Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Freeze->GetRuntimeReadinessSession().ReadinessId);
-		FindFProperty<FFloatProperty>(UChunkWorldReadinessFreezeComponent::StaticClass(), TEXT("RuntimeSettlementCollisionTimeoutSeconds"))->SetPropertyValue_InContainer(Freeze, 0.0f);
-		Freeze->Advance();
-		TestEqual(TEXT("Persistent mixed misses still fail at the collision deadline"), Freeze->GetRuntimeReadinessSession().State,
-			EChunkWorldRuntimeReadinessState::Failed);
-		TestTrue(TEXT("Failure came from bounded collision recovery"), Freeze->GetRuntimeReadinessSession().DebugReason.Contains(TEXT("Settlement collision wait expired.")));
-		TestTrue(TEXT("Expired mixed queries retain freeze"), Freeze->IsReadinessFreezeActive());
 	}
 	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FChunkWorldRuntimeReadinessTimeoutTest,
-	"PorismExtension.ChunkWorld.ReadinessFreeze.Runtime.ClientAcknowledgementTimeout",
+	FChunkWorldRuntimeReadinessDelayedClientTest,
+	"PorismExtension.ChunkWorld.ReadinessFreeze.Runtime.DelayedClientAcknowledgement",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-/** Verifies required client acknowledgement timeout fails once without releasing freeze. */
-bool FChunkWorldRuntimeReadinessTimeoutTest::RunTest(const FString& Parameters)
+/** Slow clients retain one safe operation and can finish after long waits and terrain receipt invalidation. */
+bool FChunkWorldRuntimeReadinessDelayedClientTest::RunTest(const FString& Parameters)
 {
 	FRuntimeReadinessTestContext Context;
-	if (!TestTrue(TEXT("Transient runtime-readiness authority world initializes"), Context.Initialize()))
+	if (!TestTrue(TEXT("Transient runtime-readiness authority world initializes"), Context.Initialize())) return false;
+	Context.World->SpawnActor<AChunkWorldReadinessTestSurface>();
+	auto* Freeze = Context.Pawn->GetTestFreeze();
+	const FChunkWorldSpawnRegion Region = MakeRegion();
+	const FVector FrozenLocation = Context.Pawn->GetActorLocation();
+	const FGuid SessionId = Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, Region, true, {});
+	TestTrue(TEXT("Authority starts player session"), SessionId.IsValid());
+	const FGuid FirstReceipt = Freeze->GetRuntimeReadinessSession().ReadinessId;
+	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), FirstReceipt);
+	const auto WaitForSlowClient = [&]()
 	{
-		return false;
-	}
+		const double Started = Context.World->GetTimeSeconds();
+		// Advance authority time while withholding the client's RPC, as with a throttled background client.
+		for (int32 Frame = 0; Frame < 480; ++Frame)
+		{
+			Context.World->Tick(LEVELTICK_TimeOnly, 0.25f);
+			Freeze->Advance(0.25f);
+		}
+		TestTrue(TEXT("Client delay exceeds the former twenty-second deadline"), Context.World->GetTimeSeconds() - Started > 100.0);
+		const auto Waiting = Freeze->GetRuntimeReadinessSession();
+		TestEqual(TEXT("Slow client remains pending instead of terminally blocked"), Waiting.State, EChunkWorldRuntimeReadinessState::WaitingForClientReady);
+		TestEqual(TEXT("Elapsed time alone is not a readiness failure"), Waiting.Failure, EChunkWorldRuntimeReadinessFailure::None);
+		TestEqual(TEXT("Delay preserves the operation"), Waiting.SessionId, SessionId);
+		TestTrue(TEXT("Delay preserves approved bounds"), Waiting.CandidateRegion.Minimum.Equals(Region.Minimum) && Waiting.CandidateRegion.Maximum.Equals(Region.Maximum));
+		TestFalse(TEXT("Delay never fabricates a client receipt"), Waiting.bOwningClientReady);
+		TestTrue(TEXT("Waiting retains freeze and provisional position"), Freeze->IsReadinessFreezeActive() && Context.Pawn->GetActorLocation().Equals(FrozenLocation));
+	};
+	WaitForSlowClient();
 
-	UChunkWorldReadinessTestFreezeComponent* const Freeze = Context.Pawn->GetTestFreeze();
-	Freeze->SetClientReadyTimeout(0.0f);
-	const FGuid SessionId = Freeze->StartRuntimeReadinessSession(Context.ChunkWorld, MakeRegion(), true, {});
-	TestTrue(TEXT("Authority starts timeout session"), SessionId.IsValid());
-	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), Freeze->GetRuntimeReadinessSession().ReadinessId);
-	Freeze->Advance();
-	TestEqual(TEXT("Timeout records structured failure"), Freeze->GetRuntimeReadinessSession().Failure, EChunkWorldRuntimeReadinessFailure::ClientAcknowledgementTimeout);
-	TestEqual(TEXT("Timeout retains terminal frozen state"), Freeze->GetRuntimeReadinessSession().State, EChunkWorldRuntimeReadinessState::Failed);
+	Context.ChunkWorld->GetLayoutRuntimeComponent()->OnAutomaticLayoutWriteAttempt.Broadcast(Context.ChunkWorld, FBox(Region.Minimum, Region.Maximum));
+	const FGuid LatestReceipt = Freeze->GetRuntimeReadinessSession().ReadinessId;
+	TestTrue(TEXT("Terrain writes still invalidate receipts during a long wait"), LatestReceipt != FirstReceipt);
+	TestFalse(TEXT("Late stale acknowledgement cannot release changed terrain"), Freeze->AcknowledgeOwningClientRuntimeReady(Context.Controller, SessionId, FirstReceipt));
+	Freeze->EmitRuntimeReady(Context.ChunkWorld, Context.Pawn->GetTestWalker(), LatestReceipt);
+	WaitForSlowClient();
+	TestTrue(TEXT("Late current acknowledgement is accepted"), Freeze->AcknowledgeOwningClientRuntimeReady(Context.Controller, SessionId, LatestReceipt));
+	const auto Settled = Freeze->GetRuntimeReadinessSession();
+	TestEqual(TEXT("Delayed client eventually settles without replacement or rejoin"), Settled.State, EChunkWorldRuntimeReadinessState::Settled);
+	TestFalse(TEXT("Successful delayed settlement releases freeze"), Freeze->IsReadinessFreezeActive());
+	TestTrue(TEXT("Final transform uses safe ground rather than provisional height"), Settled.SettledTransform.GetLocation().Z < FrozenLocation.Z);
+	TestTrue(TEXT("Duplicate late acknowledgement remains idempotent"), Freeze->AcknowledgeOwningClientRuntimeReady(Context.Controller, SessionId, LatestReceipt));
+	TestTrue(TEXT("Duplicate receipt preserves settled transform"), Freeze->GetRuntimeReadinessSession().SettledTransform.Equals(Settled.SettledTransform));
 	return true;
 }
 

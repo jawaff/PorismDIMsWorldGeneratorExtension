@@ -49,7 +49,6 @@ class UChunkWorldReadinessTestFreezeComponent final : public UChunkWorldReadines
 public:
 	void Advance(float DeltaTime = 0.0f);
 	void EmitRuntimeReady(AChunkWorldExtended* ChunkWorld, UObject* Walker, FGuid SessionId);
-	void SetClientReadyTimeout(float TimeoutSeconds);
 	void SetSettlementCollisionProfile(FName CollisionProfile);
 };
 

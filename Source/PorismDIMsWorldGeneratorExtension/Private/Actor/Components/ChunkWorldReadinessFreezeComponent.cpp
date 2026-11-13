@@ -148,18 +148,6 @@ void UChunkWorldReadinessFreezeComponent::TickComponent(float DeltaTime, ELevelT
 	{
 		TrySettleRuntimeSession();
 	}
-	if (bRuntimeFreezeActive && GetOwner() != nullptr && GetOwner()->HasAuthority()
-		&& RuntimeSession.State == EChunkWorldRuntimeReadinessState::WaitingForClientReady)
-	{
-		const double ElapsedSeconds = GetWorld() != nullptr ? GetWorld()->GetTimeSeconds() - RuntimeSessionStartTimeSeconds : 0.0;
-		if (ElapsedSeconds >= FMath::Max(0.0f, RuntimeClientReadyTimeoutSeconds))
-		{
-			SetRuntimeTerminal(
-				EChunkWorldRuntimeReadinessState::Failed,
-				EChunkWorldRuntimeReadinessFailure::ClientAcknowledgementTimeout,
-				TEXT("Owning client did not acknowledge local finest detail before timeout."));
-		}
-	}
 
 	TryAcknowledgeLocalCoverage();
 	if (bStartupFreezeActive || bRuntimeFreezeActive)
@@ -206,8 +194,6 @@ FGuid UChunkWorldReadinessFreezeComponent::StartRuntimeReadinessSession(
 	RuntimeSession.Facing = Facing;
 	RuntimeSession.bRequiresOwningClientReady = bRequireOwningClientReady;
 	RuntimeSession.State = EChunkWorldRuntimeReadinessState::WaitingForWalker;
-	RuntimeSessionStartTimeSeconds = GetWorld() != nullptr ? GetWorld()->GetTimeSeconds() : 0.0;
-	RuntimeSettlementWaitStartSeconds = -1.0;
 	bLocalClientReadyBroadcast = false;
 	ObserveLayoutWrites(ChunkWorld);
 	for (const auto& State : ObservedChunkWorldStates) ObserveLayoutWrites(State.ChunkWorld.Get());
@@ -758,7 +744,6 @@ void UChunkWorldReadinessFreezeComponent::HandleAutomaticLayoutWrite(AChunkWorld
 
 void UChunkWorldReadinessFreezeComponent::RearmRuntimeReadiness()
 {
-	RuntimeSettlementWaitStartSeconds = -1.0;
 	StopLocalRuntimeWalkerTracking();
 	RuntimeSession.ReadinessId = FGuid::NewGuid();
 	RuntimeSession.bServerWalkerReady = false;
@@ -773,7 +758,6 @@ void UChunkWorldReadinessFreezeComponent::TrySettleRuntimeSession()
 	if (GetOwner() == nullptr || !GetOwner()->HasAuthority() || IsRuntimeSessionTerminal()) return;
 	AChunkWorldExtended* ChunkWorld = RuntimeSession.ChunkWorld;
 	if (!ChunkWorld) return;
-	const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
 	const UChunkWorldLayoutRuntimeComponent* Layout = ChunkWorld->GetLayoutRuntimeComponent();
 	const FBox Region(RuntimeSession.CandidateRegion.Minimum, RuntimeSession.CandidateRegion.Maximum);
 	FString CoverageFailure;
@@ -795,7 +779,6 @@ void UChunkWorldReadinessFreezeComponent::TrySettleRuntimeSession()
 	}
 	if (bPendingLayouts)
 	{
-		RuntimeSettlementWaitStartSeconds = -1.0;
 		RuntimeSession.State = EChunkWorldRuntimeReadinessState::WaitingForLayouts;
 		return;
 	}
@@ -806,8 +789,7 @@ void UChunkWorldReadinessFreezeComponent::TrySettleRuntimeSession()
 	if (!RuntimeSession.bServerWalkerReady) return;
 	if (RuntimeSession.bRequiresOwningClientReady && !RuntimeSession.bOwningClientReady)
 	{
-		if (RuntimeSession.State != EChunkWorldRuntimeReadinessState::WaitingForClientReady)
-			RuntimeSessionStartTimeSeconds = Now;
+		// A slow or background client is still loading. Keep this receipt live until it can acknowledge.
 		RuntimeSession.State = EChunkWorldRuntimeReadinessState::WaitingForClientReady;
 		return;
 	}
@@ -837,14 +819,10 @@ void UChunkWorldReadinessFreezeComponent::TrySettleRuntimeSession()
 	{
 		if (bCollisionPending)
 		{
-			if (RuntimeSettlementWaitStartSeconds < 0.0) RuntimeSettlementWaitStartSeconds = Now;
-			if (Now - RuntimeSettlementWaitStartSeconds < FMath::Max(0.0f, RuntimeSettlementCollisionTimeoutSeconds))
-			{
-				RuntimeSession.State = EChunkWorldRuntimeReadinessState::WaitingForServerReady;
-				RuntimeSession.DebugReason = FailureReason;
-				return;
-			}
-			FailureReason = TEXT("Settlement collision wait expired. ") + FailureReason;
+			// Native completion can precede collision activation; elapsed time cannot prove unsafe terrain.
+			RuntimeSession.State = EChunkWorldRuntimeReadinessState::WaitingForServerReady;
+			RuntimeSession.DebugReason = FailureReason;
+			return;
 		}
 		SetRuntimeTerminal(EChunkWorldRuntimeReadinessState::Failed, Failure, FailureReason);
 		return;
@@ -995,7 +973,7 @@ bool UChunkWorldReadinessFreezeComponent::TryBuildRuntimeSettledTransform(
 	{
 		// Native completion can precede collision activation during a chunk visibility handoff.
 		// Pawn-only blockers cannot turn missing-terrain queries into a conclusive result.
-		// Retry within the existing deadline; actual terrain/clearance rejections remain conclusive.
+		// Keep missing collision retryable; actual terrain/clearance rejections remain conclusive.
 		bOutCollisionPending |= Misses > 0 && Misses + PawnHits + OutsideXY == Attempts;
 		OutFailureReason = FString::Printf(
 			TEXT("No safe blocking surface found inside bounded candidate region. Owner=%s CapsuleCenter=(%s) CapsuleOffset=(%s) Radius=%.3f HalfHeight=%.3f ScanZ=[%.3f,%.3f] RegionMin=(%s) RegionMax=(%s) Profile=%s Attempts=%d CollisionPending=%d"),
