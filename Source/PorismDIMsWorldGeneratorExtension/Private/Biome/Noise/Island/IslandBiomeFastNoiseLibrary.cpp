@@ -346,7 +346,8 @@ namespace
 		const float TopPaddingBlocks = FMath::Max(IslandPayload.DomainVerticalPadding, MinimumDomainTopAirClearanceBlocks)
 			+ FMath::Max(0.0f, ExtraTopPaddingBlocks);
 		const float TopZ = Body.Center.Z + Body.TopHeight + ConvertBlockZDistanceToNoise(TopPaddingBlocks, ScaleContext);
-		const float BottomZ = Body.Center.Z - Body.BottomDepth - ConvertBlockZDistanceToNoise(GetIslandDomainBottomPaddingBlocks(IslandPayload), ScaleContext);
+		const float BottomZ = Body.Center.Z - Body.BottomDepth - ConvertBlockZDistanceToNoise(
+			GetIslandDomainBottomPaddingBlocks(IslandPayload) + (IslandPayload.IslandBody.bCylindrical ? ExtraTopPaddingBlocks + 1.0f : 0.0f), ScaleContext);
 		const float Radius = Body.TopRadius + ConvertBlockXDistanceToNoise(GetIslandDomainRadiusPaddingBlocks(IslandPayload), ScaleContext);
 
 		FNodeLink PositionZ = Editor->PositionOutput(FVector(0.0, 0.0, 1.0), FVector::ZeroVector);
@@ -356,7 +357,9 @@ namespace
 		FNodeLink TopCap = Editor->Subtract(Editor->Constant(TopZ), PositionZ);
 		FNodeLink NormalizedDistance = Editor->DivideFloat(PlanarDistanceSquared, Radius * Radius);
 		FNodeLink UndersideHeight = Editor->MultiplyFloat(NormalizedDistance, TopZ - Body.RimThickness - BottomZ);
-		FNodeLink LowerSurface = Editor->Add(Editor->Constant(BottomZ), UndersideHeight);
+		FNodeLink LowerSurface = IslandPayload.IslandBody.bCylindrical
+			? Editor->Constant(BottomZ)
+			: Editor->Add(Editor->Constant(BottomZ), UndersideHeight);
 		FNodeLink LowerCurve = Editor->Subtract(PositionZ, LowerSurface);
 		FNodeLink VerticalBody = Editor->Min(TopCap, LowerCurve);
 		return Editor->Min(RadialSide, VerticalBody);
@@ -596,7 +599,10 @@ namespace
 
 	float GetMaxPositiveFoundationTerrainProfileHeightBlocks(const FFoundationProviderDefinition& Provider)
 	{
-		return GetFoundationTerrainProfileMaxPositiveHeightBlocks(Provider.TerrainProfile);
+		const auto* Payload = GetIslandFoundationPayload(Provider);
+		return Payload && Payload->IslandBody.bCylindrical
+			? GetFoundationTerrainProfileSurfaceSearchAmplitudeBlocks(Provider.TerrainProfile)
+			: GetFoundationTerrainProfileMaxPositiveHeightBlocks(Provider.TerrainProfile);
 	}
 
 	FNodeLink BuildFoundationTerrainProfileSurfaceOffset(
@@ -676,11 +682,32 @@ namespace
 		return Editor->Terrace(SurfaceVariation, 1.0f / StepNoise, FMath::Max(0.0f, TerrainSettings.TerraceSmoothness));
 	}
 
+	// Both faces follow the profile. The lower sampling boundary is one block below the
+	// visible bottom face, so integer thickness N produces exactly N solid voxel layers.
+	FNodeLink BuildCylinderBody(UFastNoiseEditor* E, const FIslandFoundationShapePayload& Payload,
+		const FResolvedWorldGenScaleContext& Scale, FNodeLink Offset)
+	{
+		const auto& B = Payload.IslandBody;
+		const FVector C = Scale.AuthoredBlockPositionToNoise(B.Center);
+		const FVector S = Scale.BlocksToNoiseScale;
+		if (!E || S.ContainsNaN() || FMath::Abs(S.X) < SMALL_NUMBER || FMath::Abs(S.Y) < SMALL_NUMBER || FMath::Abs(S.Z) < SMALL_NUMBER)
+			return FNodeLink();
+		FNodeLink R = E->DistanceToPoint(FastNoiseDistanceFunction::Euclidean, FVector(0, 0, 0.0001));
+		R = E->DomainAxisScale(R, FVector(1.0 / S.X, 1.0 / S.Y, 0));
+		R = E->DomainOffset(R, E->Constant(-C.X), E->Constant(-C.Y), E->Constant(0));
+		FNodeLink Side = E->MultiplyFloat(E->Subtract(E->Constant(B.TopRadius), R), FMath::Abs(S.Z));
+		FNodeLink Top = E->AddFloat(Offset.Node ? Offset : E->Constant(0), C.Z);
+		FNodeLink Bottom = E->SubtractFloat(Top, (B.TopHeight + B.BottomDepth + 1) * FMath::Abs(S.Z));
+		FNodeLink Z = E->PositionOutput(FVector(0, 0, 1), FVector::ZeroVector);
+		return E->Min(Side, E->Min(E->Subtract(Top, Z), E->Subtract(Z, Bottom)));
+	}
+
 	FNodeLink BuildIslandPositiveInsideBody(
 		UFastNoiseEditor* Editor,
 		const FIslandFoundationShapePayload& IslandPayload,
 		const FResolvedWorldGenScaleContext& ScaleContext)
 	{
+		if (IslandPayload.IslandBody.bCylindrical) return BuildCylinderBody(Editor, IslandPayload, ScaleContext, FNodeLink());
 		const FFloatingIslandBodyNoiseSettings NoiseBody = ConvertIslandBodyToNoiseSettings(IslandPayload.IslandBody, ScaleContext);
 		return UFoundationFastNoiseLibrary::BuildFloatingIslandBody(Editor, NoiseBody);
 	}
@@ -694,7 +721,9 @@ namespace
 		const FFloatingIslandBodyNoiseSettings ProfiledBody = ResolveIslandBlockBodyForTerrainProfile(Provider, IslandPayload);
 		const FFloatingIslandBodyNoiseSettings NoiseBody = ConvertIslandBodyToNoiseSettings(ProfiledBody, ScaleContext);
 		const FNodeLink SurfaceOffset = BuildFoundationTerrainProfileSurfaceOffset(Editor, Provider, ScaleContext);
-		return UFoundationFastNoiseLibrary::BuildFloatingIslandBodyWithSurfaceOffset(Editor, NoiseBody, SurfaceOffset);
+		return IslandPayload.IslandBody.bCylindrical
+			? BuildCylinderBody(Editor, IslandPayload, ScaleContext, SurfaceOffset)
+			: UFoundationFastNoiseLibrary::BuildFloatingIslandBodyWithSurfaceOffset(Editor, NoiseBody, SurfaceOffset);
 	}
 
 	bool FindFoundationSurfaceZNoiseAtAuthoredXY(
@@ -1090,7 +1119,9 @@ namespace
 		FNodeLink RadialSide = Editor->Subtract(RadiusSquared, PlanarDistanceSquared);
 		FNodeLink NormalizedDistance = Editor->DivideFloat(PlanarDistanceSquared, Radius * Radius);
 		FNodeLink UndersideHeight = Editor->MultiplyFloat(NormalizedDistance, TopZ - Body.RimThickness - BottomZ);
-		FNodeLink LowerSurface = Editor->Add(Editor->Constant(BottomZ), UndersideHeight);
+		FNodeLink LowerSurface = IslandPayload.IslandBody.bCylindrical
+			? Editor->Constant(BottomZ - ConvertBlockZDistanceToNoise(1.0f, ScaleContext))
+			: Editor->Add(Editor->Constant(BottomZ), UndersideHeight);
 		FNodeLink LowerCurve = Editor->Subtract(PositionZ, LowerSurface);
 		return Editor->Min(RadialSide, LowerCurve);
 	}
@@ -2006,6 +2037,12 @@ namespace
 		}
 		SurfaceHeight = ApplySurfaceAnchorTerrainEdgeBlend(Editor, ResolvedReservationPayload, ScaleContext, SurfaceZ, TerrainSettings, SurfaceHeight);
 		FNodeLink TerrainDensity = BuildTopFaceAlignedFlatTerrainDensity(Editor, ScaleContext, SurfaceHeight);
+		if (IslandPayload->IslandBody.bCylindrical)
+		{
+			// Spawn pads must never turn a thin slab into a deep foundation.
+			FNodeLink Body = BuildProviderFoundationGenA(Editor, Provider, ScaleContext);
+			TerrainDensity = Editor->Max(TerrainDensity, Body);
+		}
 		FNodeLink ReservationDomain = BuildClippedProviderReservationDomain(Editor, Provider, Reservation, ScaleContext, false);
 		if (!IsIslandNodeValid(TerrainDensity) || !IsIslandNodeValid(ReservationDomain))
 		{

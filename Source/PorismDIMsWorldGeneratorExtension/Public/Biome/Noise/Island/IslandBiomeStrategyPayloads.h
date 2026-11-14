@@ -13,6 +13,10 @@ struct PORISMDIMSWORLDGENERATOREXTENSION_API FIslandFoundationBodySettings
 {
 	GENERATED_BODY()
 
+	/** A finite, constant-thickness slab using the same surface profiles and reservation queries. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foundation|Island|Shape", meta = (ToolTip = "Use a circular cylinder instead of a floating underside. Thickness is Top Height plus Bottom Depth. Terrain profiles translate both faces together; rim/underside detail and silhouette controls are ignored. Reservations cannot add terrain outside this body."))
+	bool bCylindrical = false;
+
 	/** Authored-block top-center surface reference for this island provider. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foundation|Island|Shape", meta = (ToolTip = "Authored-block top-center surface reference for this island provider. Center.Z is the intended visible top face, not the bottom of the generated world."))
 	FVector Center = FVector::ZeroVector;

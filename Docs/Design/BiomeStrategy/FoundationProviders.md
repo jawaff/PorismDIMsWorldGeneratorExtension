@@ -55,7 +55,9 @@ Important settings:
 - body detail can add rim, underside, and optional bottom-spike noise
 - `DomainRadiusPadding` and `DomainVerticalPadding` expand the cheap domain envelope
 
-Terrain comes from the provider `TerrainProfile` slot. The island provider supports reusable foundation terrain profiles such as flat, noisy, rolling hills, eroded edge, crevice, bowl, ridged, and terraced profiles.
+Terrain comes from the provider `TerrainProfile` slot. The island provider supports flat, noisy, rolling hills, eroded edge, crevice, bowl, caldera, ridged, and terraced profiles.
+
+Set `IslandBody.bCylindrical` for a circular slab with vertical sides. `TopHeight + BottomDepth` sets thickness; `Center.Z` remains the top-face reference. Both faces follow the terrain profile. Flat terrain with integer thickness two produces two solid voxel layers across the disk, including spawn reservations. Noise can round fractional face positions to an extra sampled layer. Cylinder mode ignores floating-island silhouette/detail controls and clips reservation terrain to the slab, so a deep spawn box cannot thicken it.
 
 ## Infinite Plane Provider
 `EFoundationProviderType::InfinitePlane`
@@ -181,7 +183,7 @@ Supported arrangement modes:
 Variation can apply deterministic Z offset and uniform scale per instance. Validation rejects overlapping finite island or landform footprints when `bRequireNoOverlap` is enabled. Landform checks use conservative XY bounds, including footprint-center movement from scaling an off-origin prototype. Disable this option for intentional overlapping mountain ranges or connected terrain.
 
 ## Terrain Profiles
-Foundation terrain profiles are `GenA` surface-height profiles for additive providers, and floor-height profiles for Pit Void subtraction. All eight families below work with the new landforms. Eroded Edge uses the provider's finite radius when its override is zero; Bridge uses half-width, Mountain uses its shorter base radius, Column uses its shorter top radius, and Pit uses its shorter opening radius. Radial profiles use the provider center, or the first deck point for Bridge. Selecting a provider preserves an already compatible profile; choose Flat explicitly for a clean initial shape.
+Foundation terrain profiles are `GenA` surface-height profiles for additive providers, and floor-height profiles for Pit Void subtraction. The profile families below work with the landforms. Eroded Edge uses the provider's finite radius when its override is zero; Bridge uses half-width, Mountain uses its shorter base radius, Column uses its shorter top radius, and Pit uses its shorter opening radius. Radial profiles use the provider center, or the first deck point for Bridge. Selecting a provider preserves an already compatible profile; choose Flat explicitly for a clean initial shape.
 
 Available payload families include:
 - `FFlatFoundationTerrainProfilePayload`
@@ -190,8 +192,11 @@ Available payload families include:
 - `FErodedEdgeFoundationTerrainProfilePayload`
 - `FCreviceFoundationTerrainProfilePayload`
 - `FBowlFoundationTerrainProfilePayload`
+- `FCalderaFoundationTerrainProfilePayload`
 - `FRidgedFoundationTerrainProfilePayload`
 - `FTerracedFoundationTerrainProfilePayload`
+
+Caldera supplies a flat crater floor, a linear climb to the rim, and a linear exterior descent to the provider surface. Keep reservation corners inside `FloorRadiusBlocks`; tune slope using `(RimHeightBlocks - FloorHeightBlocks) / (RimRadiusBlocks - FloorRadiusBlocks)` and `RimHeightBlocks / (BaseRadiusBlocks - RimRadiusBlocks)`. These are geometric grades, not a replacement for collision/navmesh checks. Unlike Pit Void, this profile adds terrain and keeps the island's surface-query/reservation support.
 
 For additive providers, terrain profile detail stays out of `DomainNoise`. Their domains expand to contain possible positive terrain height. Pit Void evaluates its floor profile in `DomainNoise` because subtraction has no replacement `GenA` row.
 

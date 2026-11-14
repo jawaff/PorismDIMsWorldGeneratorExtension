@@ -14,6 +14,31 @@ struct PORISMDIMSWORLDGENERATOREXTENSION_API FFlatFoundationTerrainProfilePayloa
 	GENERATED_BODY()
 };
 
+/** Flat caldera floor with independently tunable inner and outer slopes. Heights are offsets above the provider surface. */
+USTRUCT(BlueprintType)
+struct PORISMDIMSWORLDGENERATOREXTENSION_API FCalderaFoundationTerrainProfilePayload : public FFoundationTerrainProfilePayloadBase
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foundation Terrain|Caldera", meta = (ToolTip = "Provider-local center in blocks. Keep castle reservations inside Floor Radius, including their corners."))
+	FVector2D CenterXY = FVector2D::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foundation Terrain|Caldera", meta = (ClampMin = "0", ToolTip = "Radius of the exactly flat crater floor in blocks. Must be smaller than Rim Radius."))
+	float FloorRadiusBlocks = 44.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foundation Terrain|Caldera", meta = (ClampMin = "0.001", ToolTip = "Radius of the crater rim in blocks. Inner slope is (Rim Height - Floor Height) / (Rim Radius - Floor Radius)."))
+	float RimRadiusBlocks = 65.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foundation Terrain|Caldera", meta = (ClampMin = "0.001", ToolTip = "Radius where the exterior reaches the provider surface. Exterior slope is Rim Height / (Base Radius - Rim Radius); leave flat ground beyond this radius for spawns."))
+	float BaseRadiusBlocks = 140.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foundation Terrain|Caldera", meta = (ClampMin = "0", ToolTip = "Flat crater-floor height above the provider surface in blocks. Must not exceed Rim Height."))
+	float FloorHeightBlocks = 24.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foundation Terrain|Caldera", meta = (ClampMin = "0", ToolTip = "Rim height above the provider surface in blocks. Widen the slopes rather than relying on increased character step height."))
+	float RimHeightBlocks = 32.0f;
+};
+
 /** Reusable noisy top-surface terrain profile for additive foundations. */
 USTRUCT(BlueprintType)
 struct PORISMDIMSWORLDGENERATOREXTENSION_API FNoisyFoundationTerrainProfilePayload : public FFoundationTerrainProfilePayloadBase

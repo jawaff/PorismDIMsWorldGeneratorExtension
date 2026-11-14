@@ -956,7 +956,8 @@ namespace
 			+ FMath::Max(
 				GetMaxPositiveSurfaceZLiftBlocks(Strategy),
 				GetStrategyMaxPositiveFoundationTerrainProfileHeightBlocks(Strategy.RootFoundationProvider));
-		const float BottomZ = Body.Center.Z - Body.TopHeight - Body.BottomDepth - GetStrategyIslandDomainBottomPaddingBlocks(*IslandPayload);
+		const float BottomZ = Body.Center.Z - Body.TopHeight - Body.BottomDepth - GetStrategyIslandDomainBottomPaddingBlocks(*IslandPayload)
+			- (Body.bCylindrical ? 1.0f + GetFoundationTerrainProfileSurfaceSearchAmplitudeBlocks(Strategy.RootFoundationProvider.TerrainProfile) : 0.0f);
 		return FBox(
 			FVector(Body.Center.X - Radius, Body.Center.Y - Radius, BottomZ),
 			FVector(Body.Center.X + Radius, Body.Center.Y + Radius, TopZ));
@@ -977,7 +978,8 @@ namespace
 			+ FMath::Max(
 				GetMaxPositiveProviderSurfaceZLiftBlocks(Provider),
 				GetStrategyMaxPositiveFoundationTerrainProfileHeightBlocks(Provider));
-		const float BottomZ = Body.Center.Z - Body.TopHeight - Body.BottomDepth - GetStrategyIslandDomainBottomPaddingBlocks(*IslandPayload);
+		const float BottomZ = Body.Center.Z - Body.TopHeight - Body.BottomDepth - GetStrategyIslandDomainBottomPaddingBlocks(*IslandPayload)
+			- (Body.bCylindrical ? 1.0f + GetFoundationTerrainProfileSurfaceSearchAmplitudeBlocks(Provider.TerrainProfile) : 0.0f);
 		return FBox(
 			FVector(Body.Center.X - Radius, Body.Center.Y - Radius, BottomZ),
 			FVector(Body.Center.X + Radius, Body.Center.Y + Radius, TopZ));
@@ -2731,6 +2733,14 @@ FBiomeStrategyValidationResult UBiomeStrategyData::ValidateStrategy() const
 		}
 		else if (const FIslandFoundationShapePayload* IslandPayload = Provider.ProviderPayload.GetPtr<FIslandFoundationShapePayload>())
 		{
+			const auto& Body = IslandPayload->IslandBody;
+			if (Body.bCylindrical && (Body.Center.ContainsNaN() || !FMath::IsFinite(Body.TopRadius)
+				|| !FMath::IsFinite(Body.TopHeight) || !FMath::IsFinite(Body.BottomDepth)
+				|| Body.TopRadius <= 0 || Body.TopHeight < 0 || Body.BottomDepth < 0 || Body.TopHeight + Body.BottomDepth <= 0))
+			{
+				AddError(Path, TEXT("Cylinder requires finite positive radius and thickness."),
+					TEXT("Set Top Radius above zero and nonnegative Top Height / Bottom Depth with a positive sum."));
+			}
 			if (IslandPayload->IslandBody.SideBulgeBlocks < 0.0f
 				|| IslandPayload->IslandBody.BottomPointDepthBlocks < 0.0f
 				|| IslandPayload->IslandBody.LowerConeSharpness < 0.0f

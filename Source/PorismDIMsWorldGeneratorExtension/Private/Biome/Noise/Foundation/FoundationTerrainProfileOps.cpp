@@ -591,10 +591,52 @@ namespace
 		}
 	}
 
+	float GetCalderaHeight(const void* Payload)
+	{
+		return static_cast<const FCalderaFoundationTerrainProfilePayload*>(Payload)->RimHeightBlocks;
+	}
+
+	FNodeLink BuildCalderaSurfaceOffset(const void* Payload, const FFoundationTerrainProfileBuildContext& Context)
+	{
+		const auto& P = *static_cast<const FCalderaFoundationTerrainProfilePayload*>(Payload);
+		if (!Context.Editor || !Context.ScaleContext || P.RimRadiusBlocks <= P.FloorRadiusBlocks || P.BaseRadiusBlocks <= P.RimRadiusBlocks)
+			return FNodeLink();
+		UFastNoiseEditor* E = Context.Editor;
+		const FVector Origin = Context.ScaleContext->AuthoredBlockPositionToNoise(FVector(Context.ProviderOriginXYBlocks + P.CenterXY, 0));
+		const FVector Scale = Context.ScaleContext->BlocksToNoiseScale;
+		// Euclidean distance avoids the discontinuities of FastNoise's approximate float power.
+		FNodeLink R = E->DistanceToPoint(FastNoiseDistanceFunction::Euclidean, FVector(0, 0, 0.0001));
+		R = E->DomainAxisScale(R, FVector(1.0 / Scale.X, 1.0 / Scale.Y, 0));
+		R = E->DomainOffset(R, E->Constant(-Origin.X), E->Constant(-Origin.Y), E->Constant(0));
+		FNodeLink Inner = E->MinFloat(E->MaxFloat(E->DivideFloat(E->SubtractFloat(R, P.FloorRadiusBlocks), P.RimRadiusBlocks - P.FloorRadiusBlocks), 0), 1);
+		FNodeLink Outer = E->MinFloat(E->MaxFloat(E->DivideFloat(E->Subtract(E->Constant(P.BaseRadiusBlocks), R), P.BaseRadiusBlocks - P.RimRadiusBlocks), 0), 1);
+		FNodeLink Height = E->Min(E->AddFloat(E->MultiplyFloat(Inner, P.RimHeightBlocks - P.FloorHeightBlocks), P.FloorHeightBlocks), E->MultiplyFloat(Outer, P.RimHeightBlocks));
+		return E->MultiplyFloat(Height, FMath::Abs(Scale.Z));
+	}
+
+	void ScaleCalderaProfile(void* Payload, const float Scale)
+	{
+		auto& P = *static_cast<FCalderaFoundationTerrainProfilePayload*>(Payload);
+		P.CenterXY *= Scale;
+		P.FloorRadiusBlocks *= Scale; P.RimRadiusBlocks *= Scale; P.BaseRadiusBlocks *= Scale;
+		P.FloorHeightBlocks *= Scale; P.RimHeightBlocks *= Scale;
+	}
+
+	void ValidateCalderaProfile(const void* Payload, const FFoundationProviderDefinition&, const FString& Path, TArray<FFoundationTerrainProfileValidationIssue>& Issues)
+	{
+		const auto& P = *static_cast<const FCalderaFoundationTerrainProfilePayload*>(Payload);
+		if (P.CenterXY.ContainsNaN() || !FMath::IsFinite(P.FloorRadiusBlocks) || !FMath::IsFinite(P.RimRadiusBlocks)
+			|| !FMath::IsFinite(P.BaseRadiusBlocks) || !FMath::IsFinite(P.FloorHeightBlocks) || !FMath::IsFinite(P.RimHeightBlocks)
+			|| P.FloorRadiusBlocks < 0 || P.RimRadiusBlocks <= P.FloorRadiusBlocks || P.BaseRadiusBlocks <= P.RimRadiusBlocks
+			|| P.FloorHeightBlocks < 0 || P.RimHeightBlocks < P.FloorHeightBlocks)
+			AddIssue(Issues, Path, TEXT("Caldera requires finite ordered radii and heights."), TEXT("Use 0 <= Floor Radius < Rim Radius < Base Radius and 0 <= Floor Height <= Rim Height."));
+	}
+
 	const FFoundationTerrainProfileOps* GetFoundationTerrainProfileOpsRegistry()
 	{
 		static const FFoundationTerrainProfileOps Registry[] =
 		{
+			{ FCalderaFoundationTerrainProfilePayload::StaticStruct(), TEXT("Caldera"), EFoundationTerrainProfileProviderSupport::AnySurface, BuildCalderaSurfaceOffset, GetCalderaHeight, GetCalderaHeight, ScaleCalderaProfile, ValidateCalderaProfile },
 			{ FFlatFoundationTerrainProfilePayload::StaticStruct(), TEXT("Flat"), EFoundationTerrainProfileProviderSupport::AnySurface, BuildFlatSurfaceOffset, GetZeroProfileHeight, GetZeroProfileHeight, nullptr, nullptr },
 			{ FNoisyFoundationTerrainProfilePayload::StaticStruct(), TEXT("Noisy"), EFoundationTerrainProfileProviderSupport::AnySurface, BuildNoisySurfaceOffset, GetNoisyMaxPositiveHeight, GetNoisySearchAmplitude, ScaleNoisyProfile, ValidateNoisyProfile },
 			{ FRollingHillsFoundationTerrainProfilePayload::StaticStruct(), TEXT("Rolling Hills"), EFoundationTerrainProfileProviderSupport::AnySurface, BuildRollingSurfaceOffset, GetRollingMaxPositiveHeight, GetRollingSearchAmplitude, ScaleRollingProfile, ValidateRollingProfile },
