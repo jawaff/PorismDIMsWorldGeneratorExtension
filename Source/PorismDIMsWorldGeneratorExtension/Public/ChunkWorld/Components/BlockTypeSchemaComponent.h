@@ -123,6 +123,10 @@ public:
 	 */
 	bool InitializeBlockCustomDataForRepresentationIndexes(const FIntVector& BlockWorldPos, int32 MaterialIndex, int32 MeshIndex);
 
+	/** After verified destruction, remove the old representation's payload and marker. A regrown block
+	 * or material exposed beneath a mesh must start from its own schema, not the destroyed block's Health. */
+	void ClearDestroyedBlockCustomData(const FIntVector& BlockWorldPos, int32 PreviousMaterialIndex, int32 PreviousMeshIndex);
+
 	/**
 	 * Initializes the block's custom data at the supplied world position when the runtime marker slot is still empty.
 	 */

@@ -1353,10 +1353,10 @@ bool AChunkWorldExtended::DestroyBlock(const FIntVector& BlockWorldPos, bool bRe
 			(void)BlockSwapScannerComponent->ForceRemoveSwapForDestroyedBlock(BlockWorldPos);
 		}
 
+		const int32 ExistingMaterialIndex = GetBlockValueByBlockWorldPos(BlockWorldPos, ERessourceType::MaterialIndex, 0);
+		const int32 ExistingMeshIndex = GetMeshDataByBlockWorldPos(BlockWorldPos).MeshId;
 		if (!Definition.MeshAsset.IsNull())
 		{
-			const int32 ExistingMaterialIndex = GetBlockValueByBlockWorldPos(BlockWorldPos, ERessourceType::MaterialIndex, 0);
-			const int32 ExistingMeshIndex = GetMeshDataByBlockWorldPos(BlockWorldPos).MeshId;
 			FMeshData EmptyMeshData;
 			EmptyMeshData.MeshId = EmptyMesh;
 			if (bHasDestroyedFeedbackHit && BlockFeedbackComponent != nullptr)
@@ -1364,6 +1364,8 @@ bool AChunkWorldExtended::DestroyBlock(const FIntVector& BlockWorldPos, bool bRe
 				(void)BlockFeedbackComponent->BroadcastAuthoritativeDestroyFeedback(DestroyedFeedbackHit);
 			}
 			SetMeshDataByBlockWorldPos(BlockWorldPos, EmptyMeshData, bRefreshChunks);
+			if (GetMeshDataByBlockWorldPos(BlockWorldPos).MeshId == EmptyMesh && GetBlockValueByBlockWorldPos(BlockWorldPos) == ExistingMaterialIndex)
+				BlockTypeSchemaComponent->ClearDestroyedBlockCustomData(BlockWorldPos, ExistingMaterialIndex, ExistingMeshIndex);
 			TrySpawnDestructionActorForDestroyedBlock(BlockWorldPos, bHasDestroyedFeedbackHit ? &DestroyedFeedbackHit : nullptr, BlockTypeName);
 		    return true;
 		}
@@ -1375,6 +1377,8 @@ bool AChunkWorldExtended::DestroyBlock(const FIntVector& BlockWorldPos, bool bRe
 				(void)BlockFeedbackComponent->BroadcastAuthoritativeDestroyFeedback(DestroyedFeedbackHit);
 			}
 			SetBlockValueByBlockWorldPos(BlockWorldPos, EmptyMaterial, bRefreshChunks);
+			if (GetBlockValueByBlockWorldPos(BlockWorldPos) == EmptyMaterial && GetMeshDataByBlockWorldPos(BlockWorldPos).MeshId == ExistingMeshIndex)
+				BlockTypeSchemaComponent->ClearDestroyedBlockCustomData(BlockWorldPos, ExistingMaterialIndex, ExistingMeshIndex);
 			TrySpawnDestructionActorForDestroyedBlock(BlockWorldPos, bHasDestroyedFeedbackHit ? &DestroyedFeedbackHit : nullptr, BlockTypeName);
 		    return true;
 		}

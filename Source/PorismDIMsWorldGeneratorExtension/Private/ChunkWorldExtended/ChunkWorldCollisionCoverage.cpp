@@ -8,7 +8,7 @@ namespace ChunkWorldCollision
 {
 	/** Read native finest-collision readiness under its visibility/topology fence.
 	 * Ready includes empty chunks; navigation export and navigation demand are irrelevant. */
-	bool HasFinestCollisionCoverageInBounds(AChunkWorldExtended& World, const FBox& WorldBounds)
+	bool HasFinestCollisionCoverageInBounds(AChunkWorldExtended& World, const FBox& WorldBounds, bool bMaterialOnly)
 	{
 		if (!World.IsRunning() || !World.WorldGenDef || !World.GetPrimaryComponent() || !WorldBounds.IsValid) return false;
 		const CChunkData* Layer = nullptr;
@@ -16,7 +16,7 @@ namespace ChunkWorldCollision
 		for (int32 Index = 0; Index < static_cast<int32>(World.WorldChunks.size()); ++Index)
 		{
 			const CChunkData* Candidate = World.WorldChunks[Index];
-			if (Candidate->Collision || Candidate->InstancedMeshCollision) { Layer = Candidate; LayerIndex = Index; }
+			if (Candidate->Collision || (!bMaterialOnly && Candidate->InstancedMeshCollision)) { Layer = Candidate; LayerIndex = Index; }
 		}
 		// A world configured without voxel collision can still settle on ordinary scene geometry.
 		if (!Layer) return true;

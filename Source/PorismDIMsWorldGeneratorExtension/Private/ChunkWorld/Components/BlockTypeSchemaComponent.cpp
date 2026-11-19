@@ -218,8 +218,11 @@ void UBlockTypeSchemaComponent::WriteBlockCustomDataSlots(const FIntVector& Bloc
 		ChunkWorld->SetBlockCustomValueByBlockWorldPos(BlockWorldPos, PackedValues[SlotIndex], SlotIndex);
 	}
 
-	// Authoritative schema writes do not flow through Porism's replicated custom-data apply callback on the
-	// server, so trigger the changes to be processed by the chunk world.
+	// Clearing the marker retires the destroyed representation's storage. The writes still replicate;
+	// they are not a second Health change and must not re-enter destruction on an empty cell.
+	if (PackedValues.IsEmpty() || PackedValues.Last() != InitializedCustomDataMarkerValue) return;
+
+	// Authoritative initialized schema writes do not pass through the client replication callback.
 	if (AChunkWorldExtended* ExtendedChunkWorld = Cast<AChunkWorldExtended>(ChunkWorld); ExtendedChunkWorld != nullptr && ExtendedChunkWorld->HasAuthority())
 	{
 		ExtendedChunkWorld->HandleBlockCustomDataCommit(BlockWorldPos, PackedValues);
@@ -565,6 +568,25 @@ bool UBlockTypeSchemaComponent::InitializeBlockCustomDataForRepresentationIndexe
 	WriteBlockCustomDataSlots(BlockWorldPos, PackedCustomData);
 
 	return true;
+}
+
+void UBlockTypeSchemaComponent::ClearDestroyedBlockCustomData(const FIntVector& BlockWorldPos, int32 PreviousMaterialIndex, int32 PreviousMeshIndex)
+{
+	const auto* World = Cast<AChunkWorldBase>(GetOwner());
+	if (!World || !World->HasAuthority() || !bBlockDefinitionLookupReady) return;
+	const auto SlotsFor = [this, PreviousMaterialIndex](int32 Mesh)
+	{
+		const auto* Row = FindBlockTypeSchemaForIndexes(PreviousMaterialIndex, Mesh);
+		const auto* Layout = Row && Row->CustomData.IsValid() ? GetOrBuildBlockCustomDataLayout(Row->CustomData.GetScriptStruct()) : nullptr;
+		return Layout ? Layout->GetValueSlotCount() + 1 : 0;
+	};
+	int32 SlotCount = SlotsFor(PreviousMeshIndex);
+	if (PreviousMaterialIndex != EmptyMaterial && PreviousMeshIndex != EmptyMesh && PreviousMeshIndex != DefaultMesh)
+		SlotCount = FMath::Max(SlotCount, SlotsFor(EmptyMesh));
+	if (SlotCount == 0) return;
+	TArray<int32> EmptySlots;
+	EmptySlots.SetNumZeroed(SlotCount);
+	WriteBlockCustomDataSlots(BlockWorldPos, EmptySlots);
 }
 
 bool UBlockTypeSchemaComponent::IsBlockCustomDataInitialized(const FIntVector& BlockWorldPos) const
