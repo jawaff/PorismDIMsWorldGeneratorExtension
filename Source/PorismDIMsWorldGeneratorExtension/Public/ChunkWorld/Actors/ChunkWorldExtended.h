@@ -92,6 +92,7 @@ struct FChunkWorldSettledBlockTransition
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnChunkWorldSettledBlockTransition, AChunkWorldExtended*, ChunkWorld, const FChunkWorldSettledBlockTransition&, Transition);
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnChunkWorldBlockRepresentationWrite, AChunkWorldExtended*, const FIntVector&);
+DECLARE_DELEGATE_OneParam(FChunkWorldGeneratorRegistration, AChunkWorldExtended&);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnChunkWorldReady, AChunkWorldExtended*, ChunkWorld);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnChunkWorldRuntimeWalkerReady, AChunkWorldExtended*, ChunkWorld, UObject*, Walker, FGuid, SessionId);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnChunkWorldObservedChunkLifecycle, AChunkWorldExtended*, ChunkWorld, const FChunkWorldObservedChunkLifecycleEvent&, Event);
@@ -217,6 +218,10 @@ public:
 	/** Returns true once every registered chunk walker has reached the finest ready chunk around its tracked position. */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "ChunkWorld|Startup")
 	bool IsWorldReady() const { return bWorldReady; }
+
+	/** Runs a local game-thread registration against initialized native terrain. Bind to its requester with a weak UObject delegate.
+	 * Before startup, only the latest request per requester is retained. Requests never follow the requester into another world. */
+	void WhenGeneratorStarted(FChunkWorldGeneratorRegistration Registration);
 
 	/** Returns true when the supplied walker is currently registered with this chunk world. */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "ChunkWorld|Startup")
@@ -467,6 +472,7 @@ private:
 	/** Deferred block custom-data notifications coalesced until the next tick so reads see settled runtime state. */
 	TMap<FIntVector, FDeferredBlockCustomDataChange> DeferredBlockCustomDataChanges;
 
+	TMap<FObjectKey, FChunkWorldGeneratorRegistration> PendingGeneratorRegistrations;
 	FOnChunkWorldBlockRepresentationWrite BlockRepresentationWriteEvent;
 
 	/** Short-lived guard against double destruction presentation for one logical block position. */

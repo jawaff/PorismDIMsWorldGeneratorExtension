@@ -1,5 +1,10 @@
 // Copyright 2026 Spotted Loaf Studio
 #include "ChunkWorldExtended/ChunkWorldNetworkSubsystem.h"
+#include "ChunkWorldExtended/ChunkWorldNetManager.h"
+#include "ChunkWorld/Actors/ChunkWorldExtended.h"
+#include "ChunkWorld/Spawn/Support/ChunkWorldSpawnTestWorld.h"
+#include "Layout/Testing/LayoutTestWorldSupport.h"
+#include "Misc/ScopeExit.h"
 #include "Engine/World.h"
 #include "Misc/AutomationTest.h"
 
@@ -52,5 +57,65 @@ bool FChunkWorldNetworkTransportTest::RunTest(const FString&)
     TestEqual(TEXT("Tick retains only bounded waiting handshakes"), Live, 64);
     World->DestroyWorld(false);
     TestEqual(TEXT("Shutdown releases queued and active handshakes"), Live, 0);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FChunkWorldRequestedSaveSectionsTest, "PorismExtension.ChunkWorld.Network.RequestedSaveSections",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FChunkWorldRequestedSaveSectionsTest::RunTest(const FString&)
+{
+    int32 Live = 0;
+    FWorldContext* Context = nullptr;
+    UWorld* World = ChunkWorldSpawnTest::CreateWorld(Context);
+    auto* Terrain = World->SpawnActor<AChunkWorldExtended>();
+    auto* Manager = World->SpawnActor<AChunkWorldNetManager>();
+    ON_SCOPE_EXIT
+    {
+        Manager->CleanupTcpSocket();
+        FLayoutTestWorldSupport::ShutdownTransientChunkWorld(Terrain);
+        ChunkWorldSpawnTest::DestroyWorld(World, Context);
+    };
+    FLayoutTestWorldSupport::InitializeTransientChunkWorld(Terrain);
+    const FIntVector Cell(2, 3, 4);
+    Terrain->SetBlockValueByBlockWorldPos(Cell, SinfullMaterial, false);
+    const auto* Layer = Terrain->PrimLayer;
+    const FIntVector Grid = Terrain->BlockWorldPosToChunkGridPos(Cell, Layer);
+    auto Capture = MakeUnique<FPartialTransport>(Live);
+    auto& Written = Capture->Written;
+    Capture->MaxWrite = MAX_int32;
+    Manager->Transport = MoveTemp(Capture);
+    Manager->bTcpConnected = true;
+    const int32 WorldId = Manager->RegisterWorld(Terrain);
+    auto CheckReply = [&](bool bExpectMesh)
+    {
+        TArray<int64> Material, Mesh, Transforms;
+        TestTrue(TEXT("Host has a material save"), Terrain->DriveSave->JustReadToArray(Material, Layer->BlockBufferSize,
+            Grid.X, Grid.Y, Grid.Z, Layer->BlockFactor));
+        TestEqual(TEXT("Host mesh indices present only after placement"), Terrain->MeshSave->JustReadToArray(Mesh,
+            Layer->BlockBufferSize, Grid.X, Grid.Y, Grid.Z, Layer->BlockFactor), bExpectMesh);
+        TestEqual(TEXT("Host transforms present only after placement"), Terrain->MeshSave->JustReadToArray(Transforms,
+            Layer->BlockBufferSize, Grid.X, Grid.Y, Grid.Z, Layer->BlockFactor, true), bExpectMesh);
+        TArray<int64> Expected;
+        for (const auto* Section : {&Material, &Mesh, &Transforms})
+        {
+            Expected.Add(Section->Num());
+            Expected.Append(*Section);
+        }
+        // Inspect the locally produced reply; no receiver or client mesh read needed.
+        Written.Reset();
+        Manager->ReceiveChunkSaveDataRequests_Implementation(WorldId, {Grid}, {0});
+        constexpr int32 HeaderBytes = 3 * sizeof(int32);
+        AddInfo(FString::Printf(TEXT("Host material/mesh/transform words=%d/%d/%d; reply payload words=%d, expected=%d."),
+            Material.Num(), Mesh.Num(), Transforms.Num(), (Written.Num() - HeaderBytes) / int32(sizeof(int64)), Expected.Num()));
+        TestTrue(bExpectMesh ? TEXT("Populated mesh sections retain exact payloads") : TEXT("Material-only chunk sends two empty mesh sections"),
+            Written.Num() == HeaderBytes + Expected.Num() * sizeof(int64)
+            && FMemory::Memcmp(Written.GetData() + HeaderBytes, Expected.GetData(), Expected.Num() * sizeof(int64)) == 0);
+    };
+    CheckReply(false);
+    FMeshData PlacedMesh;
+    PlacedMesh.MeshId = 0;
+    PlacedMesh.Flag = 42;
+    Terrain->SetMeshDataByBlockWorldPos(Cell, PlacedMesh, false);
+    CheckReply(true);
     return true;
 }

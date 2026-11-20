@@ -1,6 +1,7 @@
 // Copyright 2026 Spotted Loaf Studio
 
 #include "ChunkWorld/Actors/ChunkWorldExtended.h"
+#include "Misc/ScopeExit.h"
 
 #include "Block/BlockTypeSchemaRegistry.h"
 #include "Block/BlockTypeSchemaBlueprintLibrary.h"
@@ -448,6 +449,16 @@ void AChunkWorldExtended::StopGen()
 void AChunkWorldExtended::StartGen()
 {
 	if (bStartingGeneration || bStoppingGeneration) return;
+	bool bStarted = false;
+	// Deliver after the start guard unwinds. A callback may itself register another walker.
+	ON_SCOPE_EXIT
+	{
+		if (bStarted)
+		{
+			auto Registrations = MoveTemp(PendingGeneratorRegistrations);
+			for (auto& Entry : Registrations) WhenGeneratorStarted(MoveTemp(Entry.Value));
+		}
+	};
 	TGuardValue<bool> Starting(bStartingGeneration, true);
 	// Reject the known early failure before native startup allocates its worker pool.
 	if (!WorldGenDef && !WorldGenDefType)
@@ -495,6 +506,18 @@ void AChunkWorldExtended::StartGen()
 				*GetNameSafe(WorldGenDef));
 		}
 	}
+
+	bStarted = true;
+}
+
+void AChunkWorldExtended::WhenGeneratorStarted(FChunkWorldGeneratorRegistration Registration)
+{
+	UObject* Requester = Registration.GetUObject();
+	if (!IsValid(Requester) || Requester->GetWorld() != GetWorld() || IsActorBeingDestroyed()) return;
+	if (GeneratorShouldBeOnline && IsRunning() && !bStartingGeneration && !bStoppingGeneration)
+		Registration.ExecuteIfBound(*this);
+	else
+		PendingGeneratorRegistrations.Add(FObjectKey(Requester), MoveTemp(Registration));
 }
 
 bool AChunkWorldExtended::RestartGenerationPreservingLayoutRecords()
@@ -617,6 +640,7 @@ void AChunkWorldExtended::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		BlockSwapReplicationProxy = nullptr;
 	}
 
+	PendingGeneratorRegistrations.Reset();
 	ResetWorldReadyStateTracking();
 	RuntimeWalkerReadyStates.Reset();
 	Super::EndPlay(EndPlayReason);
